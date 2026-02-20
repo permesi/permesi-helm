@@ -3,19 +3,19 @@ permesi:
   enabled: true
   image:
     repository: ghcr.io/permesi/permesi
-    tag: 0.1.0  # managed-by-release-bot
+    tag: 0.3.29  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 genesis:
   enabled: true
   image:
     repository: ghcr.io/permesi/genesis
-    tag: 0.1.0  # managed-by-release-bot
+    tag: 0.3.29  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 web:
   enabled: true
   image:
     repository: ghcr.io/permesi/web
-    tag: 0.1.0  # managed-by-release-bot
+    tag: 0.3.29  # managed-by-release-bot
     pullPolicy: IfNotPresent

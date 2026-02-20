@@ -4,4 +4,4 @@ name: web
 description: Helm chart for permesi web console.
 type: application
 version: 0.3.29
-appVersion: "0.3.29"
+appVersion: 0.3.29

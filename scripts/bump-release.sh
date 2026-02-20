@@ -28,7 +28,7 @@ done
 
 values_file="charts/permesi-stack/values.yaml"
 # Update managed tags whether current value is quoted or unquoted.
-sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?(\s*# managed-by-release-bot\s*)$|\1${version}\2|" "$values_file"
+sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?\s*# managed-by-release-bot\s*$|\1${version}  # managed-by-release-bot|" "$values_file"
 rm -f "${values_file}.bak"
 
 echo "Bumped charts to ${version}"

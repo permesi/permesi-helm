@@ -6,6 +6,12 @@
 #     dsn:
 #       existingSecret: permesi-db
 #       secretKey: dsn
+# web:
+#   runtimeConfig:
+#     apiBaseUrl: https://api.permesi.example.com
+#     tokenBaseUrl: https://genesis.permesi.example.com
+#     clientId: 00000000-0000-0000-0000-000000000000
+#     opaqueServerId: api.permesi.example.com
 permesi:
   enabled: true
   image:

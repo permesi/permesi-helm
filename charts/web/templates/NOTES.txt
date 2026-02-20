@@ -1,0 +1,9 @@
+Web UI has been deployed as {{ include "web.fullname" . }}.
+
+Runtime overrides are served from /config.js using:
+- runtimeConfig.apiBaseUrl
+- runtimeConfig.tokenBaseUrl
+- runtimeConfig.clientId
+- runtimeConfig.opaqueServerId
+
+If runtimeConfig.existingConfigMap is set, this chart will mount that config map instead of creating one.

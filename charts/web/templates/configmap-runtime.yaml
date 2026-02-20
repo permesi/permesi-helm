@@ -1,0 +1,13 @@
+{{- include "web.validateValues" . }}
+{{- if not .Values.runtimeConfig.existingConfigMap }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "web.runtimeConfigMapName" . }}
+  labels:
+    {{- include "web.labels" . | nindent 4 }}
+data:
+  {{ .Values.runtimeConfig.key }}: |-
+    window.PERMESI_CONFIG = {{ dict "api_base_url" .Values.runtimeConfig.apiBaseUrl "token_base_url" .Values.runtimeConfig.tokenBaseUrl "client_id" .Values.runtimeConfig.clientId "opaque_server_id" .Values.runtimeConfig.opaqueServerId | toJson }};
+{{- end }}

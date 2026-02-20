@@ -4,15 +4,16 @@ Helm charts for the Permesi platform.
 
 ## Charts
 
-- `charts/permesi`: production-oriented IAM service chart (Deployments/Service/Ingress/HPA/PDB/NetworkPolicy, schema validation, secret wiring)
-- `charts/genesis`: production-oriented edge admission service chart with the same operational patterns
-- `charts/web`: web chart metadata scaffold
+- `charts/permesi`: production-oriented IAM service chart (Deployment/Service/Ingress/HPA/PDB/NetworkPolicy, schema validation, secret wiring)
+- `charts/genesis`: production-oriented edge admission chart with the same operational patterns
+- `charts/web`: production-oriented web UI chart with runtime `config.js` injection from values or an external ConfigMap
 - `charts/permesi-stack`: umbrella chart to install `permesi`, `genesis`, and `web` together
 
 See:
 
 - `charts/permesi/README.md`
 - `charts/genesis/README.md`
+- `charts/web/README.md`
 - `charts/permesi-stack/README.md`
 
 ## Release Sync Automation

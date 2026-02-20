@@ -43,3 +43,15 @@ The publish workflow validates each chart version matches the release version be
 - `charts/permesi-stack`: umbrella chart with enable/disable toggles per component
 
 These are initial scaffolds so automation and release flow can be wired first.
+
+## Auto Release
+
+Releases can be automated after CI success on `main`:
+
+- Workflow: `.github/workflows/auto-release.yml`
+- Trigger: `workflow_run` after `Charts CI` completes successfully for `push` events on `main`
+- Behavior:
+  - Reads chart version from `charts/permesi-stack/Chart.yaml`
+  - Validates all chart versions match
+  - Creates release tag `v<version>` if it does not already exist
+  - Triggers `.github/workflows/publish-charts.yml` via the `release.published` event

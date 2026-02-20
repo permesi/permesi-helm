@@ -1,0 +1,103 @@
+---
+name: Auto Release
+
+on:
+  workflow_run:
+    workflows:
+      - Charts CI
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tested SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^version:/{print $2; exit}' charts/permesi-stack/Chart.yaml)"
+
+          if [[ -z "${version}" || ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid chart version '${version}' in charts/permesi-stack/Chart.yaml" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate chart version alignment
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          for chart in charts/*; do
+            chart_file="${chart}/Chart.yaml"
+            [[ -f "${chart_file}" ]] || continue
+
+            chart_version="$(awk '/^version:/{print $2; exit}' "${chart_file}")"
+            if [[ "${chart_version}" != "${VERSION}" ]]; then
+              echo "${chart_file} has version ${chart_version}, expected ${VERSION}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check whether release exists
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |-
+          set -euo pipefail
+
+          notes=$(cat <<NOTES
+          ## permesi-helm ${VERSION}
+
+          Automated release created after successful Charts CI on main.
+
+          ### Charts
+          - permesi
+          - genesis
+          - web
+          - permesi-stack
+
+          ### OCI registry
+          - oci://ghcr.io/permesi/charts
+          NOTES
+          )
+
+          gh release create "${TAG}" \
+            --target "${{ github.event.workflow_run.head_sha }}" \
+            --title "permesi-helm ${VERSION}" \
+            --notes "${notes}"

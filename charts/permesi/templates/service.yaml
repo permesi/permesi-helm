@@ -1,0 +1,23 @@
+{{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+{{- if and .Values.service.enabled (not $socketMode) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "permesi.fullname" . }}
+  labels:
+    {{- include "permesi.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "permesi.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: {{ .Values.service.port }}
+      targetPort: https
+      protocol: TCP
+{{- end }}

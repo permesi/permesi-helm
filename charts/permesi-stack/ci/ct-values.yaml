@@ -1,0 +1,7 @@
+---
+permesi:
+  enabled: false
+genesis:
+  enabled: false
+web:
+  enabled: false

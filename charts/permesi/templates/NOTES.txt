@@ -1,0 +1,7 @@
+Permesi has been deployed as {{ include "permesi.fullname" . }}.
+
+Key runtime values are controlled through .Values.config, .Values.database,
+.Values.tls, .Values.admission, .Values.vault, and .Values.auth.
+
+If you deployed with config.socketPath, no Service is created.
+If you deployed over TCP/TLS, verify your TLS bundle path and Vault/DB inputs.

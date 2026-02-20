@@ -1,5 +1,139 @@
 ---
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 2
+
 image:
   repository: ghcr.io/permesi/genesis
   tag: 0.3.29
   pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+config:
+  port: 8080
+  socketPath: ""
+  logLevel: info
+
+database:
+  dsn:
+    value: postgres://postgres@postgres-genesis:5432/genesis?sslmode=disable
+    existingSecret: ""
+    secretKey: dsn
+
+tls:
+  pemBundlePath: /var/run/genesis/tls/bundle.pem
+  existingSecret: ""
+  secretKey: bundle.pem
+
+vault:
+  url: /var/run/secrets/vaultproject.io/agent.sock
+  roleId:
+    value: ""
+    existingSecret: ""
+    secretKey: role_id
+  secretId:
+    value: ""
+    existingSecret: ""
+    secretKey: secret_id
+  wrappedToken:
+    value: ""
+    existingSecret: ""
+    secretKey: wrapped_token
+
+service:
+  enabled: true
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: genesis.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+probes:
+  startup:
+    enabled: true
+    initialDelaySeconds: 3
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 30
+  readiness:
+    enabled: true
+    initialDelaySeconds: 3
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 6
+  liveness:
+    enabled: true
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 75
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+terminationGracePeriodSeconds: 30
+revisionHistoryLimit: 5
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []

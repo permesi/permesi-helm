@@ -1,0 +1,14 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "genesis.fullname" . }}
+  labels:
+    {{- include "genesis.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "genesis.selectorLabels" . | nindent 6 }}
+{{- end }}

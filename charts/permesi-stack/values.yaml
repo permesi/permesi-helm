@@ -1,4 +1,11 @@
 ---
+# Configure each component by setting nested values under permesi/genesis/web.
+# Example:
+# permesi:
+#   database:
+#     dsn:
+#       existingSecret: permesi-db
+#       secretKey: dsn
 permesi:
   enabled: true
   image:

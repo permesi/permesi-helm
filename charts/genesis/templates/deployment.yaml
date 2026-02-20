@@ -1,0 +1,184 @@
+{{- include "genesis.validateValues" . }}
+{{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "genesis.fullname" . }}
+  labels:
+    {{- include "genesis.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "genesis.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "genesis.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "genesis.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: genesis
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- if not $socketMode }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.config.port }}
+              protocol: TCP
+          {{- end }}
+          env:
+            - name: GENESIS_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            {{- if $socketMode }}
+            - name: GENESIS_SOCKET_PATH
+              value: {{ .Values.config.socketPath | quote }}
+            {{- else }}
+            - name: GENESIS_PORT
+              value: {{ .Values.config.port | quote }}
+            - name: GENESIS_TLS_PEM_BUNDLE
+              value: {{ .Values.tls.pemBundlePath | quote }}
+            {{- end }}
+
+            - name: GENESIS_DSN
+              {{- if .Values.database.dsn.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.dsn.existingSecret | quote }}
+                  key: {{ .Values.database.dsn.secretKey | quote }}
+              {{- else }}
+              value: {{ .Values.database.dsn.value | quote }}
+              {{- end }}
+
+            - name: GENESIS_VAULT_URL
+              value: {{ .Values.vault.url | quote }}
+            {{- if .Values.vault.roleId.existingSecret }}
+            - name: GENESIS_VAULT_ROLE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.roleId.existingSecret | quote }}
+                  key: {{ .Values.vault.roleId.secretKey | quote }}
+            {{- else if .Values.vault.roleId.value }}
+            - name: GENESIS_VAULT_ROLE_ID
+              value: {{ .Values.vault.roleId.value | quote }}
+            {{- end }}
+            {{- if .Values.vault.secretId.existingSecret }}
+            - name: GENESIS_VAULT_SECRET_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.secretId.existingSecret | quote }}
+                  key: {{ .Values.vault.secretId.secretKey | quote }}
+            {{- else if .Values.vault.secretId.value }}
+            - name: GENESIS_VAULT_SECRET_ID
+              value: {{ .Values.vault.secretId.value | quote }}
+            {{- end }}
+            {{- if .Values.vault.wrappedToken.existingSecret }}
+            - name: GENESIS_VAULT_WRAPPED_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.vault.wrappedToken.existingSecret | quote }}
+                  key: {{ .Values.vault.wrappedToken.secretKey | quote }}
+            {{- else if .Values.vault.wrappedToken.value }}
+            - name: GENESIS_VAULT_WRAPPED_TOKEN
+              value: {{ .Values.vault.wrappedToken.value | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.tls.existingSecret .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- if .Values.tls.existingSecret }}
+            - name: tls-bundle
+              mountPath: {{ include "genesis.pathDir" .Values.tls.pemBundlePath | quote }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if and (not $socketMode) .Values.probes.startup.enabled }}
+          startupProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          {{- end }}
+          {{- if and (not $socketMode) .Values.probes.readiness.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- if and (not $socketMode) .Values.probes.liveness.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if or .Values.tls.existingSecret .Values.extraVolumes }}
+      volumes:
+        {{- if .Values.tls.existingSecret }}
+        - name: tls-bundle
+          secret:
+            secretName: {{ .Values.tls.existingSecret | quote }}
+            items:
+              - key: {{ .Values.tls.secretKey | quote }}
+                path: {{ include "genesis.pathBase" .Values.tls.pemBundlePath | quote }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}

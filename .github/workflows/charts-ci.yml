@@ -1,3 +1,4 @@
+---
 name: Charts CI
 
 on:
@@ -76,11 +77,13 @@ jobs:
           fi
 
       - name: Run ct lint (all charts)
-        if: steps.changed.outputs.has_changes == 'true' && steps.meta.outputs.mode == 'all'
+        if: steps.changed.outputs.has_changes == 'true' && steps.meta.outputs.mode
+          == 'all'
         run: ct lint --all --config .ct.yaml
 
       - name: Run ct lint (changed charts)
-        if: steps.changed.outputs.has_changes == 'true' && steps.meta.outputs.mode == 'changed'
+        if: steps.changed.outputs.has_changes == 'true' && steps.meta.outputs.mode
+          == 'changed'
         env:
           TARGET_BRANCH: ${{ steps.meta.outputs.target_branch }}
         run: ct lint --target-branch "${TARGET_BRANCH}" --config .ct.yaml

@@ -1,0 +1,87 @@
+name: Publish Charts
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Chart version to publish (X.Y.Z or vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Resolve release version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            raw="${{ github.event.release.tag_name }}"
+          else
+            raw="${{ inputs.version }}"
+          fi
+
+          version="${raw#v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected X.Y.Z or vX.Y.Z, got '${raw}'" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate chart versions
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          for chart in charts/*; do
+            chart_file="${chart}/Chart.yaml"
+            [[ -f "${chart_file}" ]] || continue
+
+            chart_version="$(awk '/^version:/{print $2; exit}' "${chart_file}")"
+            if [[ "${chart_version}" != "${VERSION}" ]]; then
+              echo "${chart_file} has version ${chart_version}, expected ${VERSION}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "${GHCR_TOKEN}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Package charts
+        run: |
+          set -euo pipefail
+          mkdir -p .packages
+          for chart in charts/*; do
+            [[ -f "${chart}/Chart.yaml" ]] || continue
+            helm dependency build "${chart}" || true
+            helm package "${chart}" --destination .packages
+          done
+
+      - name: Push charts to GHCR OCI
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for package in .packages/*.tgz; do
+            helm push "${package}" oci://ghcr.io/permesi/charts
+          done

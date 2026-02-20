@@ -1,0 +1,72 @@
+name: Release Bump PR
+
+on:
+  repository_dispatch:
+    types: [permesi-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to bump (X.Y.Z or vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            raw="${{ github.event.client_payload.version }}"
+            source_repo="${{ github.event.client_payload.source_repo }}"
+            source_sha="${{ github.event.client_payload.source_sha }}"
+            source_tag="${{ github.event.client_payload.source_tag }}"
+          else
+            raw="${{ inputs.version }}"
+            source_repo="manual"
+            source_sha="manual"
+            source_tag="manual"
+          fi
+
+          version="${raw#v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected X.Y.Z or vX.Y.Z, got '${raw}'" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "source_repo=${source_repo}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "source_tag=${source_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump chart versions
+        run: ./scripts/bump-release.sh "${{ steps.meta.outputs.version }}"
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: "chore/release-${{ steps.meta.outputs.version }}"
+          delete-branch: true
+          commit-message: "chore(release): bump charts to ${{ steps.meta.outputs.version }}"
+          title: "chore(release): bump charts to ${{ steps.meta.outputs.version }}"
+          body: |
+            Automated release bump.
+
+            - Version: `${{ steps.meta.outputs.version }}`
+            - Source repo: `${{ steps.meta.outputs.source_repo }}`
+            - Source SHA: `${{ steps.meta.outputs.source_sha }}`
+            - Source tag: `${{ steps.meta.outputs.source_tag }}`
+          labels: |
+            automation
+            release

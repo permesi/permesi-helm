@@ -1,0 +1,96 @@
+name: Charts CI
+
+on:
+  pull_request:
+    paths:
+      - charts/**
+      - .ct.yaml
+      - .github/workflows/charts-ci.yml
+  push:
+    branches:
+      - main
+    paths:
+      - charts/**
+      - .ct.yaml
+      - .github/workflows/charts-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+      target_branch: ${{ steps.meta.outputs.target_branch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup chart-testing
+        uses: helm/chart-testing-action@v2.7.0
+
+      - name: Resolve target branch
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            target="${{ github.base_ref }}"
+          else
+            target="main"
+          fi
+          echo "target_branch=${target}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect changed charts
+        id: changed
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.meta.outputs.target_branch }}
+        run: |
+          set -euo pipefail
+          changed="$(ct list-changed --target-branch "${TARGET_BRANCH}" --config .ct.yaml || true)"
+          if [[ -n "${changed}" ]]; then
+            echo "Changed charts:"
+            echo "${changed}"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No chart changes detected."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run ct lint
+        if: steps.changed.outputs.has_changes == 'true'
+        env:
+          TARGET_BRANCH: ${{ steps.meta.outputs.target_branch }}
+        run: ct lint --target-branch "${TARGET_BRANCH}" --config .ct.yaml
+
+  install:
+    runs-on: ubuntu-latest
+    needs: lint
+    if: needs.lint.outputs.has_changes == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup chart-testing
+        uses: helm/chart-testing-action@v2.7.0
+
+      - name: Setup Kind
+        uses: helm/kind-action@v1.12.0
+
+      - name: Run ct install
+        env:
+          TARGET_BRANCH: ${{ needs.lint.outputs.target_branch }}
+        run: ct install --target-branch "${TARGET_BRANCH}" --config .ct.yaml

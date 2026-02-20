@@ -98,7 +98,7 @@ probes:
     failureThreshold: 30
   readiness:
     enabled: true
-    path: /health
+    path: /ready
     scheme: HTTPS
     initialDelaySeconds: 3
     periodSeconds: 10
@@ -106,6 +106,8 @@ probes:
     failureThreshold: 6
   liveness:
     enabled: true
+    path: /live
+    scheme: HTTPS
     initialDelaySeconds: 15
     periodSeconds: 20
     timeoutSeconds: 2

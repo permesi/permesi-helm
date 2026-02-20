@@ -141,8 +141,10 @@ spec:
           {{- end }}
           {{- if and (not $socketMode) .Values.probes.liveness.enabled }}
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: {{ .Values.probes.liveness.path | quote }}
               port: https
+              scheme: {{ .Values.probes.liveness.scheme }}
             initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}

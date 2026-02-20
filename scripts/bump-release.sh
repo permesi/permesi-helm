@@ -34,9 +34,27 @@ awk -v version="${version}" '
 ' "${stack_chart}" > "${stack_chart}.tmp"
 mv "${stack_chart}.tmp" "${stack_chart}"
 
-values_file="charts/permesi-stack/values.yaml"
+# Keep standalone chart defaults aligned with the release tag.
+values_files=(
+    "charts/permesi/values.yaml"
+    "charts/genesis/values.yaml"
+    "charts/web/values.yaml"
+)
+
+for file in "${values_files[@]}"; do
+    awk -v version="${version}" '
+      updated == 0 && /^[[:space:]]*tag:[[:space:]]*/ {
+        sub(/:.*/, ": " version)
+        updated = 1
+      }
+      { print }
+    ' "${file}" > "${file}.tmp"
+    mv "${file}.tmp" "${file}"
+done
+
+stack_values_file="charts/permesi-stack/values.yaml"
 # Update managed tags whether current value is quoted or unquoted.
-sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?\s*# managed-by-release-bot\s*$|\1${version}  # managed-by-release-bot|" "$values_file"
-rm -f "${values_file}.bak"
+sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?\s*# managed-by-release-bot\s*$|\1${version}  # managed-by-release-bot|" "${stack_values_file}"
+rm -f "${stack_values_file}.bak"
 
 echo "Bumped charts to ${version}"

@@ -1,5 +1,5 @@
 ---
 image:
   repository: ghcr.io/permesi/web
-  tag: 0.1.0
+  tag: 0.3.29
   pullPolicy: IfNotPresent

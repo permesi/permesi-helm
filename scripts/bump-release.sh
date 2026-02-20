@@ -21,12 +21,14 @@ chart_files=(
 
 for file in "${chart_files[@]}"; do
     sed -E -i.bak "s/^version: .*/version: ${version}/" "$file"
-    sed -E -i.bak "s/^appVersion: .*/appVersion: \"${version}\"/" "$file"
+    # Keep appVersion yamlfix-friendly (no forced quotes).
+    sed -E -i.bak "s/^appVersion: .*/appVersion: ${version}/" "$file"
     rm -f "${file}.bak"
 done
 
 values_file="charts/permesi-stack/values.yaml"
-sed -E -i.bak "s/tag: \".*\" # managed-by-release-bot/tag: \"${version}\" # managed-by-release-bot/g" "$values_file"
+# Update managed tags whether current value is quoted or unquoted.
+sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?(\s*# managed-by-release-bot\s*)$|\1${version}\2|" "$values_file"
 rm -f "${values_file}.bak"
 
 echo "Bumped charts to ${version}"

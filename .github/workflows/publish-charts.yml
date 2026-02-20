@@ -1,8 +1,10 @@
+---
 name: Publish Charts
 
 on:
   release:
-    types: [published]
+    types:
+      - published
   workflow_dispatch:
     inputs:
       version:
@@ -79,7 +81,7 @@ jobs:
           done
 
       - name: Push charts to GHCR OCI
-        run: |
+        run: |-
           set -euo pipefail
           shopt -s nullglob
           for package in .packages/*.tgz; do

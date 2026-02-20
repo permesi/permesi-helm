@@ -1,4 +1,5 @@
+---
 image:
   repository: ghcr.io/permesi/permesi
-  tag: "0.1.0"
+  tag: 0.1.0
   pullPolicy: IfNotPresent

@@ -1,8 +1,10 @@
+---
 name: Release Bump PR
 
 on:
   repository_dispatch:
-    types: [permesi-release]
+    types:
+      - permesi-release
   workflow_dispatch:
     inputs:
       version:
@@ -56,10 +58,10 @@ jobs:
       - name: Create pull request
         uses: peter-evans/create-pull-request@v7
         with:
-          branch: "chore/release-${{ steps.meta.outputs.version }}"
+          branch: chore/release-${{ steps.meta.outputs.version }}
           delete-branch: true
-          commit-message: "chore(release): bump charts to ${{ steps.meta.outputs.version }}"
-          title: "chore(release): bump charts to ${{ steps.meta.outputs.version }}"
+          commit-message: 'chore(release): bump charts to ${{ steps.meta.outputs.version }}'
+          title: 'chore(release): bump charts to ${{ steps.meta.outputs.version }}'
           body: |
             Automated release bump.
 
@@ -67,6 +69,6 @@ jobs:
             - Source repo: `${{ steps.meta.outputs.source_repo }}`
             - Source SHA: `${{ steps.meta.outputs.source_sha }}`
             - Source tag: `${{ steps.meta.outputs.source_tag }}`
-          labels: |
+          labels: |-
             automation
             release

@@ -26,6 +26,14 @@ for file in "${chart_files[@]}"; do
     rm -f "${file}.bak"
 done
 
+stack_chart="charts/permesi-stack/Chart.yaml"
+awk -v version="${version}" '
+  /^  - name: (permesi|genesis|web)$/ { in_dep = 1; print; next }
+  in_dep == 1 && /^    version:/ { print "    version: " version; in_dep = 0; next }
+  { print }
+' "${stack_chart}" > "${stack_chart}.tmp"
+mv "${stack_chart}.tmp" "${stack_chart}"
+
 values_file="charts/permesi-stack/values.yaml"
 # Update managed tags whether current value is quoted or unquoted.
 sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?\s*# managed-by-release-bot\s*$|\1${version}  # managed-by-release-bot|" "$values_file"

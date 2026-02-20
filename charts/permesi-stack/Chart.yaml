@@ -7,14 +7,14 @@ version: 0.3.29
 appVersion: 0.3.29
 dependencies:
   - name: permesi
-    version: 0.1.0
+    version: 0.3.29
     repository: file://../permesi
     condition: permesi.enabled
   - name: genesis
-    version: 0.1.0
+    version: 0.3.29
     repository: file://../genesis
     condition: genesis.enabled
   - name: web
-    version: 0.1.0
+    version: 0.3.29
     repository: file://../web
     condition: web.enabled

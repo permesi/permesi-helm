@@ -16,6 +16,88 @@ See:
 - `charts/web/README.md`
 - `charts/permesi-stack/README.md`
 
+## Install
+
+Prerequisites:
+
+- Kubernetes cluster
+- Helm 3.13+
+
+### Install from OCI (recommended)
+
+Install the full stack:
+
+```bash
+helm upgrade --install permesi \
+  oci://ghcr.io/permesi/charts/permesi-stack \
+  --version 0.3.29 \
+  --namespace permesi \
+  --create-namespace \
+  -f values.yaml
+```
+
+Install single components:
+
+```bash
+helm upgrade --install permesi-api oci://ghcr.io/permesi/charts/permesi --version 0.3.29 -n permesi --create-namespace -f permesi-values.yaml
+helm upgrade --install permesi-genesis oci://ghcr.io/permesi/charts/genesis --version 0.3.29 -n permesi --create-namespace -f genesis-values.yaml
+helm upgrade --install permesi-web oci://ghcr.io/permesi/charts/web --version 0.3.29 -n permesi --create-namespace -f web-values.yaml
+```
+
+### Install from source checkout (local/dev)
+
+```bash
+git clone https://github.com/permesi/permesi-helm.git
+cd permesi-helm/charts/permesi-stack
+helm dependency build
+helm upgrade --install permesi . -n permesi --create-namespace -f values.yaml
+```
+
+### Minimal `values.yaml` example
+
+```yaml
+permesi:
+  database:
+    dsn:
+      existingSecret: permesi-db
+      secretKey: dsn
+  tls:
+    existingSecret: permesi-tls
+    secretKey: bundle.pem
+  vault:
+    url: https://vault.example.com:8200
+    roleId:
+      existingSecret: permesi-vault
+      secretKey: role_id
+    secretId:
+      existingSecret: permesi-vault
+      secretKey: secret_id
+
+genesis:
+  database:
+    dsn:
+      existingSecret: genesis-db
+      secretKey: dsn
+  tls:
+    existingSecret: genesis-tls
+    secretKey: bundle.pem
+  vault:
+    url: https://vault.example.com:8200
+    roleId:
+      existingSecret: genesis-vault
+      secretKey: role_id
+    secretId:
+      existingSecret: genesis-vault
+      secretKey: secret_id
+
+web:
+  runtimeConfig:
+    apiBaseUrl: https://api.permesi.example.com
+    tokenBaseUrl: https://genesis.permesi.example.com
+    clientId: 00000000-0000-0000-0000-000000000000
+    opaqueServerId: api.permesi.example.com
+```
+
 ## Release Sync Automation
 
 This repository includes a workflow that opens a PR whenever `permesi` publishes a release.

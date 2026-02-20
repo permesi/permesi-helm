@@ -98,6 +98,8 @@ probes:
     failureThreshold: 30
   readiness:
     enabled: true
+    path: /health
+    scheme: HTTPS
     initialDelaySeconds: 3
     periodSeconds: 10
     timeoutSeconds: 2

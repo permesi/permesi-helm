@@ -9,6 +9,7 @@ on:
       - completed
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -104,3 +105,13 @@ jobs:
             --target "${{ github.event.workflow_run.head_sha }}" \
             --title "permesi-helm ${VERSION}" \
             --notes "${notes}"
+
+      - name: Trigger Publish Charts workflow
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run "Publish Charts" --ref main -f version="${VERSION}"

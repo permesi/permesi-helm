@@ -64,6 +64,9 @@
             "secretKey": {
               "type": "string",
               "minLength": 1
+            },
+            "externalSecret": {
+              "$ref": "#/definitions/externalSecretRef"
             }
           }
         }
@@ -83,6 +86,9 @@
         "secretKey": {
           "type": "string",
           "minLength": 1
+        },
+        "externalSecret": {
+          "$ref": "#/definitions/externalSecretRef"
         }
       }
     },
@@ -94,6 +100,9 @@
           "type": "string",
           "minLength": 1
         },
+        "externalSecret": {
+          "$ref": "#/definitions/vaultExternalSecretRef"
+        },
         "roleId": {
           "$ref": "#/definitions/envSource"
         },
@@ -102,6 +111,10 @@
         },
         "wrappedToken": {
           "$ref": "#/definitions/envSource"
+        },
+        "transitMount": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -214,6 +227,25 @@
     },
     "extraVolumeMounts": {
       "type": "array"
+    },
+    "externalSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "store": {
+          "type": "string"
+        },
+        "storeKind": {
+          "type": "string",
+          "enum": ["SecretStore", "ClusterSecretStore"]
+        },
+        "refreshInterval": {
+          "type": "string"
+        }
+      }
     }
   },
   "definitions": {
@@ -230,6 +262,33 @@
         "secretKey": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "externalSecretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remoteKey": {
+          "type": "string"
+        },
+        "remoteProperty": {
+          "type": "string"
+        }
+      }
+    },
+    "vaultExternalSecretRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remoteKey": {
+          "type": "string"
+        },
+        "roleIdProperty": {
+          "type": "string"
+        },
+        "secretIdProperty": {
+          "type": "string"
         }
       }
     }

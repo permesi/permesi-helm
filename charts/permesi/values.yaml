@@ -43,11 +43,17 @@ database:
     value: postgres://postgres@postgres-permesi:5432/permesi?sslmode=disable
     existingSecret: ""
     secretKey: dsn
+    externalSecret:
+      remoteKey: ""
+      remoteProperty: ""
 
 tls:
   pemBundlePath: /var/run/permesi/tls/bundle.pem
   existingSecret: ""
   secretKey: bundle.pem
+  externalSecret:
+    remoteKey: ""
+    remoteProperty: ""
 
 admission:
   paserkUrl: https://genesis.permesi.svc.cluster.local:8080/paserk.json
@@ -59,9 +65,16 @@ admission:
     secretKey: ca.pem
     mountPath: /var/run/permesi/admission-ca
     fileName: ca.pem
+    externalSecret:
+      remoteKey: ""
+      remoteProperty: ""
 
 vault:
   url: /var/run/secrets/vaultproject.io/agent.sock
+  externalSecret:
+    remoteKey: ""
+    roleIdProperty: ""
+    secretIdProperty: ""
   roleId:
     value: ""
     existingSecret: ""
@@ -76,6 +89,7 @@ vault:
     secretKey: wrapped_token
   kvMount: secret/permesi
   kvPath: config
+  transitMount: transit/permesi
 
 auth:
   frontendBaseUrl: https://permesi.dev
@@ -169,3 +183,9 @@ extraEnv: []
 extraEnvFrom: []
 extraVolumes: []
 extraVolumeMounts: []
+
+externalSecret:
+  enabled: false
+  store: ""
+  storeKind: ClusterSecretStore
+  refreshInterval: 1h

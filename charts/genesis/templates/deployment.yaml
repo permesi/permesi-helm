@@ -101,6 +101,8 @@ spec:
             - name: GENESIS_VAULT_WRAPPED_TOKEN
               value: {{ .Values.vault.wrappedToken.value | quote }}
             {{- end }}
+            - name: GENESIS_TRANSIT_MOUNT
+              value: {{ .Values.vault.transitMount | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

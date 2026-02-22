@@ -43,14 +43,24 @@ database:
     value: postgres://postgres@postgres-genesis:5432/genesis?sslmode=disable
     existingSecret: ""
     secretKey: dsn
+    externalSecret:
+      remoteKey: ""
+      remoteProperty: ""
 
 tls:
   pemBundlePath: /var/run/genesis/tls/bundle.pem
   existingSecret: ""
   secretKey: bundle.pem
+  externalSecret:
+    remoteKey: ""
+    remoteProperty: ""
 
 vault:
   url: /var/run/secrets/vaultproject.io/agent.sock
+  externalSecret:
+    remoteKey: ""
+    roleIdProperty: ""
+    secretIdProperty: ""
   roleId:
     value: ""
     existingSecret: ""
@@ -63,6 +73,7 @@ vault:
     value: ""
     existingSecret: ""
     secretKey: wrapped_token
+  transitMount: transit/genesis
 
 service:
   enabled: true
@@ -141,3 +152,9 @@ extraEnv: []
 extraEnvFrom: []
 extraVolumes: []
 extraVolumeMounts: []
+
+externalSecret:
+  enabled: false
+  store: ""
+  storeKind: ClusterSecretStore
+  refreshInterval: 1h

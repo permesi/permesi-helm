@@ -7,6 +7,12 @@ on:
       - Charts CI
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Optional tested main SHA to release
+        required: false
+        type: string
 
 permissions:
   actions: write
@@ -15,19 +21,30 @@ permissions:
 jobs:
   release:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
       (
-        github.event.workflow_run.event == 'push' ||
-        github.event.workflow_run.event == 'workflow_dispatch'
-      ) &&
-      github.event.workflow_run.head_branch == 'main'
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        (
+          github.event.workflow_run.event == 'push' ||
+          github.event.workflow_run.event == 'workflow_dispatch'
+        ) &&
+        github.event.workflow_run.head_branch == 'main'
+      ) ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tested SHA
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.head_sha || 'main') || github.event.workflow_run.head_sha }}
           fetch-depth: 0
+
+      - name: Resolve release target SHA
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release version
         id: meta
@@ -102,7 +119,7 @@ jobs:
           )
 
           gh release create "${TAG}" \
-            --target "${{ github.event.workflow_run.head_sha }}" \
+            --target "${{ steps.target.outputs.sha }}" \
             --title "permesi-helm ${VERSION}" \
             --notes "${notes}"
 

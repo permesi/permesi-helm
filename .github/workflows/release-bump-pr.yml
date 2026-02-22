@@ -109,9 +109,49 @@ jobs:
 
       - name: Trigger Charts CI on main
         if: steps.merged.outputs.merge_sha != ''
+        id: charts_ci
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dispatch_output="$(gh workflow run "Charts CI" --ref main 2>&1)"
+          if [[ -n "${dispatch_output}" ]]; then
+            echo "${dispatch_output}"
+          fi
+
+          run_id="$(printf '%s\n' "${dispatch_output}" | sed -nE 's#.*actions/runs/([0-9]+).*#\1#p' | head -n1)"
+          if [[ -z "${run_id}" ]]; then
+            run_id="$(gh run list --workflow "Charts CI" --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${MERGE_SHA}\") | .databaseId" | head -n1 || true)"
+          fi
+          if [[ -z "${run_id}" ]]; then
+            run_id="$(gh run list --workflow "Charts CI" --branch main --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId' || true)"
+          fi
+
+          if [[ -z "${run_id}" ]]; then
+            echo "Could not determine Charts CI run id." >&2
+            exit 1
+          fi
+
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Charts CI completion
+        if: steps.charts_ci.outputs.run_id != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run "Charts CI" --ref main
+          gh run watch "${{ steps.charts_ci.outputs.run_id }}" --exit-status
+
+      - name: Trigger Auto Release on main
+        if: steps.charts_ci.outputs.run_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run "Auto Release" --ref main -f head_sha="${MERGE_SHA}"

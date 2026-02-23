@@ -3,18 +3,18 @@ apiVersion: v2
 name: permesi-stack
 description: Umbrella chart for permesi, genesis, and web components.
 type: application
-version: 0.3.34
-appVersion: 0.3.34
+version: 0.3.35
+appVersion: 0.3.35
 dependencies:
   - name: permesi
-    version: 0.3.34
+    version: 0.3.35
     repository: file://../permesi
     condition: permesi.enabled
   - name: genesis
-    version: 0.3.34
+    version: 0.3.35
     repository: file://../genesis
     condition: genesis.enabled
   - name: web
-    version: 0.3.34
+    version: 0.3.35
     repository: file://../web
     condition: web.enabled

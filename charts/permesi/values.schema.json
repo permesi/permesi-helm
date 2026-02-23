@@ -173,6 +173,10 @@
         "frontendBaseUrl": {
           "type": "string"
         },
+        "corsAllowedOrigins": {
+          "type": "string",
+          "description": "Comma-separated list of additional CORS allowed origins"
+        },
         "emailTokenTtlSeconds": {
           "type": "integer",
           "minimum": 1

@@ -129,6 +129,10 @@ spec:
 
             - name: PERMESI_FRONTEND_BASE_URL
               value: {{ .Values.auth.frontendBaseUrl | quote }}
+            {{- if .Values.auth.corsAllowedOrigins }}
+            - name: PERMESI_CORS_ALLOWED_ORIGINS
+              value: {{ .Values.auth.corsAllowedOrigins | quote }}
+            {{- end }}
             - name: PERMESI_EMAIL_TOKEN_TTL_SECONDS
               value: {{ .Values.auth.emailTokenTtlSeconds | quote }}
             - name: PERMESI_EMAIL_RESEND_COOLDOWN_SECONDS

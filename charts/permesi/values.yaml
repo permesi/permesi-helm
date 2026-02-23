@@ -93,6 +93,7 @@ vault:
 
 auth:
   frontendBaseUrl: https://permesi.dev
+  corsAllowedOrigins: ""
   emailTokenTtlSeconds: 1800
   emailResendCooldownSeconds: 60
   sessionTtlSeconds: 604800

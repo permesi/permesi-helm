@@ -6,7 +6,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/permesi/permesi
-  tag: 0.3.35
+  tag: 0.3.36
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 

@@ -40,6 +40,30 @@ tests:
           path: spec.template.spec.volumes[0].secret.secretName
           value: tls-secret
 
+  - it: uses the lone secretId existingSecret for both vault env vars
+    set:
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      vault.externalSecret.remoteKey: vault/approle
+      vault.secretId.existingSecret: custom-vault
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: custom-vault
+                key: role_id
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_VAULT_SECRET_ID
+            valueFrom:
+              secretKeyRef:
+                name: custom-vault
+                key: secret_id
+
   - it: consumes ESO-generated secret names when only remoteKeys are set
     set:
       externalSecret.enabled: true

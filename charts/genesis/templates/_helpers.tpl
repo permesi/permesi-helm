@@ -65,7 +65,7 @@ false
 {{- end -}}
 
 {{- define "genesis.dbEsoActive" -}}
-{{- if and .Values.externalSecret.enabled (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") -}}
 true
 {{- else -}}
 false
@@ -73,7 +73,7 @@ false
 {{- end -}}
 
 {{- define "genesis.tlsEsoActive" -}}
-{{- if and .Values.externalSecret.enabled (ne (default "" .Values.tls.externalSecret.remoteKey) "") -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") -}}
 true
 {{- else -}}
 false
@@ -81,7 +81,7 @@ false
 {{- end -}}
 
 {{- define "genesis.vaultEsoActive" -}}
-{{- if and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
 true
 {{- else -}}
 false
@@ -107,6 +107,8 @@ false
 {{- define "genesis.vaultEsoTarget" -}}
 {{- if .Values.vault.roleId.existingSecret -}}
 {{- .Values.vault.roleId.existingSecret -}}
+{{- else if .Values.vault.secretId.existingSecret -}}
+{{- .Values.vault.secretId.existingSecret -}}
 {{- else -}}
 {{- printf "%s-vault" (include "genesis.fullname" .) -}}
 {{- end -}}
@@ -155,16 +157,16 @@ false
 {{- end -}}
 
 {{- if .Values.externalSecret.enabled -}}
-{{- $esoRemoteSet := or (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") (ne (default "" .Values.tls.externalSecret.remoteKey) "") (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- $esoRemoteSet := or (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
 {{- if and $esoRemoteSet (eq (default "" .Values.externalSecret.store) "") -}}
 {{- fail "genesis: externalSecret.store must be set when any externalSecret.remoteKey is set" -}}
 {{- end -}}
 {{- end -}}
 
 {{- if $vaultEsoActive -}}
-{{- $target := include "genesis.vaultEsoTarget" . -}}
+{{- $rid := default "" .Values.vault.roleId.existingSecret -}}
 {{- $sid := default "" .Values.vault.secretId.existingSecret -}}
-{{- if and (ne $sid "") (ne $sid $target) -}}
+{{- if and (ne $rid "") (ne $sid "") (ne $rid $sid) -}}
 {{- fail "genesis: when vault ESO is enabled, vault.roleId.existingSecret and vault.secretId.existingSecret must reference the same Secret" -}}
 {{- end -}}
 {{- end -}}

@@ -65,7 +65,10 @@ permesi:
     opaqueServerId: api.permesi.example.com
 
   extraEnv:
-    # Email delivery (SMTP). Leave unset to use the outbox worker instead.
+    # Email delivery. "smtp" (shown) delivers through the relay below. The
+    # default "outbox" mode only queues rows in the database and performs no
+    # delivery; to use it, remove every PERMESI_SMTP_* setting and run a
+    # separate delivery mechanism.
     - name: PERMESI_EMAIL_DELIVERY
       value: "smtp"
     - name: PERMESI_SMTP_HOST
@@ -86,7 +89,7 @@ permesi:
     # OIDC authority (issuer/audience are paired; use a separate OIDC signing
     # key in Vault, never the Genesis admission key).
     - name: PERMESI_OIDC_ISSUER
-      value: "https://id.permesi.example.com"
+      value: "https://api.permesi.example.com"
     - name: PERMESI_OAUTH_AUDIENCE
       value: "permesi-api"
     # Narrow trusted-proxy CIDRs (your ingress pods only). The edge MUST

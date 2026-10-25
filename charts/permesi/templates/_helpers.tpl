@@ -69,7 +69,7 @@ false
 {{- define "permesi.dbSecretName" -}}
 {{- if .Values.database.dsn.existingSecret -}}
 {{- .Values.database.dsn.existingSecret -}}
-{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") -}}
+{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") -}}
 {{- printf "%s-db" (include "permesi.fullname" .) -}}
 {{- end -}}
 {{- end -}}
@@ -78,7 +78,7 @@ false
 {{- define "permesi.tlsSecretName" -}}
 {{- if .Values.tls.existingSecret -}}
 {{- .Values.tls.existingSecret -}}
-{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.tls.externalSecret.remoteKey) "") -}}
+{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") -}}
 {{- printf "%s-tls" (include "permesi.fullname" .) -}}
 {{- end -}}
 {{- end -}}
@@ -90,7 +90,7 @@ false
 {{- .Values.vault.roleId.existingSecret -}}
 {{- else if .Values.vault.secretId.existingSecret -}}
 {{- .Values.vault.secretId.existingSecret -}}
-{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
 {{- printf "%s-vault" (include "permesi.fullname" .) -}}
 {{- end -}}
 {{- end -}}
@@ -99,18 +99,20 @@ false
 {{- define "permesi.admissionCaSecretName" -}}
 {{- if .Values.admission.paserkCa.existingSecret -}}
 {{- .Values.admission.paserkCa.existingSecret -}}
-{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.admission.paserkCa.externalSecret.remoteKey) "") -}}
+{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa) "") -}}
 {{- printf "%s-admission-ca" (include "permesi.fullname" .) -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "permesi.validateValues" -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
-{{- $vaultEso := and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
-{{- $dsnEso := and .Values.externalSecret.enabled (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") -}}
-{{- $anyRemoteKey := or (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") (ne (default "" .Values.tls.externalSecret.remoteKey) "") (ne (default "" .Values.vault.externalSecret.remoteKey) "") (ne (default "" .Values.admission.paserkCa.externalSecret.remoteKey) "") -}}
-{{- if and .Values.externalSecret.enabled $anyRemoteKey (eq (default "" .Values.externalSecret.store) "") -}}
+{{- $vaultEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- $dsnEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") -}}
+{{- if .Values.externalSecret.enabled -}}
+{{- $anyRemoteKey := or (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") (ne (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa) "") -}}
+{{- if and $anyRemoteKey (eq (default "" .Values.externalSecret.store) "") -}}
 {{- fail "permesi: externalSecret.store must be set when externalSecret.enabled and any externalSecret.remoteKey is configured" -}}
+{{- end -}}
 {{- end -}}
 {{- if and $vaultEso (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne .Values.vault.roleId.existingSecret .Values.vault.secretId.existingSecret) -}}
 {{- fail "permesi: vault.roleId.existingSecret and vault.secretId.existingSecret must reference the same Secret when vault.externalSecret.remoteKey is set" -}}

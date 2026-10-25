@@ -1,6 +1,6 @@
 {{- include "permesi.validateValues" . }}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
-{{- $vaultEso := and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- $vaultEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
 {{- $admissionCaSecret := include "permesi.admissionCaSecretName" . -}}
 {{- $admissionCaPath := default "" .Values.admission.paserkCaPath -}}
 {{- if and (eq $admissionCaPath "") (ne $admissionCaSecret "") -}}

@@ -52,9 +52,14 @@ genesis:
 
 The application logs in on every startup and cannot reuse a consumed one-use
 credential. The supplied Terraform AppRole defaults
-(`vault/contrib/terraform/approle.tf`) set `secret_id_num_uses = 1` and a
-one-hour SecretID TTL — with those defaults, only the first pod of a multi-replica
-Deployment can start. For production, pick **one** of:
+(`vault/contrib/terraform/approle.tf:11-14`) set `secret_id_num_uses = 1` and a
+one-hour SecretID TTL (`secret_id_ttl = 3600`); tokens themselves expire at
+`token_ttl = 3600` with `token_max_ttl = 14400`. Renewal failure shuts the pod
+down so it can re-login (`crates/service_utils/src/vault/renew.rs:118-122`).
+
+Credentials must therefore remain valid for **every future pod start**, not just
+the current rollout: restarts, rescheduling, scale-out, and the re-login that
+follows a token `max_ttl` expiry or renewal failure. Pick **one** of:
 
 - **Vault Agent (recommended).** Run a Vault Agent sidecar with auto-auth
   (e.g. Kubernetes auth) and inject its Unix socket via annotations/volumes. Set
@@ -63,9 +68,18 @@ Deployment can start. For production, pick **one** of:
   renews independently of the application, so replicas and restarts always have
   a live token. The agent socket must already exist when the transport is
   constructed.
-- **Multi-use SecretID with a sufficient TTL.** Provision the AppRole with
-  `secret_id_num_uses = 0` (unlimited) and a TTL that outlives rollout, or
-  distribute a distinct SecretID per replica.
+- **Long-lived SecretID plus a rotation procedure.** Provision the AppRole with a
+  `secret_id_num_uses`/`secret_id_ttl` policy that covers the Secret's whole
+  service life, and rotate it *before* expiry: update the Secret, then
+  `kubectl rollout restart` the Deployment so every replica re-logs-in with the
+  new SecretID. A SecretID whose TTL merely outlives the current rollout is not
+  enough — a later restart, scale-out, or re-login after a renewal failure would
+  hit an expired or exhausted credential.
+
+**Per-replica one-use credentials do not survive restarts.** With
+`secret_id_num_uses = 1`, each SecretID can be consumed once, so replicas beyond
+the first (and any later restart) fail; distributing a distinct one-use SecretID
+per replica still breaks on rescheduling or restart.
 
 **Wrapped tokens are bootstrap-only.** A response-wrapping token can be consumed
 exactly once, even if the underlying SecretID allows multiple logins. Use wrapped
@@ -162,9 +176,16 @@ environment.
 
 ## 8. Rotation and rollout
 
-- **Secrets** (DSN, TLS bundle, Vault credentials, PASERK CA) are mounted by
-  reference; rotating the Secret updates the mounted files (bundle reload is
-  observed within ~10 s). Vault credential changes require a restart to re-login.
+- **Env secrets require a restart.** The DSN and Vault credentials are injected
+  via `secretKeyRef` (environment variables), which are read only when the pod
+  starts. Rotate the Secret, then `kubectl rollout restart deployment <fullname>
+  -n permesi`.
+- **PASERK CA requires a restart.** Permesi reads the admission PASERK CA once at
+  startup (`services/permesi/src/api/handlers/mod.rs:139-150`); rotating that CA
+  Secret does not take effect until the pod restarts.
+- **Inbound TLS bundle auto-reloads.** Only the directory-mounted inbound TLS
+  bundle is re-read when its file changes (watched every ~10 s); do **not**
+  switch it to a `subPath` mount, which pins the old file.
 - **Web runtime config:** the chart-managed ConfigMap is checksummed into the pod
   template, so a runtime-config-only upgrade rolls pods. With
   `existingConfigMap`, Helm cannot hash external data — run

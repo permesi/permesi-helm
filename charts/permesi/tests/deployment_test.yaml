@@ -20,6 +20,14 @@ tests:
           path: spec.template.spec.automountServiceAccountToken
           value: true
 
+  - it: renders with ESO disabled and tls.externalSecret null
+    set:
+      tls.externalSecret: null
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+
   - it: uses the inline DSN value by default
     asserts:
       - contains:
@@ -139,6 +147,32 @@ tests:
             name: admission-paserk-ca
             mountPath: /var/run/permesi/admission-ca
             readOnly: true
+          any: true
+
+  - it: uses the lone secretId existingSecret for both vault env vars
+    set:
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      vault.externalSecret.remoteKey: vault-remote
+      vault.secretId.existingSecret: custom-vault
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: custom-vault
+                key: role_id
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_VAULT_SECRET_ID
+            valueFrom:
+              secretKeyRef:
+                name: custom-vault
+                key: secret_id
           any: true
 
   - it: omits port and TLS env in socket mode

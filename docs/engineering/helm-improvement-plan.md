@@ -622,3 +622,25 @@ Web smoke must fetch `/healthz`, `/config.js`, index and WASM assets, then upgra
 **P1:** F-01 Vault login URL; F-02 one-use credential/replica lifecycle; F-03 ESO target wiring; F-04 admission discovery; F-05 TLS/database/schema prerequisites; F-06 stale web runtime config on upgrade; F-07 baked-environment fallback; F-08 insufficient termination grace; F-09 incomplete production runtime examples; F-10 Restricted seccomp compatibility; F-11 ineffective runtime/integration CI.
 
 **Milestones:** M1 Permesi chart; M2 Genesis chart; M3 web runtime; M4 stack/profile/runbook; M5 contract tests and real-dependency CI. Main must create the requested Markdown file from this handoff before claiming the file-existence acceptance criterion is satisfied.
+
+---
+
+## 7. Lead plan review (Opus)
+
+Spot-verified before approval: F-01 (`permesi/crates/vault_client/src/lib.rs` `approle_login` POSTs to the supplied URL; Genesis alone normalizes via `services/genesis/src/vault/mod.rs:21`), F-03 (vault ExternalSecret target derives from `vault.roleId.existingSecret` while the Deployment reads `vault.secretId.existingSecret` separately; default ESO targets are never consumed), F-08/F-10 (values defaults).
+
+| Finding | Decision | Notes |
+|---|---|---|
+| F-01 | Approved (docs/NOTES) | No URL rewriting in templates. |
+| F-02 | Approved (docs only) | Restart-safe auth documented; no new auth mechanism. |
+| F-03 | Approved | Effective-name helpers; explicit names keep precedence; fail on conflicting Vault target names or missing store. |
+| F-04 | Approved, narrowed | No default changes/renames. Production example + umbrella NOTES warning computing the real Genesis Service. |
+| F-05, F-09, F-12 | Approved (docs/example) | `docs/operations.md`, `docs/examples/production-stack.yaml`, chart READMEs. |
+| F-06 | Approved | Checksum annotation for chart-managed web config. |
+| F-07 | Approved with escape hatch | Fail on blank managed runtime keys; new `runtimeConfig.allowBuildDefaults` (default `false`) restores previous fallback behavior for upgrades. |
+| F-08 | Approved | Backend grace 60 s. |
+| F-10 | Approved | `seccompProfile: RuntimeDefault`; pod-level `automountServiceAccountToken` (defaults unchanged). |
+| F-11 | Approved, narrowed | helm-unittest suites per chart, CI runs them, stop swallowing tool failures, one real web replica in ct install. Real Postgres/Vault/TLS integration job **deferred**: needs provisioned schemas, Vault roles/transit keys and certificates; tracked as outstanding. |
+| F-13 | Approved (subset) | HPA bounds validation, `.helmignore`, stale README versions, chart-only release note. |
+
+Milestones executed: M1 permesi chart, M2 genesis chart, M3 web chart, M4 stack/docs, M5 CI — disjoint file sets, separate worktrees, integrated by the lead.

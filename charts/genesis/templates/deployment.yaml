@@ -1,5 +1,9 @@
 {{- include "genesis.validateValues" . }}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+{{- $dbSecret := include "genesis.dbSecretName" . -}}
+{{- $tlsSecret := include "genesis.tlsSecretName" . -}}
+{{- $vaultRoleIdSecret := include "genesis.vaultRoleIdSecretName" . -}}
+{{- $vaultSecretIdSecret := include "genesis.vaultSecretIdSecretName" . -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -28,6 +32,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "genesis.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
@@ -60,10 +65,10 @@ spec:
             {{- end }}
 
             - name: GENESIS_DSN
-              {{- if .Values.database.dsn.existingSecret }}
+              {{- if $dbSecret }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.database.dsn.existingSecret | quote }}
+                  name: {{ $dbSecret | quote }}
                   key: {{ .Values.database.dsn.secretKey | quote }}
               {{- else }}
               value: {{ .Values.database.dsn.value | quote }}
@@ -71,21 +76,21 @@ spec:
 
             - name: GENESIS_VAULT_URL
               value: {{ .Values.vault.url | quote }}
-            {{- if .Values.vault.roleId.existingSecret }}
+            {{- if $vaultRoleIdSecret }}
             - name: GENESIS_VAULT_ROLE_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.vault.roleId.existingSecret | quote }}
+                  name: {{ $vaultRoleIdSecret | quote }}
                   key: {{ .Values.vault.roleId.secretKey | quote }}
             {{- else if .Values.vault.roleId.value }}
             - name: GENESIS_VAULT_ROLE_ID
               value: {{ .Values.vault.roleId.value | quote }}
             {{- end }}
-            {{- if .Values.vault.secretId.existingSecret }}
+            {{- if $vaultSecretIdSecret }}
             - name: GENESIS_VAULT_SECRET_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.vault.secretId.existingSecret | quote }}
+                  name: {{ $vaultSecretIdSecret | quote }}
                   key: {{ .Values.vault.secretId.secretKey | quote }}
             {{- else if .Values.vault.secretId.value }}
             - name: GENESIS_VAULT_SECRET_ID
@@ -110,9 +115,9 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.tls.existingSecret .Values.extraVolumeMounts }}
+          {{- if or $tlsSecret .Values.extraVolumeMounts }}
           volumeMounts:
-            {{- if .Values.tls.existingSecret }}
+            {{- if $tlsSecret }}
             - name: tls-bundle
               mountPath: {{ include "genesis.pathDir" .Values.tls.pemBundlePath | quote }}
               readOnly: true
@@ -154,12 +159,12 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or .Values.tls.existingSecret .Values.extraVolumes }}
+      {{- if or $tlsSecret .Values.extraVolumes }}
       volumes:
-        {{- if .Values.tls.existingSecret }}
+        {{- if $tlsSecret }}
         - name: tls-bundle
           secret:
-            secretName: {{ .Values.tls.existingSecret | quote }}
+            secretName: {{ $tlsSecret | quote }}
             items:
               - key: {{ .Values.tls.secretKey | quote }}
                 path: {{ include "genesis.pathBase" .Values.tls.pemBundlePath | quote }}

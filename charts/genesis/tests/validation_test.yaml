@@ -1,0 +1,33 @@
+suite: genesis validation failures
+release:
+  name: my-release
+templates:
+  - deployment.yaml
+tests:
+  - it: fails when vault ESO is active and roleId/secretId existingSecret names conflict
+    set:
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      vault.externalSecret.remoteKey: vault/approle
+      vault.roleId.existingSecret: vault-a
+      vault.secretId.existingSecret: vault-b
+    asserts:
+      - failedTemplate:
+          errorPattern: "when vault ESO is enabled"
+
+  - it: fails when externalSecret is enabled with a remoteKey but no store
+    set:
+      externalSecret.enabled: true
+      database.dsn.externalSecret.remoteKey: db/creds
+    asserts:
+      - failedTemplate:
+          errorPattern: "externalSecret.store must be set"
+
+  - it: fails when autoscaling minReplicas exceeds maxReplicas
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 8
+      autoscaling.maxReplicas: 3
+    asserts:
+      - failedTemplate:
+          errorPattern: "autoscaling.minReplicas must not exceed"

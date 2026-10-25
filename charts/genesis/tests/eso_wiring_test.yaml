@@ -1,0 +1,80 @@
+suite: genesis deployment ESO wiring
+release:
+  name: my-release
+templates:
+  - deployment.yaml
+tests:
+  - it: consumes explicit existing secrets for DSN, TLS, and Vault
+    set:
+      database.dsn.existingSecret: db-secret
+      tls.existingSecret: tls-secret
+      vault.url: https://vault.example.com:8200
+      vault.roleId.existingSecret: vault-creds
+      vault.secretId.existingSecret: vault-creds
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DSN
+            valueFrom:
+              secretKeyRef:
+                name: db-secret
+                key: dsn
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: vault-creds
+                key: role_id
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_VAULT_SECRET_ID
+            valueFrom:
+              secretKeyRef:
+                name: vault-creds
+                key: secret_id
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: tls-secret
+
+  - it: consumes ESO-generated secret names when only remoteKeys are set
+    set:
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      database.dsn.externalSecret.remoteKey: db/creds
+      tls.externalSecret.remoteKey: tls/cert
+      vault.externalSecret.remoteKey: vault/approle
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DSN
+            valueFrom:
+              secretKeyRef:
+                name: my-release-genesis-db
+                key: dsn
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: my-release-genesis-vault
+                key: role_id
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_VAULT_SECRET_ID
+            valueFrom:
+              secretKeyRef:
+                name: my-release-genesis-vault
+                key: secret_id
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: my-release-genesis-tls
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].name
+          value: tls-bundle

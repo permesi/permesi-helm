@@ -1,0 +1,66 @@
+suite: genesis deployment defaults
+release:
+  name: my-release
+templates:
+  - deployment.yaml
+tests:
+  - it: renders default termination grace of 60 seconds
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 60
+
+  - it: renders pod-level seccomp RuntimeDefault
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+
+  - it: renders pod-level automountServiceAccountToken
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+
+  - it: keeps DSN inline by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DSN
+            value: "postgres://postgres@postgres-genesis:5432/genesis?sslmode=disable"
+
+  - it: does not mount a TLS volume by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes
+
+  - it: sets replicas when autoscaling is disabled
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+
+  - it: socket mode suppresses port and emits socket path env
+    set:
+      config.socketPath: /run/genesis.sock
+      service.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].ports
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_SOCKET_PATH
+            value: /run/genesis.sock
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_PORT
+
+  - it: omits replicas when autoscaling is enabled
+    set:
+      autoscaling.enabled: true
+    asserts:
+      - notExists:
+          path: spec.replicas

@@ -22,6 +22,8 @@ podLabels: {}
 podSecurityContext:
   fsGroup: 10001
   fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   runAsNonRoot: true
@@ -145,7 +147,7 @@ tolerations: []
 affinity: {}
 topologySpreadConstraints: []
 priorityClassName: ""
-terminationGracePeriodSeconds: 30
+terminationGracePeriodSeconds: 60
 revisionHistoryLimit: 5
 
 extraEnv: []

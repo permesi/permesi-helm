@@ -1,0 +1,35 @@
+{{- if .Values.genesis.enabled }}
+{{- $genesisName := default "genesis" .Values.genesis.nameOverride -}}
+{{- $genesisFullname := "" -}}
+{{- if .Values.genesis.fullnameOverride -}}
+{{- $genesisFullname = .Values.genesis.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else if contains $genesisName .Release.Name -}}
+{{- $genesisFullname = .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $genesisFullname = printf "%s-%s" .Release.Name $genesisName | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- $genesisHost := printf "%s.%s.svc.cluster.local" $genesisFullname .Release.Namespace -}}
+{{- $genesisPort := default 8080 .Values.genesis.service.port | toString -}}
+{{- $genesisUrl := printf "https://%s:%s/paserk.json" $genesisHost $genesisPort -}}
+Genesis is deployed as {{ $genesisFullname }}.
+Admission public keys are published by the Genesis Service at:
+  {{ $genesisUrl }}
+
+{{- if .Values.permesi.enabled }}
+{{- $paserkUrl := default "" .Values.permesi.admission.paserkUrl -}}
+{{- if not (contains $genesisHost $paserkUrl) }}
+WARNING: permesi.admission.paserkUrl does not point at this release's Genesis
+Service. It is set to:
+  {{ $paserkUrl }}
+while the Genesis Service in this release is:
+  {{ $genesisHost }}:{{ $genesisPort }}
+If Permesi should fetch admission keys from the Genesis instance installed by
+this chart, set:
+  permesi:
+    admission:
+      paserkUrl: {{ $genesisUrl }}
+External or separately-managed Genesis URLs are also valid; this warning can be
+ignored in that case.
+{{- end }}
+{{- end }}
+{{- end }}

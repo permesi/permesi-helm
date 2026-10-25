@@ -15,6 +15,8 @@ See:
 - `charts/genesis/README.md`
 - `charts/web/README.md`
 - `charts/permesi-stack/README.md`
+- `docs/examples/production-stack.yaml`: a tested, internally consistent production profile
+- `docs/operations.md`: operational runbook (Vault, TLS, HA, NetworkPolicy, upgrades)
 
 ## Install
 
@@ -30,7 +32,7 @@ Install the full stack:
 ```bash
 helm upgrade --install permesi \
   oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.3.29 \
+  --version 0.4.3 \
   --namespace permesi \
   --create-namespace \
   -f values.yaml
@@ -39,9 +41,9 @@ helm upgrade --install permesi \
 Install single components:
 
 ```bash
-helm upgrade --install permesi-api oci://ghcr.io/permesi/charts/permesi --version 0.3.29 -n permesi --create-namespace -f permesi-values.yaml
-helm upgrade --install permesi-genesis oci://ghcr.io/permesi/charts/genesis --version 0.3.29 -n permesi --create-namespace -f genesis-values.yaml
-helm upgrade --install permesi-web oci://ghcr.io/permesi/charts/web --version 0.3.29 -n permesi --create-namespace -f web-values.yaml
+helm upgrade --install permesi-api oci://ghcr.io/permesi/charts/permesi --version 0.4.3 -n permesi --create-namespace -f permesi-values.yaml
+helm upgrade --install permesi-genesis oci://ghcr.io/permesi/charts/genesis --version 0.4.3 -n permesi --create-namespace -f genesis-values.yaml
+helm upgrade --install permesi-web oci://ghcr.io/permesi/charts/web --version 0.4.3 -n permesi --create-namespace -f web-values.yaml
 ```
 
 ### Install from source checkout (local/dev)
@@ -65,7 +67,9 @@ permesi:
     existingSecret: permesi-tls
     secretKey: bundle.pem
   vault:
-    url: https://vault.example.com:8200
+    # Permesi POSTs to this URL verbatim for AppRole login, so it must be the
+    # full login endpoint (not just the origin).
+    url: https://vault.example.com:8200/v1/auth/approle/login
     roleId:
       existingSecret: permesi-vault
       secretKey: role_id
@@ -82,6 +86,7 @@ genesis:
     existingSecret: genesis-tls
     secretKey: bundle.pem
   vault:
+    # Genesis accepts a base URL (or the full login endpoint) and normalizes it.
     url: https://vault.example.com:8200
     roleId:
       existingSecret: genesis-vault

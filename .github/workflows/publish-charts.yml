@@ -76,7 +76,9 @@ jobs:
           mkdir -p .packages
           for chart in charts/*; do
             [[ -f "${chart}/Chart.yaml" ]] || continue
-            helm dependency build "${chart}" || true
+            if grep -q '^dependencies:' "${chart}/Chart.yaml"; then
+              helm dependency build "${chart}"
+            fi
             helm package "${chart}" --destination .packages
           done
 

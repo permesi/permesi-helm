@@ -1,7 +1,9 @@
 {{- include "permesi.validateValues" . }}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+{{- $vaultEso := and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- $admissionCaSecret := include "permesi.admissionCaSecretName" . -}}
 {{- $admissionCaPath := default "" .Values.admission.paserkCaPath -}}
-{{- if and (eq $admissionCaPath "") .Values.admission.paserkCa.existingSecret -}}
+{{- if and (eq $admissionCaPath "") (ne $admissionCaSecret "") -}}
 {{- $admissionCaPath = printf "%s/%s" .Values.admission.paserkCa.mountPath .Values.admission.paserkCa.fileName -}}
 {{- end -}}
 ---
@@ -32,6 +34,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "permesi.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
@@ -64,10 +67,10 @@ spec:
             {{- end }}
 
             - name: PERMESI_DSN
-              {{- if .Values.database.dsn.existingSecret }}
+              {{- if include "permesi.dbSecretName" . }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.database.dsn.existingSecret | quote }}
+                  name: {{ include "permesi.dbSecretName" . | quote }}
                   key: {{ .Values.database.dsn.secretKey | quote }}
               {{- else }}
               value: {{ .Values.database.dsn.value | quote }}
@@ -90,6 +93,18 @@ spec:
 
             - name: PERMESI_VAULT_URL
               value: {{ .Values.vault.url | quote }}
+            {{- if $vaultEso }}
+            - name: PERMESI_VAULT_ROLE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "permesi.vaultSecretName" . | quote }}
+                  key: {{ .Values.vault.roleId.secretKey | quote }}
+            - name: PERMESI_VAULT_SECRET_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "permesi.vaultSecretName" . | quote }}
+                  key: {{ .Values.vault.secretId.secretKey | quote }}
+            {{- else }}
             {{- if .Values.vault.roleId.existingSecret }}
             - name: PERMESI_VAULT_ROLE_ID
               valueFrom:
@@ -109,6 +124,7 @@ spec:
             {{- else if .Values.vault.secretId.value }}
             - name: PERMESI_VAULT_SECRET_ID
               value: {{ .Values.vault.secretId.value | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.vault.wrappedToken.existingSecret }}
             - name: PERMESI_VAULT_WRAPPED_TOKEN
@@ -164,14 +180,14 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.tls.existingSecret .Values.admission.paserkCa.existingSecret .Values.extraVolumeMounts }}
+          {{- if or (include "permesi.tlsSecretName" .) (include "permesi.admissionCaSecretName" .) .Values.extraVolumeMounts }}
           volumeMounts:
-            {{- if .Values.tls.existingSecret }}
+            {{- if include "permesi.tlsSecretName" . }}
             - name: tls-bundle
               mountPath: {{ include "permesi.pathDir" .Values.tls.pemBundlePath | quote }}
               readOnly: true
             {{- end }}
-            {{- if .Values.admission.paserkCa.existingSecret }}
+            {{- if include "permesi.admissionCaSecretName" . }}
             - name: admission-paserk-ca
               mountPath: {{ .Values.admission.paserkCa.mountPath | quote }}
               readOnly: true
@@ -213,20 +229,20 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or .Values.tls.existingSecret .Values.admission.paserkCa.existingSecret .Values.extraVolumes }}
+      {{- if or (include "permesi.tlsSecretName" .) (include "permesi.admissionCaSecretName" .) .Values.extraVolumes }}
       volumes:
-        {{- if .Values.tls.existingSecret }}
+        {{- if include "permesi.tlsSecretName" . }}
         - name: tls-bundle
           secret:
-            secretName: {{ .Values.tls.existingSecret | quote }}
+            secretName: {{ include "permesi.tlsSecretName" . | quote }}
             items:
               - key: {{ .Values.tls.secretKey | quote }}
                 path: {{ include "permesi.pathBase" .Values.tls.pemBundlePath | quote }}
         {{- end }}
-        {{- if .Values.admission.paserkCa.existingSecret }}
+        {{- if include "permesi.admissionCaSecretName" . }}
         - name: admission-paserk-ca
           secret:
-            secretName: {{ .Values.admission.paserkCa.existingSecret | quote }}
+            secretName: {{ include "permesi.admissionCaSecretName" . | quote }}
             items:
               - key: {{ .Values.admission.paserkCa.secretKey | quote }}
                 path: {{ .Values.admission.paserkCa.fileName | quote }}

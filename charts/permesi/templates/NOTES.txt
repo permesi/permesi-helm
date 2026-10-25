@@ -1,7 +1,21 @@
 Permesi has been deployed as {{ include "permesi.fullname" . }}.
 
-Key runtime values are controlled through .Values.config, .Values.database,
-.Values.tls, .Values.admission, .Values.vault, and .Values.auth.
+Runtime configuration is driven by .Values.config, .Values.database, .Values.tls,
+.Values.admission, .Values.vault, and .Values.auth.
 
-If you deployed with config.socketPath, no Service is created.
-If you deployed over TCP/TLS, verify your TLS bundle path and Vault/DB inputs.
+Server mode: {{ if ne (default "" .Values.config.socketPath) "" -}}
+  Unix socket {{ .Values.config.socketPath }} (no Service is created).
+{{- else -}}
+  TCP/TLS on port {{ .Values.config.port }}. Verify your TLS bundle path and
+Vault/DB inputs.
+{{- end }}
+
+Admission PASERK URL: {{ .Values.admission.paserkUrl }}
+  This URL must resolve to the Genesis Service over HTTPS. In the umbrella stack
+  chart a release named "R" creates the Genesis Service "R-genesis"; update
+  admission.paserkUrl when you change the release name, namespace, or port.
+
+Vault URL: {{ .Values.vault.url }}
+  Direct AppRole requires the full login endpoint, for example
+  https://<vault>:8200/v1/auth/approle/login. When vault.url is a Unix-socket
+  path (Vault Agent auto-auth), it is passed through unchanged.

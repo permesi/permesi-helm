@@ -1,0 +1,173 @@
+suite: permesi Deployment
+release:
+  name: permesi
+  namespace: permesi
+templates:
+  - deployment.yaml
+tests:
+  - it: renders default grace period, seccomp, and pod automount
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 60
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+
+  - it: uses the inline DSN value by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_DSN
+            value: postgres://postgres@postgres-permesi:5432/permesi?sslmode=disable
+          any: true
+
+  - it: consumes explicit existingSecret names
+    set:
+      database.dsn.existingSecret: permesi-db
+      tls.existingSecret: permesi-tls
+      vault.roleId.existingSecret: permesi-vault
+      vault.secretId.existingSecret: permesi-vault
+      admission.paserkCa.existingSecret: permesi-admission-ca
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_DSN
+            valueFrom:
+              secretKeyRef:
+                name: permesi-db
+                key: dsn
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: permesi-vault
+                key: role_id
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_VAULT_SECRET_ID
+            valueFrom:
+              secretKeyRef:
+                name: permesi-vault
+                key: secret_id
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_ADMISSION_PASERK_CA_PATH
+            value: /var/run/permesi/admission-ca/ca.pem
+          any: true
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: permesi-tls
+      - equal:
+          path: spec.template.spec.volumes[1].secret.secretName
+          value: permesi-admission-ca
+
+  - it: consumes ESO-generated names when remote keys are set
+    set:
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      database.dsn.value: ""
+      database.dsn.externalSecret.remoteKey: db-remote
+      tls.externalSecret.remoteKey: tls-remote
+      vault.externalSecret.remoteKey: vault-remote
+      admission.paserkCa.externalSecret.remoteKey: ca-remote
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_DSN
+            valueFrom:
+              secretKeyRef:
+                name: permesi-db
+                key: dsn
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_VAULT_ROLE_ID
+            valueFrom:
+              secretKeyRef:
+                name: permesi-vault
+                key: role_id
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_VAULT_SECRET_ID
+            valueFrom:
+              secretKeyRef:
+                name: permesi-vault
+                key: secret_id
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_ADMISSION_PASERK_CA_PATH
+            value: /var/run/permesi/admission-ca/ca.pem
+          any: true
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: permesi-tls
+      - equal:
+          path: spec.template.spec.volumes[1].secret.secretName
+          value: permesi-admission-ca
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tls-bundle
+            mountPath: /var/run/permesi/tls
+            readOnly: true
+          any: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: admission-paserk-ca
+            mountPath: /var/run/permesi/admission-ca
+            readOnly: true
+          any: true
+
+  - it: omits port and TLS env in socket mode
+    set:
+      config.socketPath: /var/run/permesi/permesi.sock
+      service.enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_SOCKET_PATH
+            value: /var/run/permesi/permesi.sock
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_PORT
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_TLS_PEM_BUNDLE
+          any: true
+
+  - it: omits replicas when autoscaling is enabled
+    set:
+      autoscaling.enabled: true
+      autoscaling.minReplicas: 2
+      autoscaling.maxReplicas: 6
+    asserts:
+      - notExists:
+          path: spec.replicas

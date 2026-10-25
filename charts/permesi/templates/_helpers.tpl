@@ -64,13 +64,66 @@ false
 {{- end -}}
 {{- end -}}
 
+{{/* Effective secret name for the database DSN: explicit existingSecret wins; otherwise
+     the ESO-generated default target name when ESO is active; otherwise empty (inline). */}}
+{{- define "permesi.dbSecretName" -}}
+{{- if .Values.database.dsn.existingSecret -}}
+{{- .Values.database.dsn.existingSecret -}}
+{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") -}}
+{{- printf "%s-db" (include "permesi.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Effective secret name for the TLS PEM bundle. */}}
+{{- define "permesi.tlsSecretName" -}}
+{{- if .Values.tls.existingSecret -}}
+{{- .Values.tls.existingSecret -}}
+{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.tls.externalSecret.remoteKey) "") -}}
+{{- printf "%s-tls" (include "permesi.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Effective secret name for Vault AppRole credentials. When Vault ESO is active both
+     role_id and secret_id are written to one Secret; this returns that single name. */}}
+{{- define "permesi.vaultSecretName" -}}
+{{- if .Values.vault.roleId.existingSecret -}}
+{{- .Values.vault.roleId.existingSecret -}}
+{{- else if .Values.vault.secretId.existingSecret -}}
+{{- .Values.vault.secretId.existingSecret -}}
+{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- printf "%s-vault" (include "permesi.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Effective secret name for the admission PASERK CA bundle. */}}
+{{- define "permesi.admissionCaSecretName" -}}
+{{- if .Values.admission.paserkCa.existingSecret -}}
+{{- .Values.admission.paserkCa.existingSecret -}}
+{{- else if and .Values.externalSecret.enabled (ne (default "" .Values.admission.paserkCa.externalSecret.remoteKey) "") -}}
+{{- printf "%s-admission-ca" (include "permesi.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "permesi.validateValues" -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+{{- $vaultEso := and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- $dsnEso := and .Values.externalSecret.enabled (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") -}}
+{{- $anyRemoteKey := or (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") (ne (default "" .Values.tls.externalSecret.remoteKey) "") (ne (default "" .Values.vault.externalSecret.remoteKey) "") (ne (default "" .Values.admission.paserkCa.externalSecret.remoteKey) "") -}}
+{{- if and .Values.externalSecret.enabled $anyRemoteKey (eq (default "" .Values.externalSecret.store) "") -}}
+{{- fail "permesi: externalSecret.store must be set when externalSecret.enabled and any externalSecret.remoteKey is configured" -}}
+{{- end -}}
+{{- if and $vaultEso (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne .Values.vault.roleId.existingSecret .Values.vault.secretId.existingSecret) -}}
+{{- fail "permesi: vault.roleId.existingSecret and vault.secretId.existingSecret must reference the same Secret when vault.externalSecret.remoteKey is set" -}}
+{{- end -}}
+{{- if and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) (int .Values.autoscaling.maxReplicas)) -}}
+{{- fail "permesi: autoscaling.minReplicas must not exceed autoscaling.maxReplicas" -}}
+{{- end -}}
+
 {{- if and $socketMode .Values.service.enabled -}}
 {{- fail "permesi: service.enabled must be false when config.socketPath is set" -}}
 {{- end -}}
 
-{{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") -}}
+{{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dsnEso -}}
 {{- if not $dsnSet -}}
 {{- fail "permesi: set database.dsn.value or database.dsn.existingSecret" -}}
 {{- end -}}
@@ -87,14 +140,14 @@ false
 {{- fail "permesi: tls.pemBundlePath must be set when not running in socket mode" -}}
 {{- end -}}
 
-{{- $secretIdSet := or (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") -}}
+{{- $secretIdSet := or (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") $vaultEso -}}
 {{- $wrappedTokenSet := or (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
 {{- if and $secretIdSet $wrappedTokenSet -}}
 {{- fail "permesi: vault.secretId and vault.wrappedToken are mutually exclusive" -}}
 {{- end -}}
 
 {{- $vaultIsTcp := eq (include "permesi.vaultIsTcp" .) "true" -}}
-{{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") -}}
+{{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEso -}}
 {{- if and $vaultIsTcp (not $roleSet) -}}
 {{- fail "permesi: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}

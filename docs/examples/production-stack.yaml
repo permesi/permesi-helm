@@ -1,0 +1,405 @@
+# Production umbrella values for release "permesi" in namespace "permesi".
+#
+# Install:
+#   helm dependency build charts/permesi-stack
+#   helm upgrade --install permesi charts/permesi-stack -n permesi \
+#     -f docs/examples/production-stack.yaml
+#
+# Every secret value is supplied by reference (existingSecret / secretKeyRef),
+# never inlined. Operators must create these Secrets before rollout; the
+# expected keys are listed in docs/operations.md.
+#
+# DNS expectations (release "permesi", namespace "permesi"):
+#   - Genesis Service:   permesi-genesis.permesi.svc.cluster.local:8080
+#   - Permesi Service:   permesi.permesi.svc.cluster.local:8080
+#   - Web Service:       permesi-web.permesi.svc.cluster.local:8080
+# Public hostnames used below are examples; keep them consistent with your
+# ingress hosts, TLS certificates, and web runtimeConfig.
+
+permesi:
+  enabled: true
+
+  replicaCount: 2
+  terminationGracePeriodSeconds: 60
+
+  database:
+    dsn:
+      # The DSN is read from a Secret so credentials never appear in values.
+      # The DSN must include sslmode=verify-full and point sslrootcert at the
+      # CA volume mounted below, e.g.:
+      #   postgres://permesi@postgres.example.com:5432/permesi?sslmode=verify-full&sslrootcert=/var/run/permesi/db-ca/ca.crt
+      # The username/password in the DSN are replaced at startup with Vault
+      # dynamic credentials (see docs/operations.md).
+      existingSecret: permesi-db
+      secretKey: dsn
+
+  tls:
+    # Combined PEM bundle (private key followed by certificate chain).
+    existingSecret: permesi-tls
+    secretKey: bundle.pem
+
+  admission:
+    paserkUrl: https://permesi-genesis.permesi.svc.cluster.local:8080/paserk.json
+    issuer: https://genesis.permesi.example.com
+    audience: permesi
+    paserkCa:
+      # Separate outbound trust for the Genesis PASERK HTTPS endpoint. This is
+      # not the inbound TLS bundle; see docs/operations.md.
+      existingSecret: permesi-admission-ca
+      secretKey: ca.pem
+
+  vault:
+    # Permesi does NOT normalize the Vault URL: it POSTs to this value exactly
+    # for AppRole login, so use the full login endpoint (F-01).
+    url: https://vault.example.com:8200/v1/auth/approle/login
+    roleId:
+      existingSecret: permesi-vault
+      secretKey: role_id
+    secretId:
+      existingSecret: permesi-vault
+      secretKey: secret_id
+
+  auth:
+    frontendBaseUrl: https://console.permesi.example.com
+    corsAllowedOrigins: https://console.permesi.example.com
+    opaqueServerId: api.permesi.example.com
+
+  extraEnv:
+    # Email delivery (SMTP). Leave unset to use the outbox worker instead.
+    - name: PERMESI_EMAIL_DELIVERY
+      value: "smtp"
+    - name: PERMESI_SMTP_HOST
+      value: "smtp.example.com"
+    - name: PERMESI_SMTP_FROM
+      value: "no-reply@permesi.example.com"
+    - name: PERMESI_SMTP_USERNAME
+      value: "permesi"
+    - name: PERMESI_SMTP_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: permesi-smtp
+          key: password
+    - name: PERMESI_SMTP_PORT
+      value: "465"
+    - name: PERMESI_SMTP_TLS
+      value: "implicit"
+    # OIDC authority (issuer/audience are paired; use a separate OIDC signing
+    # key in Vault, never the Genesis admission key).
+    - name: PERMESI_OIDC_ISSUER
+      value: "https://id.permesi.example.com"
+    - name: PERMESI_OAUTH_AUDIENCE
+      value: "permesi-api"
+    # Narrow trusted-proxy CIDRs (your ingress pods only). The edge MUST
+    # overwrite X-Real-IP; never trust 0.0.0.0/0.
+    - name: PERMESI_AUTH_TRUSTED_PROXIES
+      value: "10.244.0.0/16"
+
+  extraVolumes:
+    - name: db-ca
+      secret:
+        secretName: postgres-ca
+        items:
+          - key: ca.crt
+            path: ca.crt
+
+  extraVolumeMounts:
+    - name: db-ca
+      mountPath: /var/run/permesi/db-ca
+      readOnly: true
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: permesi
+          app.kubernetes.io/instance: permesi
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: permesi
+          app.kubernetes.io/instance: permesi
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      # Permesi serves TLS itself; tell the controller to speak HTTPS upstream.
+      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    hosts:
+      - host: api.permesi.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: permesi-api-ingress-tls
+        hosts:
+          - api.permesi.example.com
+
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
+    egress:
+      # DNS
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+        ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+      # External PostgreSQL (replace with your DB network)
+      - to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - port: 5432
+            protocol: TCP
+      # External Vault (replace with your Vault network)
+      - to:
+          - ipBlock:
+              cidr: 10.30.0.0/16
+        ports:
+          - port: 8200
+            protocol: TCP
+      # Genesis PASERK fetch (Permesi -> Genesis)
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: genesis
+                app.kubernetes.io/instance: permesi
+        ports:
+          - port: 8080
+            protocol: TCP
+      # External SMTP relay (replace with your mail network)
+      - to:
+          - ipBlock:
+              cidr: 10.40.0.0/16
+        ports:
+          - port: 465
+            protocol: TCP
+
+genesis:
+  enabled: true
+
+  replicaCount: 2
+  terminationGracePeriodSeconds: 60
+
+  database:
+    dsn:
+      existingSecret: genesis-db
+      secretKey: dsn
+
+  tls:
+    existingSecret: genesis-tls
+    secretKey: bundle.pem
+
+  vault:
+    # Genesis accepts a base URL or a full AppRole login endpoint; it
+    # normalizes the base URL to /v1/auth/approle/login (F-01).
+    url: https://vault.example.com:8200
+    roleId:
+      existingSecret: genesis-vault
+      secretKey: role_id
+    secretId:
+      existingSecret: genesis-vault
+      secretKey: secret_id
+
+  extraEnv:
+    # Must match permesi.admission.issuer / audience exactly (split trust).
+    - name: GENESIS_ADMISSION_ISS
+      value: "https://genesis.permesi.example.com"
+    - name: GENESIS_ADMISSION_AUD
+      value: "permesi"
+
+  extraVolumes:
+    - name: db-ca
+      secret:
+        secretName: postgres-ca
+        items:
+          - key: ca.crt
+            path: ca.crt
+
+  extraVolumeMounts:
+    - name: db-ca
+      mountPath: /var/run/genesis/db-ca
+      readOnly: true
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: genesis
+          app.kubernetes.io/instance: permesi
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: genesis
+          app.kubernetes.io/instance: permesi
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    hosts:
+      - host: genesis.permesi.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: permesi-genesis-ingress-tls
+        hosts:
+          - genesis.permesi.example.com
+
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: permesi
+                app.kubernetes.io/instance: permesi
+        ports:
+          - port: 8080
+            protocol: TCP
+    egress:
+      # DNS
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+        ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+      # External PostgreSQL (replace with your DB network)
+      - to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - port: 5432
+            protocol: TCP
+      # External Vault (replace with your Vault network)
+      - to:
+          - ipBlock:
+              cidr: 10.30.0.0/16
+        ports:
+          - port: 8200
+            protocol: TCP
+
+web:
+  enabled: true
+
+  replicaCount: 2
+
+  runtimeConfig:
+    # Public hostnames must match the ingress hosts below; opaqueServerId must
+    # match permesi.auth.opaqueServerId.
+    apiBaseUrl: https://api.permesi.example.com
+    tokenBaseUrl: https://genesis.permesi.example.com
+    clientId: 00000000-0000-0000-0000-000000000000
+    opaqueServerId: api.permesi.example.com
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: web
+          app.kubernetes.io/instance: permesi
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: web
+          app.kubernetes.io/instance: permesi
+
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: console.permesi.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: permesi-web-ingress-tls
+        hosts:
+          - console.permesi.example.com
+
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
+    egress:
+      # DNS only: the browser (not nginx) calls Permesi and Genesis directly,
+      # so no backend egress is opened for the web pod.
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+        ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP

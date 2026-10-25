@@ -1,0 +1,120 @@
+suite: web runtime config checksum and configmap
+
+templates:
+  - deployment.yaml
+  - configmap-runtime.yaml
+
+release:
+  name: test-release
+  namespace: test-ns
+
+tests:
+  - it: renders a checksum annotation for chart-managed config
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/runtime-config"]
+          value: fdfd4b3cf2da2b729b70dd41264c7ca9424159903803f694488c1c597ecd4909
+        template: deployment.yaml
+
+  - it: changes the checksum when a runtime key changes
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-other-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/runtime-config"]
+          value: 7a737879ea771076e7e29d7e5b0dd304d30bf0a340aead94787be7fdd0e0d83a
+        template: deployment.yaml
+
+  - it: merges user podAnnotations with the checksum annotation
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      podAnnotations:
+        example.com/team: platform
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/runtime-config"]
+          value: fdfd4b3cf2da2b729b70dd41264c7ca9424159903803f694488c1c597ecd4909
+        template: deployment.yaml
+      - equal:
+          path: spec.template.metadata.annotations["example.com/team"]
+          value: platform
+        template: deployment.yaml
+
+  - it: checksum overrides a user-supplied checksum annotation
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      podAnnotations:
+        checksum/runtime-config: stale-user-value
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/runtime-config"]
+          value: fdfd4b3cf2da2b729b70dd41264c7ca9424159903803f694488c1c597ecd4909
+        template: deployment.yaml
+
+  - it: encodes special characters in config.js with toJson
+    set:
+      runtimeConfig:
+        apiBaseUrl: 'https://api.example.com/x?a=1&b=2&c="quoted"'
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - equal:
+          path: data["config.js"]
+          value: 'window.PERMESI_CONFIG = {"api_base_url":"https://api.example.com/x?a=1\u0026b=2\u0026c=\"quoted\"","client_id":"my-client-id","opaque_server_id":"api.example.com","token_base_url":"https://genesis.example.com"};'
+        template: configmap-runtime.yaml
+
+  - it: permits blank values when allowBuildDefaults is true
+    set:
+      runtimeConfig:
+        allowBuildDefaults: true
+    asserts:
+      - hasDocuments:
+          count: 1
+        template: configmap-runtime.yaml
+      - matchRegex:
+          path: data["config.js"]
+          pattern: '"api_base_url":""'
+        template: configmap-runtime.yaml
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/runtime-config"]
+          pattern: '^[0-9a-f]{64}$'
+        template: deployment.yaml
+
+  - it: omits checksum and managed ConfigMap when existingConfigMap is set
+    set:
+      runtimeConfig:
+        existingConfigMap: my-external-cm
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: configmap-runtime.yaml
+      - notExists:
+          path: spec.template.metadata.annotations
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.volumes[0].configMap.name
+          value: my-external-cm
+        template: deployment.yaml
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].subPath
+          value: config.js
+        template: deployment.yaml

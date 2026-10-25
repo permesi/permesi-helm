@@ -1,0 +1,50 @@
+suite: web runtime config nonblank validation
+
+templates:
+  - deployment.yaml
+
+release:
+  name: test-release
+  namespace: test-ns
+
+tests:
+  - it: fails when apiBaseUrl is blank
+    set:
+      runtimeConfig:
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: apiBaseUrl must not be empty
+
+  - it: fails when tokenBaseUrl is whitespace
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: "   "
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: tokenBaseUrl must not be empty
+
+  - it: fails when clientId is blank
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        opaqueServerId: api.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: clientId must not be empty
+
+  - it: fails when opaqueServerId is blank
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+    asserts:
+      - failedTemplate:
+          errorPattern: opaqueServerId must not be empty

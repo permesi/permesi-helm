@@ -1,0 +1,63 @@
+suite: web autoscaling bounds
+
+templates:
+  - deployment.yaml
+  - hpa.yaml
+
+release:
+  name: test-release
+  namespace: test-ns
+
+tests:
+  - it: fails when minReplicas exceeds maxReplicas
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      autoscaling:
+        enabled: true
+        minReplicas: 10
+        maxReplicas: 5
+    asserts:
+      - failedTemplate:
+          errorPattern: must not be greater than
+        template: deployment.yaml
+
+  - it: renders HPA with valid bounds
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 5
+    asserts:
+      - equal:
+          path: spec.minReplicas
+          value: 2
+        template: hpa.yaml
+      - equal:
+          path: spec.maxReplicas
+          value: 5
+        template: hpa.yaml
+
+  - it: omits deployment replicas when autoscaling is enabled
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 5
+    asserts:
+      - notExists:
+          path: spec.replicas
+        template: deployment.yaml

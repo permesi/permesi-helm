@@ -6,4 +6,16 @@ Runtime overrides are served from /config.js using:
 - runtimeConfig.clientId
 - runtimeConfig.opaqueServerId
 
-If runtimeConfig.existingConfigMap is set, this chart will mount that config map instead of creating one.
+These are browser-side URLs and identifiers. Use public HTTPS hostnames
+reachable from the user's browser (the API and Genesis origins), not
+cluster-local Service DNS names.
+
+{{- if .Values.runtimeConfig.existingConfigMap }}
+This chart is mounting the external ConfigMap "{{ .Values.runtimeConfig.existingConfigMap }}".
+After changing that ConfigMap, roll the pods manually:
+  kubectl rollout restart deployment/{{ include "web.fullname" . }}
+{{- else if .Values.runtimeConfig.allowBuildDefaults }}
+WARNING: runtimeConfig.allowBuildDefaults is true, so the runtime values may be
+blank and the browser will fall back to the image-baked endpoints. This is not
+recommended for production.
+{{- end }}

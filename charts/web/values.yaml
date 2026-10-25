@@ -22,6 +22,8 @@ podLabels: {}
 podSecurityContext:
   fsGroup: 101
   fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   runAsNonRoot: true
@@ -34,12 +36,27 @@ securityContext:
       - ALL
 
 runtimeConfig:
+  # Set to the name of an existing ConfigMap to take over /config.js
+  # ownership. When set, the chart does not create or checksum a ConfigMap,
+  # and you must restart pods manually (kubectl rollout restart) after
+  # changing the external ConfigMap.
   existingConfigMap: ""
   key: config.js
+  # Browser-side runtime configuration. These are public URLs and identifiers
+  # the browser (WASM) uses to reach the API and Genesis. They must be
+  # reachable from the user's browser, not cluster-local DNS names, and must
+  # match the provisioned Genesis client and backend OPAQUE server ID.
+  # All four values are REQUIRED when the chart manages the ConfigMap unless
+  # allowBuildDefaults is true.
   apiBaseUrl: ""
   tokenBaseUrl: ""
   clientId: ""
   opaqueServerId: ""
+  # Escape hatch that restores the old behavior of falling back to the
+  # image-baked endpoints when the four runtime values above are left blank.
+  # NOT recommended for production: it may silently contact the wrong
+  # environment.
+  allowBuildDefaults: false
 
 service:
   type: ClusterIP

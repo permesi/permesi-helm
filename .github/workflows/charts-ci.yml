@@ -38,6 +38,9 @@ jobs:
       - name: Setup chart-testing
         uses: helm/chart-testing-action@v2.7.0
 
+      - name: Install helm-unittest plugin
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2
+
       - name: Resolve chart test mode
         id: meta
         shell: bash
@@ -66,7 +69,7 @@ jobs:
             exit 0
           fi
 
-          changed="$(ct list-changed --target-branch "${TARGET_BRANCH}" --config .ct.yaml || true)"
+          changed="$(ct list-changed --target-branch "${TARGET_BRANCH}" --config .ct.yaml)"
           if [[ -n "${changed}" ]]; then
             echo "Changed charts:"
             echo "${changed}"
@@ -87,6 +90,23 @@ jobs:
         env:
           TARGET_BRANCH: ${{ steps.meta.outputs.target_branch }}
         run: ct lint --target-branch "${TARGET_BRANCH}" --config .ct.yaml
+
+      - name: Run helm unit tests
+        if: steps.changed.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ran_any=false
+          for chart in charts/*; do
+            [[ -d "${chart}/tests" ]] || continue
+            ran_any=true
+            echo "Running helm unittest for ${chart}"
+            helm unittest "${chart}"
+          done
+          if [[ "${ran_any}" == "false" ]]; then
+            echo "No chart unit tests found (no charts/*/tests directories)."
+          fi
 
   install:
     runs-on: ubuntu-latest

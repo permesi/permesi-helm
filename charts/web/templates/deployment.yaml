@@ -21,12 +21,18 @@ spec:
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.podAnnotations }}
+      {{- $annotations := default dict .Values.podAnnotations -}}
+      {{- $checksum := include "web.runtimeConfigChecksum" . -}}
+      {{- if $checksum -}}
+      {{- $annotations = merge (dict "checksum/runtime-config" $checksum) $annotations -}}
+      {{- end -}}
+      {{- if $annotations }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml $annotations | nindent 8 }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "web.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}

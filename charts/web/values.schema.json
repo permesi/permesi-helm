@@ -51,6 +51,9 @@
         },
         "opaqueServerId": {
           "type": "string"
+        },
+        "allowBuildDefaults": {
+          "type": "boolean"
         }
       }
     },

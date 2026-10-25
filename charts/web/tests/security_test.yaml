@@ -1,0 +1,66 @@
+suite: web pod security context and automount
+
+templates:
+  - deployment.yaml
+
+release:
+  name: test-release
+  namespace: test-ns
+
+tests:
+  - it: sets seccomp RuntimeDefault on pod security context
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.seccompProfile.type
+          value: RuntimeDefault
+
+  - it: renders automountServiceAccountToken at pod level false by default
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: honors automount true at pod level
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      serviceAccount:
+        automount: true
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true
+
+  - it: applies automount at pod level when serviceAccount.create is false
+    set:
+      runtimeConfig:
+        apiBaseUrl: https://api.example.com
+        tokenBaseUrl: https://genesis.example.com
+        clientId: my-client-id
+        opaqueServerId: api.example.com
+      serviceAccount:
+        create: false
+        name: custom-sa
+        automount: true
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: custom-sa
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: true

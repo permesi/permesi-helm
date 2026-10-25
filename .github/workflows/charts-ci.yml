@@ -113,7 +113,6 @@ jobs:
           fi
 
       - name: Render production profile
-        if: steps.changed.outputs.has_changes == 'true'
         shell: bash
         run: |
           set -euo pipefail

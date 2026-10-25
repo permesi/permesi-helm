@@ -644,3 +644,28 @@ Spot-verified before approval: F-01 (`permesi/crates/vault_client/src/lib.rs` `a
 | F-13 | Approved (subset) | HPA bounds validation, `.helmignore`, stale README versions, chart-only release note. |
 
 Milestones executed: M1 permesi chart, M2 genesis chart, M3 web chart, M4 stack/docs, M5 CI — disjoint file sets, separate worktrees, integrated by the lead.
+
+## 8. Implementation status and outstanding verification
+
+| Finding | Status | Where |
+|---|---|---|
+| F-01 | Done | `charts/permesi/{README.md,templates/NOTES.txt}`, root `README.md`, `docs/operations.md` |
+| F-02 | Done (docs) | `docs/operations.md` §2, chart READMEs/NOTES |
+| F-03 | Done | `charts/{permesi,genesis}/templates/{_helpers.tpl,deployment.yaml,external-secret.yaml}` + tests |
+| F-04 | Done (profile + umbrella NOTES warning) | `docs/examples/production-stack.yaml`, `charts/permesi-stack/templates/NOTES.txt` |
+| F-05, F-09, F-12 | Done (docs/example) | `docs/operations.md`, `docs/examples/production-stack.yaml` |
+| F-06, F-07 | Done | `charts/web/templates/*`, `runtimeConfig.allowBuildDefaults` |
+| F-08, F-10 | Done | backend grace 60 s; `seccompProfile: RuntimeDefault`; pod-level `automountServiceAccountToken` |
+| F-11 | Partly done | helm-unittest suites (55 tests), CI runs them with Helm pinned to v3.16.4, production-profile render gate, failures no longer swallowed, one real web replica in `ct install`. |
+| F-13 | Partly done | HPA bounds validation, `.helmignore`, README versions, chart-only release note. |
+
+Chart versions bumped to 0.4.4 (chart-only); `appVersion` and image tags stay 0.4.3. The next application release must use a version above 0.4.4 or bump charts past it, because `ct` enforces version increments.
+
+**Not yet verified (needs an isolated environment with real dependencies):**
+
+- Backend pods running against real PostgreSQL, Vault (AppRole and Agent socket modes), and TLS certificates. The Kind checks only proved admission under the Restricted Pod Security Standard and the rendered pod spec; without dependencies the backends cannot become ready.
+- Genesis→Permesi PASERK fetch over cluster TLS, admission-token verification, and OIDC flow.
+- External Secrets Operator reconciliation against a real store.
+- NetworkPolicy enforcement, which needs a CNI that enforces it; Kind's default CNI does not.
+- Certificate rotation, SIGTERM drain under load, and DB credential lease expiry.
+- GitHub Actions execution of the modified workflows.

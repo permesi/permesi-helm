@@ -32,7 +32,7 @@ Install the full stack:
 ```bash
 helm upgrade --install permesi \
   oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.4.3 \
+  --version 0.4.4 \
   --namespace permesi \
   --create-namespace \
   -f values.yaml
@@ -41,9 +41,9 @@ helm upgrade --install permesi \
 Install single components:
 
 ```bash
-helm upgrade --install permesi-api oci://ghcr.io/permesi/charts/permesi --version 0.4.3 -n permesi --create-namespace -f permesi-values.yaml
-helm upgrade --install permesi-genesis oci://ghcr.io/permesi/charts/genesis --version 0.4.3 -n permesi --create-namespace -f genesis-values.yaml
-helm upgrade --install permesi-web oci://ghcr.io/permesi/charts/web --version 0.4.3 -n permesi --create-namespace -f web-values.yaml
+helm upgrade --install permesi-api oci://ghcr.io/permesi/charts/permesi --version 0.4.4 -n permesi --create-namespace -f permesi-values.yaml
+helm upgrade --install permesi-genesis oci://ghcr.io/permesi/charts/genesis --version 0.4.4 -n permesi --create-namespace -f genesis-values.yaml
+helm upgrade --install permesi-web oci://ghcr.io/permesi/charts/web --version 0.4.4 -n permesi --create-namespace -f web-values.yaml
 ```
 
 ### Install from source checkout (local/dev)

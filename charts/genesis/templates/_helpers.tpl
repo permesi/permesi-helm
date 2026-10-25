@@ -64,15 +64,82 @@ false
 {{- end -}}
 {{- end -}}
 
+{{- define "genesis.dbEsoActive" -}}
+{{- if and .Values.externalSecret.enabled (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.tlsEsoActive" -}}
+{{- if and .Values.externalSecret.enabled (ne (default "" .Values.tls.externalSecret.remoteKey) "") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.vaultEsoActive" -}}
+{{- if and .Values.externalSecret.enabled (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.dbSecretName" -}}
+{{- if .Values.database.dsn.existingSecret -}}
+{{- .Values.database.dsn.existingSecret -}}
+{{- else if eq (include "genesis.dbEsoActive" .) "true" -}}
+{{- printf "%s-db" (include "genesis.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.tlsSecretName" -}}
+{{- if .Values.tls.existingSecret -}}
+{{- .Values.tls.existingSecret -}}
+{{- else if eq (include "genesis.tlsEsoActive" .) "true" -}}
+{{- printf "%s-tls" (include "genesis.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.vaultEsoTarget" -}}
+{{- if .Values.vault.roleId.existingSecret -}}
+{{- .Values.vault.roleId.existingSecret -}}
+{{- else -}}
+{{- printf "%s-vault" (include "genesis.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.vaultRoleIdSecretName" -}}
+{{- if .Values.vault.roleId.existingSecret -}}
+{{- .Values.vault.roleId.existingSecret -}}
+{{- else if eq (include "genesis.vaultEsoActive" .) "true" -}}
+{{- include "genesis.vaultEsoTarget" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "genesis.vaultSecretIdSecretName" -}}
+{{- if .Values.vault.secretId.existingSecret -}}
+{{- .Values.vault.secretId.existingSecret -}}
+{{- else if eq (include "genesis.vaultEsoActive" .) "true" -}}
+{{- include "genesis.vaultEsoTarget" . -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "genesis.validateValues" -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- if and $socketMode .Values.service.enabled -}}
 {{- fail "genesis: service.enabled must be false when config.socketPath is set" -}}
 {{- end -}}
 
-{{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") -}}
+{{- $dbEsoActive := eq (include "genesis.dbEsoActive" .) "true" -}}
+{{- $vaultEsoActive := eq (include "genesis.vaultEsoActive" .) "true" -}}
+
+{{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dbEsoActive -}}
 {{- if not $dsnSet -}}
-{{- fail "genesis: set database.dsn.value or database.dsn.existingSecret" -}}
+{{- fail "genesis: set database.dsn.value, database.dsn.existingSecret, or database.dsn.externalSecret.remoteKey" -}}
 {{- end -}}
 
 {{- if eq (default "" .Values.vault.url) "" -}}
@@ -83,14 +150,33 @@ false
 {{- fail "genesis: tls.pemBundlePath must be set when not running in socket mode" -}}
 {{- end -}}
 
-{{- $secretIdSet := or (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") -}}
+{{- if and .Values.autoscaling.enabled (gt (int (default 0 .Values.autoscaling.minReplicas)) (int (default 0 .Values.autoscaling.maxReplicas))) -}}
+{{- fail "genesis: autoscaling.minReplicas must not exceed autoscaling.maxReplicas" -}}
+{{- end -}}
+
+{{- if .Values.externalSecret.enabled -}}
+{{- $esoRemoteSet := or (ne (default "" .Values.database.dsn.externalSecret.remoteKey) "") (ne (default "" .Values.tls.externalSecret.remoteKey) "") (ne (default "" .Values.vault.externalSecret.remoteKey) "") -}}
+{{- if and $esoRemoteSet (eq (default "" .Values.externalSecret.store) "") -}}
+{{- fail "genesis: externalSecret.store must be set when any externalSecret.remoteKey is set" -}}
+{{- end -}}
+{{- end -}}
+
+{{- if $vaultEsoActive -}}
+{{- $target := include "genesis.vaultEsoTarget" . -}}
+{{- $sid := default "" .Values.vault.secretId.existingSecret -}}
+{{- if and (ne $sid "") (ne $sid $target) -}}
+{{- fail "genesis: when vault ESO is enabled, vault.roleId.existingSecret and vault.secretId.existingSecret must reference the same Secret" -}}
+{{- end -}}
+{{- end -}}
+
+{{- $secretIdSet := or (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") $vaultEsoActive -}}
 {{- $wrappedTokenSet := or (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
 {{- if and $secretIdSet $wrappedTokenSet -}}
 {{- fail "genesis: vault.secretId and vault.wrappedToken are mutually exclusive" -}}
 {{- end -}}
 
 {{- $vaultIsTcp := eq (include "genesis.vaultIsTcp" .) "true" -}}
-{{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") -}}
+{{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEsoActive -}}
 {{- if and $vaultIsTcp (not $roleSet) -}}
 {{- fail "genesis: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}

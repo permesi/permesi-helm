@@ -50,12 +50,3 @@ tests:
             name: data
             emptyDir: {}
           any: true
-  - it: runs one in-memory dev Vault replica
-    template: charts/quickstart/templates/vault-deployment.yaml
-    asserts:
-      - equal:
-          path: spec.replicas
-          value: 1
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: -dev

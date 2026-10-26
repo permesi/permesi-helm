@@ -821,10 +821,13 @@ vault write -f database/rotate-root/genesis
 Reruns reuse existing manager configs and must not overwrite rotated passwords.
 Check the exact `connection_details.username` and `allowed_roles` before reuse.
 Initial config creation and the first manager rotation are separate operations:
-a persisted config alone is not proof the rotation finished. If provisioning is
-interrupted between them, require an authorized successful rotate-root for that
-manager before declaring bootstrap complete. Do not reset an owner password or
-assume an automatic interrupted-first-rotation repair.
+a persisted config alone is not proof the rotation finished. For the manual
+production procedure, interrupted provisioning requires an authorized successful
+rotate-root before declaring that manager complete. The disposable helper
+instead records root-only pending/completed markers in Vault and resumes
+unfinished initial rotations using Vault's current credentials; normal completed
+reruns leave those credentials unchanged. Neither path resets a schema owner
+password or reapplies a bootstrap password to an existing manager config.
 Legacy owner-as-manager installs require a reviewed manager-separated restore/
 migration; the disposable helper instead accepts only explicit reset or restore.
 No automatic owner-password reset is supported. Rotation scheduling is

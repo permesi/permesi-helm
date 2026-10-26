@@ -51,4 +51,8 @@ before="$(grep '^INFO: .*sha256' "$log_dir/before.log")"
 after="$(grep '^INFO: .*sha256' "$log_dir/after.log")"
 [[ -n "$before" && "$before" == "$after" ]] || { echo 'Cryptographic identity changed across reinstall' >&2; exit 1; }
 echo 'PASS: full-stack reinstall preserved OPAQUE seed, CA and signing-key fingerprints'
+rotation_namespace="qv-rot-$(printf '%s/%s' "$NAMESPACE" "$RELEASE" | sha256sum | cut -c1-16)"
+python3 scripts/quickstart/tests/real-verifier-regressions.py \
+  --context "$CONTEXT" --namespace "$rotation_namespace" --release qvrot \
+  --bootstrap-rotation --app-source "$APP_SOURCE"
 echo 'real-dependencies.sh: PASS'

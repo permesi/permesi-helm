@@ -640,7 +640,7 @@ Spot-verified before approval: F-01 (`permesi/crates/vault_client/src/lib.rs` `a
 | F-07 | Approved with escape hatch | Fail on blank managed runtime keys; new `runtimeConfig.allowBuildDefaults` (default `false`) restores previous fallback behavior for upgrades. |
 | F-08 | Approved | Backend grace 60 s. |
 | F-10 | Approved | `seccompProfile: RuntimeDefault`; pod-level `automountServiceAccountToken` (defaults unchanged). |
-| F-11 | Approved, narrowed | helm-unittest suites per chart, CI runs them, stop swallowing tool failures, one real web replica in ct install. Real Postgres/Vault/TLS integration job **deferred**: needs provisioned schemas, Vault roles/transit keys and certificates; tracked as outstanding. |
+| F-11 | Approved, initially narrowed | Initial pass added chart tests and a real web replica; dependency integration was deferred. The expanded adoption work subsequently implemented and exercised the real PostgreSQL/Vault/TLS gate; see `k8s-adoption-plan.md` §12 for current evidence and limits. |
 | F-13 | Approved (subset) | HPA bounds validation, `.helmignore`, stale README versions, chart-only release note. |
 
 Milestones executed: M1 permesi chart, M2 genesis chart, M3 web chart, M4 stack/docs, M5 CI — disjoint file sets, separate worktrees, integrated by the lead.
@@ -656,16 +656,19 @@ Milestones executed: M1 permesi chart, M2 genesis chart, M3 web chart, M4 stack/
 | F-05, F-09, F-12 | Done (docs/example) | `docs/operations.md`, `docs/examples/production-stack.yaml` |
 | F-06, F-07 | Done | `charts/web/templates/*`, `runtimeConfig.allowBuildDefaults` |
 | F-08, F-10 | Done | backend grace 60 s; `seccompProfile: RuntimeDefault`; pod-level `automountServiceAccountToken` |
-| F-11 | Partly done | helm-unittest suites (55 tests), CI runs them with Helm pinned to v3.16.4, production-profile render gate, failures no longer swallowed, one real web replica in `ct install`. |
+| F-11 | Done in expanded adoption work | Chart tests, real web smoke, Restricted admission/upgrade gate, and the separate `scripts/ci/real-dependencies.sh` job. Current validation is recorded in `k8s-adoption-plan.md` §12. |
 | F-13 | Partly done | HPA bounds validation, `.helmignore`, README versions, chart-only release note. |
 
-Chart versions bumped to 0.4.4 (chart-only); `appVersion` and image tags stay 0.4.3. The next application release must use a version above 0.4.4 or bump charts past it, because `ct` enforces version increments.
+Chart versions are 0.4.4 (chart-only); `appVersion` and default images remain 0.4.3.
+Application and chart versions are independent: `scripts/bump-release.sh` advances
+the chart version separately, with an optional explicit `--chart-version`.
+New native Kubernetes-auth flags require a supporting application image.
 
-**Not yet verified (needs an isolated environment with real dependencies):**
+**Verification disposition after expanded adoption:**
 
-- Backend pods running against real PostgreSQL, Vault (AppRole and Agent socket modes), and TLS certificates. The Kind checks only proved admission under the Restricted Pod Security Standard and the rendered pod spec; without dependencies the backends cannot become ready.
-- Genesis→Permesi PASERK fetch over cluster TLS, admission-token verification, and OIDC flow.
-- External Secrets Operator reconciliation against a real store.
-- NetworkPolicy enforcement, which needs a CNI that enforces it; Kind's default CNI does not.
-- Certificate rotation, SIGTERM drain under load, and DB credential lease expiry.
-- GitHub Actions execution of the modified workflows.
+- Real PostgreSQL/Vault-backed backend replicas, Agent socket mode, TLS trust and leaf reload are now exercised by the isolated Kind dependency gate. This is not an exhaustive legacy AppRole matrix.
+- Genesis→Permesi cluster-TLS PASERK discovery, admission and actual OPAQUE signup start/finish are verified. Browser/WASM, verified email and OIDC authorization flows remain unverified.
+- External Secrets Operator reconciliation against a real store remains unverified.
+- NetworkPolicy enforcement remains unverified; it needs an enforcing CNI, unlike Kind's default.
+- Actual DB-pool lease revocation, fail-closed restart and new-credential recovery are verified for both services. Natural expiry/max-TTL recovery, CA-root rotation and SIGTERM drain under load remain separate qualifications.
+- Modified GitHub workflows passed local checks but were not executed on GitHub Actions.

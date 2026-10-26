@@ -320,3 +320,102 @@ Approved as designed, with these decisions:
 - **M-DOC**: approved; drafts in parallel, finalized after runtime acceptance.
 - **M-APP**: 5a and 5c already implemented on `permesi` branch `feat/k8s-hardening` (reviewer to check Genesis compatibility of the shared helper and the extra nginx cases in §7). 5d approved (keyless Cosign + OCI provenance in `deploy.yml`; remote signing evidence requires an authorized CI run).
 - **5b native Kubernetes auth: approved after the user's authorization of all application changes.** Implement optional startup Kubernetes login in both services and explicit projected-token Helm configuration. Retain existing fail-closed shutdown on renewal failure; Kubernetes restarts the process, which rereads the projected JWT and authenticates again. This is restart-based reauthentication, not seamless replacement of token clones. Agent mode remains the recommended PKI deployment path. New flags require a supporting application image and must not be claimed to work with the released 0.4.3 images.
+
+## 12. Final delivery ledger and evidence
+
+This section supersedes the implementation-future tense in the original design.
+The native-auth decision in §11 supersedes the initial recommendation in §7.
+All approved implementation milestones and independent reviews are complete;
+no confirmed P0/P1 finding remains unresolved. Remote release/publication and
+production qualification are intentionally outside this local delivery.
+
+### Milestones and ownership
+
+Architect: Astra. Implementation: dedicated builders in isolated Herdr worktrees;
+the final builders used Codex Sol 6.1 at the user's request after provider/quota
+failures. Independent review: separate Codex sessions, with targeted follow-up
+after corrections. Global model roles and authentication were not changed.
+
+| Milestone | Status | Principal files / local evidence |
+|---|---|---|
+| Assessment and lead approval | Complete | This plan and `helm-improvement-plan.md`; evidence-backed findings, scope decisions and split-trust contract. |
+| Initial chart hardening and CI smoke | Complete | Backend/web templates, schemas/tests, `scripts/ci/kind-smoke.sh`, chart CI and release README automation (`666265e`). |
+| M-VA | Complete | `charts/{permesi,genesis}/`: opt-in native Agent sidecar, private memory-backed TLS/socket, scoped JWT, authenticated startup gate and digest pinning. Default legacy mode retained. |
+| M-QS | Complete | `scripts/quickstart/`: install/connect/verify, locked SQL/images, helper chart, real OPAQUE client and actual fault/retry regressions. Security/lifecycle corrections `de750e5`, `a81d64b`, `6ead3e4`. |
+| M-UQ | Complete | `charts/permesi-stack/`: default-disabled local helper dependency, explicit dev acknowledgement, coherent packaged quickstart profile (`68015d1`). |
+| M-DIG and native chart configuration | Complete | Component/umbrella image helpers, schemas and values; release sender/receiver validation and independent chart versions; native auth projection (`11f6c80`, `4cdce0c`, `3df2e35`). |
+| M-APP, including native auth | Complete on separate app branch | `feat/k8s-hardening`: Vault URL normalization, nginx header inheritance, OCI signing/provenance and release verification, optional native Kubernetes auth with restart-based reauthentication, actual sender/receiver contract (`f3dae20`). Original `sandbox` checkout retained. |
+| M-DOC | Complete | Root/chart READMEs, `docs/operations.md`, `docs/install-guide.md`, legacy and Vault-backed examples. External reviewer renewal and real pg_cron qualification corrected (`1020e94`). |
+| Independent review and corrections | Complete | Application, Agent, quickstart, umbrella, digest/native charts and guide reviewed separately. Final interrupted-manager-rotation P2 corrected and independently runtime-verified. |
+
+### Review decisions
+
+- Corrected real bootstrap/verifier defects: dev Vault root-banner leakage,
+  manager/schema-owner separation, `.pgpass` escaping, cluster RBAC identity and
+  pregrant handling, exact issued-role grants/revocation, and owned dynamic
+  port-forward listeners. Both services' actual DB-pool recovery is now checked.
+- Initial manager rotation now has root-only pending/completed Vault markers.
+  A successful config write is not mistaken for completed rotation. Failed
+  rotation or completion writes fail closed; retry uses Vault's current private
+  credential, never resets an owner or reapplies a bootstrap manager password.
+  Normal completed reruns preserve manager passwords.
+- Native chart edge corrections were accepted; a blanket ban on opaque
+  `extraEnvFrom` imports was rejected as an unjustified interface restriction.
+  Imported authentication settings remain the operator's responsibility;
+  conflicting runtime modes fail closed in the supporting application.
+- Production-guide gaps were corrected: explicit external reviewer connection/
+  JWT refresh and management-token renewal, plus background-worker pg_cron
+  registration and real maintenance-effect checks. No speculative controller or
+  cert-manager dependency was introduced.
+
+### Executed validation
+
+Commands use the repository's pinned tooling via a temporary rootless container
+wrapper where host CLIs are absent. Cluster mutations used only the owned Kind
+`permesi-helm-test` environment, Kubernetes 1.32.2.
+
+| Layer | Actual result and scope |
+|---|---|
+| Helm chart tests | 319 passed, 28 suites across three components, umbrella and quickstart helper. |
+| Lint/render/schema | `ct lint --all --config .ct.yaml` passed all four charts; strict component/helper/stack lint, production/default/negative profiles and dependency packaging exercised. Version-increment lint against `main` passed separately. Blank required web runtime values intentionally fail rendering; zero-config production install is not promised. |
+| Release contracts | 13 release/bump tests and 4 port-forward subprocess tests passed. Actual app sender shell → actual Helm receiver: 4 tests passed, with network delivery replaced by local capture. |
+| Kubernetes installation | `ct install --all --config .ct.yaml` passed all four charts. Its zero-backend fixtures are admission/install checks, not backend runtime proof. |
+| Restricted/upgrade smoke | Exact `scripts/ci/kind-smoke.sh` passed: real web config serving/rollout, unchanged selectors through base upgrade, Restricted PSA, backend grace and disruption configuration. |
+| Complete real-dependency CI entry point | Exact `scripts/ci/real-dependencies.sh` passed in 613.29 seconds, including its final permanent bootstrap-rotation hook. Real PostgreSQL, Vault, two Ready backend replicas, trusted TLS and successful OPAQUE signup start/finish; no zero-replica substitute. |
+| Runtime security/lifecycle | Missing/tampered/wrong-issuer/wrong-audience admission rejected; wrong CA/hostname rejected; split-trust access denied. Served leaf changed without pod restart; Agent restart, pod replacement, 2→3→2 scaling, actual DB-pool lease revocation/restart/new credentials/readiness/admission, and full reinstall with preserved records/cryptographic identity passed. Injected grant/revocation defects failed for the intended assertions and were restored. |
+| Initial rotation failure/retry | Lead complete gate and independent reviewer both ran the permanent real Vault/PostgreSQL cutpoint mode for both managers: missing/pending markers, denied rotation, successful rotation with denied completion write, read failures and malformed identity/state, unchanged schema owners and normal-rerun password preservation. Reviewer's direct run passed in 370.48 seconds and verified owned namespace/cluster-grant cleanup. |
+| Helm-only entry path | Fresh packaged `charts/permesi-stack/examples/quickstart.yaml` install and common verifier passed under Restricted PSA, using explicit helper identity. |
+| App compilation/behavior | Lead focused locked Rust library suites: 645 passed, 2 ignored; formatting and strict touched-crate all-target/all-feature clippy passed. Actual rebuilt CLIs and nginx HTTP header/status paths exercised. No application image was published. |
+| Native auth isolated qualification | Builder ran actual changed Rust helper and both rebuilt service startup login paths against real Vault/Kubernetes: correct roles, policy isolation, renewal, revocation rejection, fresh JWT/restart login, wrong audience/SA/namespace/role denial. This fixture intentionally stopped at unprovisioned database infrastructure; it is not full new-image readiness proof. |
+| Production-guide command qualification | Isolated external-Vault reviewer replacement/login and scoped operator renewal exercised. PostgreSQL 18.6 + pg_cron 1.6.8 ran 12 successful jobs with partition/cleanup effects before/after manager SQL-password replacement. Not combined production infrastructure certification. |
+| Workflow syntax | Actionlint passed changed app/chart workflows. No GitHub-hosted publication/signing/dispatch run was performed. |
+
+### Remaining qualification and release boundaries
+
+- Quickstart is disposable development: in-memory HTTP Vault, plaintext ephemeral
+  PostgreSQL, bootstrap credential Secret exception, no backups, HA or scheduler.
+  Workload credentials/crypto/TLS private material remain Vault-managed. Use the
+  external-infrastructure guide for production, not the dev profile.
+- Existing published 0.4.3 images support the tested Agent path. New native-auth
+  flags require a newly built supporting app image; they are not attributed to
+  those published images. Native full-stack image readiness/supervisor recovery
+  remains distinct from the isolated login qualification.
+- Browser/WASM trust import, verified email, SMTP and complete OIDC/PKCE flows
+  were not end-to-end tested. Default Kind CNI does not prove NetworkPolicy
+  enforcement. Production DB/Vault HA/failover, load/SIGTERM drain, CA-root
+  rollover, natural JWT/token max-TTL expiry, and exact Agent auth-token revocation
+  remain separate qualifications. Actual DB-pool lease revocation was tested.
+- External reviewer qualification used isolated dev HTTP Vault, not production
+  TLS or elapsed timer expiry. Scheduler qualification changed manager SQL
+  passwords directly, not a combined Vault rotate-root production scenario.
+- No live keyless GitHub signing/provenance/registry promotion, remote dispatch,
+  push, PR, release, publication or production deployment was authorized or run.
+- Agent API proxy is deprecated upstream: the pinned tested Agent version is
+  1.20.4; no arbitrary future-version compatibility is claimed.
+- Old unreleased owner-as-manager dev setups require explicit reset or reviewed
+  restore/migration. Bootstrap does not silently rewrite owner credentials.
+
+The reusable parent `.omp/AGENTS.md` was updated. Future sessions retain default
+application read-only access; this task's explicit app authorization is not a
+permanent relaxation. Completed owned agent panes and isolated test resources
+are removed after evidence collection; unrelated panes/checkouts are preserved.

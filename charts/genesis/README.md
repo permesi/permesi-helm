@@ -56,6 +56,54 @@ both forms are accepted:
 
 For the Vault Agent proxy, use the Unix socket path (the default).
 
+`vault.authMethod` defaults to `auto` (socket→Agent, TCP→AppRole).
+Explicit `approle` requires TCP. Native `kubernetes` requires a newly built,
+**unreleased application image**; default `0.4.3` does not implement its flags.
+Managed Agent requires `auto` and remains recommended when PKI rendering is needed.
+
+## Native Kubernetes Vault login
+
+| Key | Default | Native-mode contract |
+|---|---|---|
+| `vault.authMethod` | `auto` | `auto`, `approle`, `kubernetes` |
+| `vault.kubernetes.authMount` | `kubernetes` | relative mount, nested paths allowed; no `auth/` or `/v1/auth/` prefix |
+| `vault.kubernetes.role` | `""` | required service-specific Vault Kubernetes role |
+| `vault.kubernetes.tokenPath` | `/var/run/secrets/vault-native/token` | normalized absolute file path in a dedicated non-root directory |
+| `vault.kubernetes.audience` | `vault` | nonblank; must match the Vault role |
+| `vault.kubernetes.tokenExpirationSeconds` | `3600` | requested JWT lifetime, integer `600..86400` |
+
+After choosing a native-capable image:
+
+```yaml
+vault:
+  url: https://vault.example.com:8200
+  authMethod: kubernetes
+  agent:
+    enabled: false
+  kubernetes:
+    role: genesis
+serviceAccount:
+  automount: false
+tls:
+  existingSecret: genesis-tls
+```
+
+Native mode requires a Vault HTTP(S) origin without credentials, application
+path, query or fragment (trailing `/` allowed). It emits
+`GENESIS_VAULT_AUTH_METHOD` and `GENESIS_VAULT_KUBERNETES_{AUTH_MOUNT,ROLE,TOKEN_PATH}`.
+The application alone gets the read-only `0400` audience-scoped projected JWT.
+No Agent/TokenReview RBAC is added; only Vault's reviewer needs TokenReview.
+Native auth does not provision TLS/CA files: Secret/ESO and external CSI mounts
+remain supported.
+
+AppRole IDs, wrapped tokens, Vault ESO credential sources and conflicting
+authentication `extraEnv` entries are rejected. Generic `extraEnvFrom` remains
+supported but opaque to Helm; remove legacy AppRole credential variables from
+imported Secrets/ConfigMaps. The application fails closed on native conflicts.
+Reauthentication is restart-based: renewal failure drains/stops the process,
+then the supervisor restart reads the current JWT and obtains a new token/DB
+credentials. No hot token swap or fallback to AppRole is implemented.
+
 ## Admission metadata
 
 Genesis signs admission tokens for Permesi. Set via `extraEnv` when you need to
@@ -76,9 +124,8 @@ cover the Service DNS name Permesi uses for that endpoint.
 
 A shared one-use SecretID or response-wrapping token is bootstrap-only, not
 HA-safe: it can be consumed once, so replicas or later restarts fail. For
-multi-replica deployments use an externally managed Vault Agent auto-auth proxy
-with a shared, ready socket (the default `vault.url`), or provision role IDs /
-SecretIDs with sufficient uses and TTL. `vault.secretId` and
+multi-replica deployments prefer the managed Vault Agent with per-pod auto-auth,
+or provision AppRole credentials with sufficient uses and TTL. `vault.secretId` and
 `vault.wrappedToken` are mutually exclusive.
 
 ## Vault Agent (managed sidecar, opt-in)
@@ -93,7 +140,7 @@ as destinations.
 |---|---|---|
 | `vault.agent.enabled` | `false` | opt-in native sidecar |
 | `vault.agent.address` | `""` | required HTTP(S) Vault origin when enabled |
-| `vault.agent.image.{repository,tag,pullPolicy}` | `hashicorp/vault`, `1.20.4`, `IfNotPresent` | pinned tested patch |
+| `vault.agent.image.{repository,tag,digest,pullPolicy}` | `hashicorp/vault`, `1.20.4`, `""`, `IfNotPresent` | digest wins over tag |
 | `vault.agent.auth.{mount,role,audience,tokenExpirationSeconds}` | `kubernetes`, required role, `vault`, `3600` | projected token audience must match the Vault role |
 | `vault.agent.ca.{existingConfigMap,key}` | `""` / `ca.crt` | public Vault CA; optional for public-root Vault |
 | `vault.agent.pki.{mount,role,commonName,dnsNames,ttl}` | `pki-int`, required role, required CN/SAN, `[]`, `24h` | service-specific PKI role |
@@ -126,7 +173,8 @@ may be reused on Agent restart.
 
 Set `image.digest` (`sha256:<64 hex>`) to pin by digest: the chart renders
 `repository@digest` and a tag change does not override it. Clear the digest to
-return to `repository:tag`. <!-- UNVERIFIED: digest helper is M-DIG work. -->
+return to `repository:tag`. The same precedence applies independently to
+`vault.agent.image.digest`; app release bumps do not change the Agent pin.
 
 ## Graceful termination
 
@@ -162,8 +210,9 @@ The chart enforces these invariants at render time:
 
 - `service.enabled` must be `false` when `config.socketPath` is set.
 - `vault.secretId` and `vault.wrappedToken` are mutually exclusive.
-- When `vault.url` is HTTP(S), `vault.roleId` and one of `vault.secretId` or
-  `vault.wrappedToken` must be configured.
+- In TCP `auto`/`approle` mode, `vault.roleId` and one of `vault.secretId` or
+  `vault.wrappedToken` must be configured. Native mode uses its Kubernetes role
+  instead and rejects those AppRole credentials.
 - `autoscaling.minReplicas` must not exceed `autoscaling.maxReplicas`.
 - `externalSecret.store` must be set when any `externalSecret.remoteKey` is set.
 - When vault ESO is active, `vault.roleId.existingSecret` and

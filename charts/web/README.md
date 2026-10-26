@@ -81,7 +81,8 @@ When using an external ConfigMap:
 
 Set `image.digest` (`sha256:<64 hex>`) to pin by digest: the chart renders
 `repository@digest` and a tag change does not override it. Clear the digest to
-return to `repository:tag`. <!-- UNVERIFIED: digest helper is M-DIG work. -->
+return to `repository:tag`. Digests must match `sha256:[0-9a-f]{64}`; a digest
+does not by itself establish signature or provenance verification.
 
 ## Example
 

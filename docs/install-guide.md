@@ -11,10 +11,130 @@ Two paths are documented here:
 - **Disposable quickstart** — `scripts/quickstart/install.sh`, one command,
   cluster-local PostgreSQL + dev-mode Vault. Development only.
 
-This guide follows the design contract in
-`docs/engineering/k8s-adoption-plan.md` §10. Placeholder hostnames use the same
-release/namespace (`permesi`/`permesi`) and public DNS as
-`docs/examples/production-stack.yaml`; substitute your own.
+Production steps below are source-derived operator instructions, not a claim
+that this guide was run against production Vault/PostgreSQL or an HTTPS edge.
+Use the application SQL revision tested with your selected images; the disposable
+lock currently pairs app `0.4.3` with commit
+`04783bc009cdef4e8ba71910c12ecbd25aa74dfd`. Do not substitute branch HEAD.
+The production examples use release/namespace `permesi`/`permesi`; replace their
+hostnames, networks, client ID and trust anchors for your environment.
+
+## Disposable quickstart
+
+Requires Bash, Helm, kubectl, Python 3, an explicit reachable kube context and a
+Linux/amd64 node. Installation into an existing cluster needs no local Kind or
+container runtime. Cluster-admin permissions are needed for the helper's narrowly
+scoped reviewer RBAC; only Vault's SA receives TokenReview. New namespaces enforce
+Restricted PSA. Managed Agent requires Kubernetes ≥1.29 with SidecarContainers.
+
+```bash
+bash scripts/quickstart/install.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi --acknowledge-development
+```
+
+The default fetches the immutable SQL archive/checksum from
+`scripts/quickstart/lock.json`; image pins are also in that file. PostgreSQL 18.6
+and HTTP dev Vault 1.20.4 are internal ClusterIP workloads. Bootstrap runs schema
+acquisition → authenticated owner SQL → Vault configuration before application
+startup succeeds. Two replicas of each backend use Agent, real TLS and exact
+SA-bound Kubernetes roles. No Terraform is needed.
+
+Options:
+- `--app-source /path/to/permesi` packages the complete `db/sql` include tree from
+  a clean matching Git checkout. `--allow-dirty` explicitly accepts dirty/non-Git
+  sources; that is not evidence of image/schema compatibility.
+- `--kind permesi-dev` replaces `--context` to use/create a named Kind cluster;
+  Kind/runtime are required only for that option. Never deletes an existing
+  cluster. Existing-cluster mode is the tested path.
+- `--deps-only` bootstraps only PostgreSQL/Vault; `--charts-dir` selects component
+  charts; repeatable `--quickstart-values` supplies helper overrides.
+- `--timeout 900` is the per-stage default. `--pki-ttl 2m` is intended for the
+  verifier's bounded leaf-rotation exercise (default `24h`).
+- `--cleanup` removes only a namespace/cluster created by that invocation on exit
+  (success or failure); it refuses pre-existing namespaces. Without it, failed
+  installs remain for diagnosis.
+
+For **dependency-only** Helm bootstrap (not a full-stack substitute):
+
+```bash
+helm upgrade --install permesi-quickstart scripts/quickstart/chart \
+  --namespace permesi-quickstart --create-namespace \
+  --set acknowledgeDevelopment=true --wait --wait-for-jobs --timeout 900s
+```
+
+It fetches the locked SQL archive, or accepts
+`bootstrap.schema.existingConfigMaps` with `sourceUrl: ""` for the full SQL
+include tree. `bootstrap.services.*.serviceName` and
+`bootstrap.kubernetesRoles.*.serviceAccount` must match any later applications.
+Script install supplies its own complete wiring. For a complete Helm-only stack,
+use the [umbrella profile](../charts/permesi-stack/README.md#quickstart-mode),
+not the dependency-only command above.
+
+### Verify and connect
+
+The full verifier needs curl and Cargo (or an executable `QS_ADMISSION_BIN` built
+from `scripts/quickstart/admission`). Containerized Alpine tooling requires a
+compatible static/musl binary. Run commands in the same tool environment/context
+that can reach the cluster:
+
+```bash
+bash scripts/quickstart/verify.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi
+
+bash scripts/quickstart/connect.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi --ca-out quickstart-ca.pem
+```
+
+`connect.sh` stays in the foreground and stops its own forwards on Ctrl-C:
+- web `http://localhost:8080`;
+- API `https://api.localhost:8443`;
+- Genesis `https://genesis.localhost:9443`.
+
+Resolve `api.localhost` and `genesis.localhost` to `127.0.0.1`. Import only the
+exported **public** root CA into a disposable browser profile; the script neither
+modifies trust nor disables verification. For curl:
+
+```bash
+curl --cacert quickstart-ca.pem --resolve genesis.localhost:9443:127.0.0.1 \
+  https://genesis.localhost:9443/paserk.json
+```
+
+The quickstart uses test client `00000000-0000-0000-0000-000000000000`,
+OPAQUE server ID `api.localhost`, allowed dev domain `example.test`, and outbox
+email (no SMTP delivery). `verify.sh --exercise-lifecycle` mutates only this dev
+installation: independent wrong-claim negatives, leaf rotation, Agent restart,
+backend replacement and scaling. Use a short PKI TTL at install for that run.
+
+The reported M-QS local driver exercised two Ready backend replicas, trusted HTTPS
+and wrong-CA/hostname rejection, real OPAQUE signup start **200**/finish **201**,
+pending user/outbox, cross-service denials, same-pod leaf reload, Agent restart,
+scaling, and reinstall identity/data preservation. This is native test-client
+OPAQUE, **not native Vault auth** and not browser/WASM signup. GitHub execution,
+verified-email login/OIDC/SMTP E2E, expiry-driven JWT rotation, revoked live DB
+pool recovery, CA rotation, production TLS, HA/backups, NetworkPolicy enforcement
+and pg_cron are not implied.
+
+The independent R-QS review also found dev root/unseal material in Vault startup
+logs, a manager-password-rotation/rerun mismatch, `.pgpass` escaping defects and
+verifier isolation/assertion limits. Treat dev logs as credentials and consult
+the [current qualifications](operations.md#11-quickstart-qualification-and-known-boundaries);
+normal-path success does not establish that those adversarial cases are fixed.
+
+### Bootstrap secret exception and reset
+
+Random PostgreSQL administrator/owner passwords and the dev Vault root credential
+must exist before Vault can bootstrap. The helper creates a narrowly mounted
+**bootstrap-only Kubernetes Secret**, retained after uninstall for safe reruns;
+these inputs never reach application pods. Alternatively
+`bootstrap.credentialsSecret` names a precreated Secret with keys
+`postgres-admin-password`, `vault-root-token`, `vault-permesi-password`,
+`vault-genesis-password`. Private application TLS keys remain in memory volumes,
+never synchronized to Kubernetes Secrets.
+
+Both dependencies are ephemeral. Losing dev Vault while retaining **any**
+application database (even empty) deliberately fails bootstrap; generating a new
+OPAQUE seed cannot restore identity. Use an explicit full dev reset or a matching
+restore, not an in-place Vault-image replacement.
 
 ---
 
@@ -50,8 +170,9 @@ only place shell probes, certificate rendering, and preparation happen.
 - **Application ServiceAccounts need no RBAC.** They need no Secret read/list and
   no TokenReview permission; Vault authenticates the pod via the projected
   service-account token, and the Agent holds the resulting Vault token. In Agent
-  mode the chart sets `serviceAccount.automount=false` and mounts a projected,
-  audience-scoped token **only into the Agent container**.
+  mode set `serviceAccount.automount=false` (validated by the chart); an explicit
+  audience-scoped token is mounted **only into the Agent container**. Optional
+  native mode mounts its separate projection only into the application.
 - **In-cluster Vault** needs `TokenReview` for its *own* ServiceAccount only — a
   narrowly scoped ClusterRole, or the upstream `system:auth-delegator` cluster role
   bound to Vault's SA alone. Do not grant TokenReview to backend or bootstrap
@@ -68,9 +189,9 @@ only place shell probes, certificate rendering, and preparation happen.
 
 ## 2. PostgreSQL: databases, owners, runtime grants
 
-Both services require externally provisioned databases. There is no bundled
-database, no PVC, and **no application migrations**: schemas are applied by an
-operator as the schema owner before the pods start.
+In the **production path**, both services require externally provisioned
+databases; the application charts provision no production database/PVC.
+There are **no application migrations**: apply schemas before the pods start.
 
 ### Version compatibility
 
@@ -97,13 +218,20 @@ Create the two Vault manager roles with strong, unique passwords **before** runn
 the canonical bootstrap, so `00_init.sql` does not fall back to its development
 `change-me` password:
 
+Use a TLS-authenticated administrator connection and interactive `\password`
+(or a protected operator credential workflow), not real password literals in
+shell history:
+
 ```bash
-psql -h db.example.com -U postgres -d postgres \
-  -c "CREATE ROLE vault_permesi WITH LOGIN PASSWORD '<strong-password>' CREATEROLE;"
-psql -h db.example.com -U postgres -d postgres \
-  -c "CREATE ROLE vault_genesis WITH LOGIN PASSWORD '<strong-password>' CREATEROLE;"
-psql -h db.example.com -U postgres -d postgres \
-  -c "GRANT pg_signal_backend TO vault_permesi, vault_genesis;"
+export PGSSLMODE=verify-full
+export PGSSLROOTCERT=/path/to/postgresql-ca.crt
+psql -X -v ON_ERROR_STOP=1 -h db.example.com -U postgres -d postgres <<'SQL'
+CREATE ROLE vault_permesi WITH LOGIN CREATEROLE;
+\password vault_permesi
+CREATE ROLE vault_genesis WITH LOGIN CREATEROLE;
+\password vault_genesis
+GRANT pg_signal_backend TO vault_permesi, vault_genesis;
+SQL
 ```
 
 ### 2.2 Apply the canonical include tree
@@ -117,20 +245,23 @@ administrator or substitute `SET ROLE` — the script switches to fresh
 owner-authenticated connections.
 
 ```bash
-export PGPASSWORD='<admin-password>'
-# .pgpass must also carry the vault_permesi / vault_genesis credentials so the
-# script's `\connect <db> <owner>` steps can authenticate over TCP.
-psql -h db.example.com -U postgres -d postgres \
-  -v ON_ERROR_STOP=1 -f db/sql/00_init.sql
+export PGPASSFILE=/secure/operator/permesi.pgpass
 unset PGPASSWORD
+psql -X -h db.example.com -U postgres -d postgres \
+  -v ON_ERROR_STOP=1 -f db/sql/00_init.sql
 ```
 
-A minimal `.pgpass` (mode `0600`) for the owner-authenticated connections:
+A minimal `PGPASSFILE` (mode `0600`) includes administrator **and** owner entries;
+do not set a single `PGPASSWORD` that would override them on `\connect`:
 
 ```
+db.example.com:5432:*:postgres:<administrator-password>
 db.example.com:5432:*:vault_permesi:<strong-password>
 db.example.com:5432:*:vault_genesis:<strong-password>
 ```
+
+In each `.pgpass` password field, escape literal `:` as `\:` and `\` as `\\`;
+protect the file outside the repository and do not log its contents.
 
 ### 2.3 Production scheduler (pg_cron) and verification
 
@@ -184,13 +315,13 @@ Keep TLS verification enabled. The PKI issuing/CRL URLs must be routable
 vault auth enable kubernetes
 ```
 
-**In-cluster Vault** — point Vault at the cluster and let it re-read its own
-service-account token (do not persist an expiring `kubectl create token` result):
+**In-cluster Vault** — with Vault's normal API-audience SA token/CA mounted,
+configure the API host but **omit** a static reviewer JWT and CA value. Vault
+re-reads its local reviewer token as it rotates:
 
 ```bash
 vault write auth/kubernetes/config \
-  kubernetes_host="https://kubernetes.default.svc:443" \
-  token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+  kubernetes_host="https://kubernetes.default.svc:443"
 ```
 
 Grant TokenReview to **Vault's SA only**:
@@ -201,8 +332,9 @@ kubectl create clusterrolebinding vault-auth-delegator \
   --serviceaccount=vault:vault
 ```
 
-**External Vault** — write a renewable long-lived reviewer token and rotate it on
-a documented schedule; configure `kubernetes_host` to a reachable API/CA endpoint.
+**External Vault** — arrange API connectivity and trusted Kubernetes CA plus an
+operator-managed reviewer-token renewal/rotation strategy. Do not permanently
+configure an expiring `kubectl create token` result or grant app SAs TokenReview.
 
 ### 3.2 Kubernetes auth roles (SA-bound, exact namespace/audience)
 
@@ -230,23 +362,26 @@ vault write auth/kubernetes/role/genesis \
 
 > The ServiceAccount names are release-dependent: a release named `permesi`
 > renders `permesi` (permesi chart) and `permesi-genesis` (genesis chart). Adjust
-> to your `fullnameOverride`/`nameOverride`. These are renewable service tokens
-> (TTL 1h / max TTL 4h), so Agent restart and JWT rotation are covered.
+> to your `fullnameOverride`/`nameOverride`. Request renewable **service** tokens
+> (TTL 1h / max TTL 4h), not nonrenewable batch tokens.
 
 ### 3.3 KV v2 seed/pepper (cryptographic identity)
 
-Mount KV v2 and write the 32-byte standard-base64 seed/pepper **only if absent**.
-If the config is partially populated, stop rather than silently replace
-cryptographic identity — a fresh seed makes existing users unrecoverable:
+These are **first-install** commands, not an automatic repair/rerun script.
+Verify an existing mount's type before reuse. If config already exists, preserve
+both fields; partial population requires diagnosis/restore, never regeneration.
+If any application database was retained after Vault loss, stop and restore the
+matching Vault identity. Only for a genuinely new deployment:
 
 ```bash
 vault secrets enable -path=secret/permesi -version=2 kv
-
-vault kv get secret/permesi/config >/dev/null 2>&1 || \
-vault kv put secret/permesi/config \
-  opaque_server_seed="$(openssl rand 32 | base64 -w0)" \
-  mfa_recovery_pepper="$(openssl rand 32 | base64 -w0)"
+python3 -c 'import os,base64,json; print(json.dumps({k:base64.b64encode(os.urandom(32)).decode() for k in ("opaque_server_seed","mfa_recovery_pepper")}))' \
+  | vault kv put -mount=secret/permesi -cas=0 config -
 ```
+
+Each field is standard-base64 encoding of 32 random bytes. CAS `0` refuses to
+overwrite an existing key; any failure must stop the procedure. Do not log the
+JSON input, use shell tracing, or replace this with an error-to-overwrite fallback.
 
 ### 3.4 Transit mounts and keys
 
@@ -292,6 +427,12 @@ Repeat for `genesis` with `database/config/genesis`, `database/roles/genesis`, t
 `genesis` database name, and `GRANT genesis_runtime`. Each connection's
 `allowed_roles` is restricted to itself.
 
+Configure connections only on initial provisioning: reruns must not overwrite a
+manager password that Vault has rotated. Manager/root rotation and its scheduling
+are operator-owned; do not assume Terraform Enterprise scheduling is available
+in community Vault. Use protected operator input rather than real credentials
+in command history, values files or Helm release data.
+
 > The application always replaces DSN username/password with Vault-issued
 > credentials from `/v1/database/creds/{permesi,genesis}`; the DSN Secret carries
 > a placeholder username/password — only host/port/database and TLS options matter.
@@ -302,7 +443,7 @@ Repeat for `genesis` with `database/config/genesis`, `database/roles/genesis`, t
 vault secrets enable -path=pki-root -max-lease-ttl=315360000 pki
 vault secrets enable -path=pki-int  -max-lease-ttl=94608000  pki
 
-# Root CA (offline issuer)
+# Root CA generation (this command does not make the root offline)
 vault write -field=certificate pki-root/root/generate/internal \
   common_name="Permesi Root CA" ttl=87600h key_type=ec key_bits=256 \
   issuer_name=permesi-root > pki-root.crt
@@ -323,6 +464,10 @@ vault write pki-int/config/urls \
   issuing_certificates="https://vault.example.com/v1/pki-int/ca" \
   crl_distribution_points="https://vault.example.com/v1/pki-int/crl"
 ```
+
+The commands above keep the root in the addressed Vault. For a genuinely offline
+production root, sign the intermediate CSR in the separately operated offline
+root system and import its full signed chain into the online `pki-int` mount.
 
 Import the complete signed issuer chain at `intermediate/set-signed`, including
 each parent intermediate. The Agent writes the ordered, deduplicated
@@ -416,8 +561,8 @@ backward compatibility — but note the **URL difference**:
 
 - **Permesi 0.4.3** POSTs the role/secret ID to `vault.url` verbatim, so it must be
   the full login endpoint `https://vault.example.com:8200/v1/auth/approle/login`.
-- **Permesi ≥ next release** (app branch `feat/k8s-hardening`, unreleased) accepts a
-  Vault base URL (`https://vault.example.com:8200`) and normalizes it.
+- **Unreleased Permesi build** (app branch `feat/k8s-hardening`) accepts a Vault
+  base URL (`https://vault.example.com:8200`) and normalizes it.
 - Genesis already accepts either form.
 
 ```bash
@@ -433,6 +578,56 @@ vault write auth/approle/role/genesis \
 AppRole SecretIDs are single-use with a 1-hour TTL by default: use Agent mode for
 multi-replica, restart-safe deployments, or provision SecretIDs with sufficient
 uses/TTL and a rotation procedure.
+
+### 3.10 Optional native Kubernetes authentication
+
+Both services now implement `auto`, `approle`, and `kubernetes` modes in the
+**unreleased application build** on `feat/k8s-hardening`. Select a rebuilt,
+native-capable image before opting in: default image `0.4.3` lacks these flags.
+Native auth is not the Agent proxy and does not render PKI/TLS/PASERK files.
+
+`vault.authMethod: auto` preserves socket→Agent and TCP→AppRole without adding
+native env/JWT mounts. `approle` explicitly requires TCP. Native mode requires a
+Vault HTTP(S) origin (optional trailing `/`, no credentials/path/query/fragment),
+no managed Agent, no AppRole/wrapped/ESO Vault credentials, and automount false.
+
+```yaml
+vault:
+  url: https://vault.example.com:8200
+  authMethod: kubernetes
+  agent:
+    enabled: false
+  kubernetes:
+    authMount: kubernetes
+    role: permesi              # genesis for the other component
+    tokenPath: /var/run/secrets/vault-native/token
+    audience: vault
+    tokenExpirationSeconds: 3600
+serviceAccount:
+  automount: false
+tls:
+  existingSecret: permesi-tls  # or an operator-managed CSI/file mount
+```
+
+The role binds the exact application SA/namespace and audience as in §3.2.
+`authMount` is relative (nested mounts supported), `role`/`audience` nonblank,
+`tokenPath` normalized inside a dedicated non-root directory, and requested
+expiration is `600..86400` seconds. The app alone gets a read-only `0400` JWT
+projection; Kubernetes controls the actual issued lifetime.
+
+The chart emits `<PREFIX>_VAULT_AUTH_METHOD` and
+`<PREFIX>_VAULT_KUBERNETES_{AUTH_MOUNT,ROLE,TOKEN_PATH}` (`PERMESI` or `GENESIS`).
+Known conflicting `extraEnv` entries are rejected. Generic `extraEnvFrom` remains
+supported but opaque: remove legacy AppRole credential variables from imported
+Secrets/ConfigMaps before native mode; the application fails closed on conflicts.
+No TokenReview permission belongs on the application SA.
+
+Authentication reads the JWT and POSTs `{role,jwt}` to
+`/v1/auth/<authMount>/login`; the token must be renewable. Reauthentication is
+**restart-based**: renewal failure drains/stops the process; its supervisor
+restarts, reads the current JWT and reacquires token/DB credentials. No hot token
+swap or fallback is implemented. Mount native Vault transport CA trust in the
+application image/trust bundle; `vault.agent.ca` applies only to Agent.
 
 ---
 
@@ -527,9 +722,11 @@ during an independent sidecar restart.
   disables TLS only on the local socket.
 - **PostgreSQL**: DSN uses `sslmode=verify-full` plus a CA mounted via
   `extraVolumes`/`extraVolumeMounts`.
-- **Private keys never synchronized to Kubernetes Secrets**: the backend gets no
-  TLS Secret, no AppRole/DB Secret, and no Vault root token. Public trust anchors
-  (Vault CA, PKI CA) may be ConfigMaps.
+- **Private keys never synchronized to Kubernetes Secrets**: backend TLS bundles
+  and the PASERK CA come from Agent; no AppRole, issued DB credential or Vault
+  root token is supplied to the app. The example still references an optional
+  DSN Secret containing placeholder/connection settings, not dynamic credentials.
+  Public Vault/PKI/DB trust anchors may be ConfigMaps.
 
 ---
 
@@ -583,7 +780,7 @@ web:
 ```bash
 helm dependency build charts/permesi-stack
 helm upgrade --install permesi charts/permesi-stack \
-  --namespace permesi --create-namespace \
+  --namespace permesi --create-namespace --wait --timeout 900s \
   -f docs/examples/vault-agent-stack.yaml
 ```
 
@@ -591,13 +788,15 @@ helm upgrade --install permesi charts/permesi-stack \
 
 ```bash
 export CA=/path/to/your-public-pki-ca.crt
+LB_IP='<your-load-balancer-ip>'
 
-curl --cacert "$CA" --resolve api.permesi.example.com:443:<lb-ip> \
+curl --cacert "$CA" --resolve "api.permesi.example.com:443:${LB_IP}" \
   https://api.permesi.example.com/live
-curl --cacert "$CA" --resolve genesis.permesi.example.com:443:<lb-ip> \
+curl --cacert "$CA" --resolve "genesis.permesi.example.com:443:${LB_IP}" \
   https://genesis.permesi.example.com/paserk.json
-curl --cacert "$CA" --resolve genesis.permesi.example.com:443:<lb-ip> \
-  "https://genesis.permesi.example.com/token?client_id=00000000-0000-0000-0000-000000000000"
+CLIENT_ID='<your-provisioned-production-client-uuid>'
+curl --cacert "$CA" --resolve "genesis.permesi.example.com:443:${LB_IP}" \
+  "https://genesis.permesi.example.com/token?client_id=${CLIENT_ID}"
 ```
 
 A wrong CA or wrong hostname must fail; Kubernetes HTTPS probes do **not** verify
@@ -641,8 +840,8 @@ TLS.
 - The Agent re-reads rotated service-account JWTs. Its probe checks authenticated
   proxy access and required file presence, not new certificate issuance; a valid
   cached bundle can be reused. Verify socket recovery and backend requests after
-  an independent Agent restart. End-to-end restart/JWT-rotation evidence remains
-  pending M-QS.
+  an independent Agent restart. M-QS reports Agent-only restart recovery; natural
+  projected-JWT expiry/rotation remains a separate qualification.
 - A stopped Agent whose auth token and runtime certificates expire cannot re-issue
   until restarted with valid bootstrap credentials (in the managed chart, this is
   the projected JWT + Kubernetes auth — no cert-auth bootstrap).
@@ -670,13 +869,29 @@ the Agent does not repair an existing pool automatically. See
 
 ### 8.1 Image digest and signature verification
 
-Charts pin `image.repository:tag`; when `image.digest` is set (`sha256:<64 hex>`),
-the rendered image reference is `repository@digest` and a tag change does not
-override it. Clear the digest to return to tag references. App releases sign OCI
-images keyless (Cosign) and publish digests; verify against the expected GitHub
-OIDC issuer/workflow identity before promoting.
+Application and Agent image blocks accept `digest: ""` or
+`sha256:<64 lowercase hex>`. A nonempty digest renders `repository@digest` and
+overrides the tag. Replace or clear the digest when changing identity; app-release
+automation updates/clears managed app digests but leaves Agent pins unchanged.
+See [release procedures](operations.md#10-release-and-image-identity).
 
-<!-- UNVERIFIED: digest values/helper are M-DIG work; finalize after M-DIG handoff. -->
+Signing/provenance are independent of digest selection. The application workflow
+contains keyless signing/OCI-attestation steps, but local chart validation is not
+remote signing evidence and old `0.4.3` pins are not thereby claimed signed.
+For an authorized candidate, verify its actual digest with exact workflow
+identity and commit, never a permissive identity regex:
+
+```bash
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/permesi/permesi/.github/workflows/deploy.yml@refs/heads/${CANDIDATE_BRANCH}" \
+  --certificate-github-workflow-sha "${CANDIDATE_COMMIT}" \
+  "ghcr.io/permesi/${SERVICE}@${DIGEST}"
+```
+
+Obtain branch/commit/digest from trusted release metadata. Validate OCI provenance
+against the same subject digest and expected source/workflow using GitHub's
+attestation verifier. This guide did not execute remote Cosign/GitHub verification.
 
 ### 8.2 Restricted diagnostics
 
@@ -686,10 +901,21 @@ rollout state, not credentials. Use `kubectl describe`/`events` with redaction.
 
 ### 8.3 Scoped teardown
 
-Production teardown is operator-owned and out of scope for the charts. For the
-disposable quickstart, teardown removes only resources the quickstart created; see
-the script help (`scripts/quickstart/install.sh`). Never delete a cluster or
-namespace you did not create.
+For the script quickstart in a namespace you created exclusively for this install:
+
+```bash
+CTX=kind-permesi-helm-test
+NS=permesi-quickstart
+R=permesi
+helm --kube-context "$CTX" uninstall "$R-web" "$R" "$R-genesis" "$R-quickstart" -n "$NS"
+kubectl --context "$CTX" delete namespace "$NS"
+```
+
+Uninstall the helper **before** deleting the namespace so its cluster-scoped
+reviewer binding is removed. The retained bootstrap Secret is removed by namespace
+deletion. Stop `connect.sh` first. Inspect any failed uninstall before deleting;
+do not hide errors. Delete a Kind cluster only if you created it solely for this
+run; never delete shared namespaces/clusters or external production dependencies.
 
 ### 8.4 Dev state-loss warning
 

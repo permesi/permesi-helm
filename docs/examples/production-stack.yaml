@@ -1,4 +1,6 @@
 # Production umbrella values for release "permesi" in namespace "permesi".
+# Legacy Secret/AppRole/ESO-compatible alternative, not the recommended
+# all-in-Vault path. For Agent-rendered PKI use vault-agent-stack.yaml.
 #
 # Install:
 #   helm dependency build charts/permesi-stack
@@ -6,8 +8,8 @@
 #     -f docs/examples/production-stack.yaml
 #
 # Every secret value is supplied by reference (existingSecret / secretKeyRef),
-# never inlined. Operators must create these Secrets before rollout; the
-# expected keys are listed in docs/operations.md.
+# never inlined. Operators must create these Secrets before rollout; see the
+# component values for key names and docs/install-guide.md for prerequisites.
 #
 # DNS expectations (release "permesi", namespace "permesi"):
 #   - Genesis Service:   permesi-genesis.permesi.svc.cluster.local:8080

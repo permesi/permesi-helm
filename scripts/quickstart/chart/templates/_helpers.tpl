@@ -68,7 +68,9 @@ capabilities:
 
 {{/* Cluster-scoped TokenReview grant name (release + namespace scoped). */}}
 {{- define "quickstart.tokenReviewName" -}}
-{{- printf "%s-%s-tokenreview" (include "quickstart.fullname" .) .Release.Namespace | trunc 63 | trimSuffix "-" -}}
+{{- $identity := printf "%s/%s" .Release.Name .Release.Namespace -}}
+{{- $prefix := printf "%s-%s" (include "quickstart.fullname" .) .Release.Namespace | trunc 38 | trimSuffix "-" -}}
+{{- printf "%s-%s-tokenreview" $prefix ($identity | sha256sum | trunc 12) -}}
 {{- end -}}
 
 {{/* Component fullname convention shared by direct and umbrella installs.

@@ -131,6 +131,12 @@ ensure_mount database database
 db_config() {
   name="$1"; user="$2"; pw_file="$3"
   if vault read "database/config/${name}" >/dev/null 2>&1; then
+    vault read -format=json -field=connection_details "database/config/${name}" \
+      | grep -Eq '^[[:space:]]*"username": "'"${user}"'"[,]?[[:space:]]*$' \
+      || die "database/config/${name} must use ${user}; legacy owner-as-manager installs require restoring a manager-separated Vault configuration or an explicit disposable development namespace reset (no automatic password reset)"
+    allowed="$(vault read -format=json -field=allowed_roles "database/config/${name}" | tr -d '[:space:]')"
+    [ "$allowed" = "[\"${name}\"]" ] \
+      || die "database/config/${name} allowed_roles must be exactly ${name}; repair the Vault configuration before rerunning"
     log "database/config/${name} exists; leaving manager credentials untouched"
     return 0
   fi
@@ -141,7 +147,8 @@ db_config() {
     max_connection_lifetime=120s \
     username="${user}" password=@"${pw_file}" \
     root_rotation_statements="ALTER ROLE \"${user}\" WITH PASSWORD '{{password}}';" >/dev/null
-  log "configured database/config/${name}"
+  vault write -force "database/rotate-root/${name}" >/dev/null
+  log "configured database/config/${name} and rotated bootstrap manager password"
 }
 db_role() {
   name="$1"; runtime="$2"
@@ -155,8 +162,8 @@ db_role() {
     revocation_statements="DROP ROLE IF EXISTS \"{{name}}\";" \
     default_ttl=1h max_ttl=4h >/dev/null
 }
-db_config permesi vault_permesi /credentials/vault-permesi-password
-db_config genesis vault_genesis /credentials/vault-genesis-password
+db_config permesi vault_permesi_manager /credentials/vault-permesi-password
+db_config genesis vault_genesis_manager /credentials/vault-genesis-password
 db_role permesi permesi_runtime
 db_role genesis genesis_runtime
 

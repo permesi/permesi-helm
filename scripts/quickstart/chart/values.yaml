@@ -11,12 +11,23 @@ acknowledgeDevelopment: false
 nameOverride: ""
 fullnameOverride: ""
 
+rbac:
+  # false: a cluster administrator must pregrant tokenreviews.create to ONLY
+  # system:serviceaccount:<namespace>:<fullname>-vault (not application/bootstrap
+  # accounts). The installer skips cluster-RBAC creation preflight in this mode.
+  # Namespace-scoped credential Job RBAC is unaffected.
+  createTokenReviewBinding: true
+
 bootstrap:
   # Operator-provisioned credentials Secret. When empty, the credentials Job
   # creates "<fullname>-bootstrap-credentials" once and never regenerates it.
   # Required keys: postgres-admin-password, vault-root-token,
   # vault-permesi-password, vault-genesis-password.
   credentialsSecret: ""
+  # Owner passwords remain stable for canonical schema bootstrap. Separate
+  # vault_{permesi,genesis}_manager logins initially share these passwords, then
+  # Vault immediately rotates them; manager credentials live only inside Vault.
+  # Existing-Secret passwords may include ':' and '\', but not CR/LF.
 
   # Canonical permesi db/sql include tree. Set exactly one source.
   schema:

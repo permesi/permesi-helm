@@ -1,5 +1,6 @@
 {{- $fullname := include "quickstart.fullname" . -}}
 {{- $tokenReview := include "quickstart.tokenReviewName" . -}}
+{{- if .Values.rbac.createTokenReviewBinding }}
 # TokenReview authority for the dev Vault ServiceAccount ONLY (Kubernetes auth
 # reviewer). Cluster-scoped: requires a cluster administrator.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -27,8 +28,9 @@ subjects:
   - kind: ServiceAccount
     name: {{ $fullname }}-vault
     namespace: {{ .Release.Namespace }}
-{{- if not .Values.bootstrap.credentialsSecret }}
 ---
+{{- end }}
+{{- if not .Values.bootstrap.credentialsSecret }}
 # The credentials Job creates the bootstrap Secret once. RBAC cannot restrict
 # `create` by resourceNames, so the grant is namespace-scoped `create` only
 # (no get/list/update): the Job can never read or overwrite a Secret.

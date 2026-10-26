@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import socket
 import ssl
 import subprocess
@@ -36,11 +37,59 @@ def fullname(release, chart):
     return release if chart in release else f"{release}-{chart}"
 
 
+class PortForward:
+    """A loopback listener owned by one kubectl child, never a probed old port."""
+
+    def __init__(self, kubectl, target, remote_port=8080, timeout=20):
+        self.process = subprocess.Popen(
+            kubectl + ['port-forward', '--address', '127.0.0.1', target, f':{remote_port}'],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+        self.port = None
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(self.process.stdout, selectors.EVENT_READ)
+                pending = b''
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    self.check()
+                    for key, _ in selector.select(min(.2, max(0, deadline - time.monotonic()))):
+                        data = os.read(key.fd, 4096)
+                        if not data:
+                            raise RuntimeError('port-forward closed stdout before becoming ready')
+                        pending += data
+                        while b'\n' in pending:
+                            line, pending = pending.split(b'\n', 1)
+                            match = re.fullmatch(rb'Forwarding from 127\.0\.0\.1:(\d+) -> \d+\r?', line)
+                            if match:
+                                self.check()
+                                self.port = int(match.group(1))
+                                return
+                raise RuntimeError('port-forward never announced its own loopback listener')
+        except BaseException:
+            self.close()
+            raise
+
+    def check(self):
+        if self.process.poll() is not None:
+            raise RuntimeError('owned port-forward exited')
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        self.process.stdout.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--context', required=True)
     parser.add_argument('--namespace', required=True)
     parser.add_argument('--release', default='permesi')
+    parser.add_argument('--helper-fullname', help='Dependency object prefix; defaults to <release>-quickstart')
     parser.add_argument('--exercise-lifecycle', action='store_true')
     parser.add_argument('--rotation-timeout', type=int, default=240)
     a = parser.parse_args()
@@ -69,7 +118,7 @@ def main():
     ns = kj('get', 'namespace', a.namespace)
     require(ns['metadata'].get('labels', {}).get('pod-security.kubernetes.io/enforce') == 'restricted',
             f'{a.namespace}: Restricted PSA enforced')
-    qs = a.release + '-quickstart'
+    qs = a.helper_fullname or a.release + '-quickstart'
     names = {'permesi': fullname(a.release, 'permesi'),
              'genesis': fullname(a.release + '-genesis', 'genesis')}
     web = fullname(a.release + '-web', 'web')
@@ -138,32 +187,30 @@ def main():
         wrong_ca = tmp / 'wrong-ca.pem'
         wrong_ca.write_text(kj('get', 'configmap', 'kube-root-ca.crt')['data']['ca.crt'])
         tls = ssl.create_default_context(cafile=str(ca))
-        def forward(target, port):
-            proc = subprocess.Popen(k + ['port-forward', '--address', '127.0.0.1', target, f'{port}:8080'],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            forwards.append(proc)
-            deadline = time.monotonic() + 20
-            while time.monotonic() < deadline:
-                if proc.poll() is not None:
-                    raise RuntimeError('port-forward exited before becoming ready')
-                try:
-                    with socket.create_connection(('127.0.0.1', port), timeout=1):
-                        return proc
-                except OSError:
-                    time.sleep(.2)
-            raise RuntimeError('port-forward never became ready')
-        ports = {'permesi': 18443, 'genesis': 19443}
+        def forward(target):
+            owned = PortForward(k, target)
+            forwards.append(owned)
+            return owned
+        ports = {}
+        backend_forwards = {}
+        def check_forward(svc):
+            backend_forwards[svc].check()
         def cert(svc, context=tls, hostname=None):
+            check_forward(svc)
             with socket.create_connection(('127.0.0.1', ports[svc]), timeout=5) as sock:
                 with context.wrap_socket(sock, server_hostname=hostname or ('api.localhost' if svc == 'permesi' else 'genesis.localhost')) as conn:
                     return conn.getpeercert()
         def https(svc, path):
+            check_forward(svc)
             host = 'api.localhost' if svc == 'permesi' else 'genesis.localhost'
             port = ports[svc]
             return run(['curl', '--noproxy', '*', '--silent', '--show-error', '--fail', '--max-time', '20',
                         '--cacert', str(ca), '--resolve', f'{host}:{port}:127.0.0.1', f'https://{host}:{port}{path}'])
-        def admission(expect_rejected=False, genesis_port=19443):
-            env = dict(os.environ, QS_API_PORT='18443', QS_GENESIS_PORT=str(genesis_port))
+        def admission(expect_rejected=False, genesis_port=None):
+            for svc in names:
+                check_forward(svc)
+            env = dict(os.environ, QS_API_PORT=str(ports['permesi']),
+                       QS_GENESIS_PORT=str(genesis_port if genesis_port is not None else ports['genesis']))
             cmd = [binary, str(ca)] + (['--expect-rejected'] if expect_rejected else [])
             output = run(cmd, env=env)
             print(output, flush=True)
@@ -181,7 +228,8 @@ def main():
             return p['metadata']['uid'], [(s['name'], s['restartCount']) for s in statuses]
         try:
             for svc, p in selected.items():
-                forward('pod/' + p['metadata']['name'], ports[svc])
+                backend_forwards[svc] = forward('pod/' + p['metadata']['name'])
+                ports[svc] = backend_forwards[svc].port
                 for path in ['/live', '/ready'] + (['/paserk.json'] if svc == 'genesis' else []):
                     https(svc, path)
                     require(True, f'{svc} HTTPS {path}: trusted root and correct hostname')
@@ -193,8 +241,9 @@ def main():
                         require(True, f'{svc}: {label} rejected by TLS validation')
                     else:
                         raise RuntimeError(f'{svc}: {label} unexpectedly accepted')
-            forward('svc/' + web, 18080)
-            config = run(['curl', '--noproxy', '*', '-fsS', 'http://127.0.0.1:18080/config.js'])
+            web_forward = forward('svc/' + web)
+            web_forward.check()
+            config = run(['curl', '--noproxy', '*', '-fsS', f'http://127.0.0.1:{web_forward.port}/config.js'])
             config = json.loads(config.split('=', 1)[1].strip().rstrip(';'))
             require(config == dict(api_base_url='https://api.localhost:8443', token_base_url='https://genesis.localhost:9443',
                                    client_id='00000000-0000-0000-0000-000000000000', opaque_server_id='api.localhost'),
@@ -219,15 +268,14 @@ def main():
                     claim_forward = None
                     try:
                         run(k + ['wait', '--for=condition=Ready', 'pod/' + test_pod, '--timeout=180s'])
-                        claim_forward = forward('pod/' + test_pod, 19444)
-                        admission(expect_rejected=True, genesis_port=19444)
+                        claim_forward = forward('pod/' + test_pod)
+                        admission(expect_rejected=True, genesis_port=claim_forward.port)
                         require(True, f'{env_name}: real signed token rejected with only this claim changed')
                     finally:
                         if claim_forward:
-                            claim_forward.terminate()
-                            claim_forward.wait(timeout=5)
+                            claim_forward.close()
                         run(k + ['delete', 'pod', test_pod, '--wait=false'])
-                # Same pod and fixed port-forward for the whole measurement:
+                # Same pod and owned port-forward for the whole measurement:
                 # load-balancing between two different leaf certs is NOT rotation.
                 before = {svc: cert(svc)['serialNumber'] for svc in names}
                 snapshots = {svc: status_snapshot(p['metadata']['name']) for svc, p in selected.items()}
@@ -265,14 +313,61 @@ def main():
                     else:
                         raise RuntimeError(f'{svc}: Agent-only restart did not recover')
                 admission()
+                # These are actual application pool identities, observed by pod
+                # IP in PostgreSQL, not a verifier-issued credential. Prefix
+                # revocation is deliberately confined to this owned namespace.
+                def pool_users(svc, pod):
+                    ip = pod['status']['podIP']
+                    query = ("SELECT DISTINCT a.usename FROM pg_stat_activity a JOIN pg_roles r ON r.rolname=a.usename "
+                             f"WHERE a.datname='{svc}' AND a.client_addr='{ip}'::inet "
+                             f"AND pg_has_role(r.oid,'{svc}_runtime','MEMBER') ORDER BY a.usename")
+                    return set(run(k + ['exec', qs + '-postgresql-0', '-c', 'postgresql', '--',
+                                       'psql', '-X', '-U', 'postgres', '-d', svc, '-tAc', query]).splitlines())
+                for svc, p in selected.items():
+                    pod = p['metadata']['name']
+                    before_pod = kj('get', 'pod', pod)
+                    old_status = next(s for s in before_pod['status']['containerStatuses'] if s['name'] == svc)
+                    old_users = pool_users(svc, before_pod)
+                    require(bool(old_users), f'{svc}: identified active application DB pool credentials privately')
+                    run(k + ['exec', f'deploy/{qs}-vault', '-c', 'vault', '--',
+                             'vault', 'lease', 'revoke', '-sync', '-prefix', f'database/creds/{svc}'])
+                    quoted = ','.join("'" + user.replace("'", "''") + "'" for user in old_users)
+                    remaining = run(k + ['exec', qs + '-postgresql-0', '-c', 'postgresql', '--',
+                                         'psql', '-X', '-U', 'postgres', '-d', svc, '-tAc',
+                                         f'SELECT count(*) FROM pg_roles WHERE rolname IN ({quoted})'])
+                    require(remaining == '0', f'{svc}: revoked actual pool roles are absent')
+                    deadline = time.monotonic() + 180
+                    while time.monotonic() < deadline:
+                        current = kj('get', 'pod', pod)
+                        require_same_pod = current['metadata']['uid'] == before_pod['metadata']['uid']
+                        if not require_same_pod:
+                            raise RuntimeError(f'{svc}: pod replacement cannot prove an application-only restart')
+                        status = next(s for s in current['status']['containerStatuses'] if s['name'] == svc)
+                        if status['restartCount'] > old_status['restartCount'] and status.get('ready'):
+                            terminated = status.get('lastState', {}).get('terminated', {})
+                            previous = run(k + ['logs', pod, '-c', svc, '--previous'])
+                            require(terminated.get('exitCode', 0) != 0 and
+                                    any(reason in previous for reason in
+                                        ('database_healthcheck_failed', 'vault_db_lease_renewal_failed')),
+                                    f'{svc}: revoked pool triggered fail-closed app exit and container restart')
+                            new_users = pool_users(svc, current)
+                            require(bool(new_users) and old_users.isdisjoint(new_users),
+                                    f'{svc}: restarted application uses new DB pool credentials')
+                            # Reopen only our own forward after the app restart.
+                            backend_forwards[svc].close()
+                            backend_forwards[svc] = forward('pod/' + pod)
+                            ports[svc] = backend_forwards[svc].port
+                            https(svc, '/ready')
+                            require(True, f'{svc}: HTTPS readiness restored after actual pool lease revocation')
+                            break
+                        time.sleep(2)
+                    else:
+                        raise RuntimeError(f'{svc}: actual pool lease revocation did not recover within 180s')
+                    ready(names[svc])
+                admission()
         finally:
-            for proc in forwards:
-                proc.terminate()
-            for proc in forwards:
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+            for owned in forwards:
+                owned.close()
 
     if a.exercise_lifecycle:
         for svc, name in names.items():
@@ -287,7 +382,8 @@ def main():
             ready(name)
         # Re-run non-mutating proof against replacement pods, including actual
         # admission, not just Deployment status.
-        cmd = ['python3', __file__, '--context', a.context, '--namespace', a.namespace, '--release', a.release]
+        cmd = ['python3', __file__, '--context', a.context, '--namespace', a.namespace,
+               '--release', a.release, '--helper-fullname', qs]
         print(run(cmd, env=dict(os.environ, QS_ADMISSION_BIN=binary)), flush=True)
 
 

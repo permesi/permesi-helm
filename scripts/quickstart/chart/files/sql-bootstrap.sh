@@ -11,9 +11,20 @@ PG_PORT="${PG_PORT:-5432}"
 CRED_DIR="${CRED_DIR:-/credentials}"
 STATE_DIR="${STATE_DIR:-/state}"
 
-ADMIN_PW="$(cat "${CRED_DIR}/postgres-admin-password")"
-PERMESI_PW="$(cat "${CRED_DIR}/vault-permesi-password")"
-GENESIS_PW="$(cat "${CRED_DIR}/vault-genesis-password")"
+# Preserve trailing bytes while reading, then reject line breaks unsupported by
+# libpq's line-oriented password file. Never include credential bytes in errors.
+read_password() {
+  local value
+  value="$(cat "${CRED_DIR}/$1" && printf '.')" || return
+  value="${value%.}"
+  case "$value" in
+    *$'\n'*|*$'\r'*) echo "sql-bootstrap: credential $1 contains unsupported line breaks" >&2; exit 1 ;;
+  esac
+  printf '%s' "$value"
+}
+ADMIN_PW="$(read_password postgres-admin-password)"
+PERMESI_PW="$(read_password vault-permesi-password)"
+GENESIS_PW="$(read_password vault-genesis-password)"
 
 # Bounded wait for PostgreSQL.
 for _ in $(seq 1 90); do
@@ -28,11 +39,15 @@ umask 077
 PGPASSFILE="$(mktemp)"
 export PGPASSFILE
 trap 'rm -f "${PGPASSFILE}"' EXIT
-cat > "${PGPASSFILE}" <<EOF
-${PG_HOST}:${PG_PORT}:*:postgres:${ADMIN_PW}
-${PG_HOST}:${PG_PORT}:genesis:vault_genesis:${GENESIS_PW}
-${PG_HOST}:${PG_PORT}:permesi:vault_permesi:${PERMESI_PW}
-EOF
+pgpass_escape() {
+  local value="${1//\\/\\\\}"
+  printf '%s' "${value//:/\\:}"
+}
+{
+  printf '%s:%s:*:postgres:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$ADMIN_PW")"
+  printf '%s:%s:genesis:vault_genesis:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$GENESIS_PW")"
+  printf '%s:%s:permesi:vault_permesi:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$PERMESI_PW")"
+} > "$PGPASSFILE"
 
 admin_psql() { psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U postgres -v ON_ERROR_STOP=1 "$@"; }
 
@@ -43,9 +58,9 @@ retained="$(admin_psql -d postgres -tA -c "SELECT count(*) FROM pg_database WHER
 printf '%s\n' "$retained" > "${STATE_DIR}/retained-database-count"
 chmod 0644 "${STATE_DIR}/retained-database-count"
 
-# Pre-create non-superuser LOGIN CREATEROLE owners so 00_init.sql never falls
-# back to its 'change-me' placeholder. Never touch an existing role's password
-# (Vault may have rotated it).
+# Pre-create canonical owners with strong passwords, never resetting them.
+# Vault uses separate managers below; root rotation must not change these
+# owner-authenticated schema bootstrap credentials.
 admin_psql -d postgres -q -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
 SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_permesi', :'perm_pw')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_permesi')\gexec
@@ -56,6 +71,21 @@ SQL
 cd /db/sql
 admin_psql -d postgres -f 00_init.sql
 echo "sql-bootstrap: 00_init.sql complete"
+
+# Credential managers have no schema ownership or inherited runtime access.
+# Bootstrap with the corresponding owner password once; Vault immediately
+# rotates it and owns the steady-state credential. Never reset existing roles.
+admin_psql -d postgres -q -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
+SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_permesi_manager', :'perm_pw')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_permesi_manager')\gexec
+SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_genesis_manager', :'gen_pw')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_genesis_manager')\gexec
+GRANT permesi_runtime TO vault_permesi_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT genesis_runtime TO vault_genesis_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT CONNECT ON DATABASE permesi TO vault_permesi_manager;
+GRANT CONNECT ON DATABASE genesis TO vault_genesis_manager;
+GRANT pg_signal_backend TO vault_permesi_manager, vault_genesis_manager;
+SQL
 
 # Explicit owner-authenticated verification (transactional, rolls back).
 psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U vault_permesi -d permesi -v ON_ERROR_STOP=1 -f verify_permesi.sql

@@ -1,0 +1,44 @@
+suite: quickstart TokenReview privilege boundary
+release:
+  name: dev
+  namespace: qs-regression
+templates:
+  - rbac.yaml
+set:
+  acknowledgeDevelopment: true
+tests:
+  - it: grants TokenReview only to the Vault service account
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: subjects
+          value:
+            - kind: ServiceAccount
+              name: dev-permesi-quickstart-vault
+              namespace: qs-regression
+  - it: leaves credential Job grants intact when TokenReview is pregranted
+    set:
+      rbac.createTokenReviewBinding: false
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Role
+        documentIndex: 0
+      - equal:
+          path: rules
+          value:
+            - apiGroups: [""]
+              resources: [secrets]
+              verbs: [create]
+        documentIndex: 0
+      - isKind:
+          of: RoleBinding
+        documentIndex: 1
+      - equal:
+          path: subjects
+          value:
+            - kind: ServiceAccount
+              name: dev-permesi-quickstart-credentials
+              namespace: qs-regression
+        documentIndex: 1

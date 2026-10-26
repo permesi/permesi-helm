@@ -44,7 +44,7 @@ spec:
         - name: vault
           image: {{ include "quickstart.image" .Values.vault.image }}
           imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200", "-dev-no-store-token"]
+          command: ["sh", "/scripts/start-dev-vault.sh"]
           env:
             - name: VAULT_DEV_ROOT_TOKEN_ID
               valueFrom:
@@ -89,9 +89,18 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
           resources:
             {{- toYaml .Values.vault.resources | nindent 12 }}
       volumes:
+        - name: scripts
+          configMap:
+            name: {{ $fullname }}-scripts
+            items:
+              - key: start-dev-vault.sh
+                path: start-dev-vault.sh
         - name: tmp
           emptyDir:
             medium: Memory

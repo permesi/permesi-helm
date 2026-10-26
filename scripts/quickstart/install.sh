@@ -146,6 +146,22 @@ H=(helm --kube-context "${CONTEXT}")
 log "context=${CONTEXT} namespace=${NAMESPACE} release=${RELEASE}"
 log "names: dependencies=${QS_FULLNAME} permesi=${PERMESI_NAME} genesis=${GENESIS_NAME}"
 
+# Render the effective switch (including all --quickstart-values overrides)
+# before namespace/SQL ConfigMap mutation. Pregranted installations need no
+# cluster-scoped creation rights; namespaced credential RBAC remains enabled.
+qs_values=()
+for f in "${QS_VALUES[@]}"; do qs_values+=(-f "${f}"); done
+rbac_manifest="$("${H[@]}" template "${QS_RELEASE}" "${QS_CHART}" -n "${NAMESPACE}" \
+  --set acknowledgeDevelopment=true --set-string "fullnameOverride=${QS_FULLNAME}" \
+  "${qs_values[@]}")" \
+  || die "cannot render dependency RBAC preflight"
+if [[ "$rbac_manifest" == *$'\nkind: ClusterRoleBinding\n'* ]]; then
+  for resource in clusterroles.rbac.authorization.k8s.io clusterrolebindings.rbac.authorization.k8s.io; do
+    [[ "$("${K[@]}" auth can-i create "$resource")" == yes ]] \
+      || die "cannot create ${resource}; ask a cluster administrator to pregrant tokenreviews.create to system:serviceaccount:${NAMESPACE}:${QS_FULLNAME}-vault ONLY, then set rbac.createTokenReviewBinding=false in --quickstart-values"
+  done
+fi
+
 if "${K[@]}" get namespace "${NAMESPACE}" >/dev/null 2>&1; then
   [[ "$CLEANUP" != true ]] || die "--cleanup requires a new namespace; refusing to remove resources from existing ${NAMESPACE}"
   enforce="$("${K[@]}" get namespace "${NAMESPACE}" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
@@ -220,8 +236,6 @@ diagnose_bootstrap() {
 }
 
 log "installing dependency chart ${QS_RELEASE} (PostgreSQL + dev Vault + bootstrap)"
-qs_values=()
-for f in "${QS_VALUES[@]}"; do qs_values+=(-f "${f}"); done
 if ! "${H[@]}" upgrade --install "${QS_RELEASE}" "${QS_CHART}" -n "${NAMESPACE}" \
     --set acknowledgeDevelopment=true \
     --set-string "fullnameOverride=${QS_FULLNAME}" \

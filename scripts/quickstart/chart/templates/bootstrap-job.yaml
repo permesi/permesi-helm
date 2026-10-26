@@ -166,7 +166,7 @@ spec:
             - name: state
               mountPath: /state
               readOnly: true
-            # Database manager (owner) passwords only; never the admin password.
+            # Owner passwords used only for the managers' initial configuration.
             - name: vault-credentials
               mountPath: /credentials
               readOnly: true

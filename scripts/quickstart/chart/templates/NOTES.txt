@@ -12,7 +12,24 @@ permesi-quickstart: DISPOSABLE DEVELOPMENT DEPENDENCIES. NOT FOR PRODUCTION.
   administrator/owner passwords live in Secret
   "{{ include "quickstart.credentialsSecretName" . }}" (never in Helm values or
   release history). It is not Helm-owned and survives `helm uninstall`.
+  Canonical schema owners retain those passwords. Separate non-owner
+  vault_permesi_manager / vault_genesis_manager credentials are immediately
+  rotated and thereafter retained only inside Vault; rotate-root never changes
+  the schema owners. Legacy owner-as-manager Vault configs require an explicit
+  disposable namespace reset or a restored manager-separated configuration.
 - No backups, HA, TLS to Vault/PostgreSQL, or pg_cron maintenance scheduler.
 
 Bootstrap Job: {{ include "quickstart.fullname" . }}-bootstrap-{{ .Release.Revision }}
   kubectl -n {{ .Release.Namespace }} logs job/{{ include "quickstart.fullname" . }}-bootstrap-{{ .Release.Revision }} --all-containers
+
+TokenReview pregrant interface:
+  rbac.createTokenReviewBinding=true (default) creates cluster RBAC for ONLY
+  ServiceAccount {{ include "quickstart.fullname" . }}-vault.
+  For a namespaced installer, a cluster administrator must first run:
+    kubectl create clusterrole {{ include "quickstart.tokenReviewName" . }} --verb=create --resource=tokenreviews.authentication.k8s.io
+    kubectl create clusterrolebinding {{ include "quickstart.tokenReviewName" . }} --clusterrole={{ include "quickstart.tokenReviewName" . }} --serviceaccount={{ .Release.Namespace }}:{{ include "quickstart.fullname" . }}-vault
+  Then set rbac.createTokenReviewBinding=false in --quickstart-values.
+  This leaves namespaced credential Job RBAC enabled. Never grant TokenReview
+  to application or bootstrap ServiceAccounts. Pregranted RBAC is operator-owned;
+  do not switch an existing Helm-owned binding to pregrant mode without first
+  arranging a separate operator-owned grant (Helm removes its managed binding).

@@ -46,6 +46,14 @@
     "enabled": {"type": "boolean"},
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
+    "rbac": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createTokenReviewBinding"],
+      "properties": {
+        "createTokenReviewBinding": {"type": "boolean"}
+      }
+    },
     "bootstrap": {
       "type": "object",
       "additionalProperties": false,

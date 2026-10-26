@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "quickstart.labels" . | nindent 4 }}
 data:
-  {{- range $f := list "fetch-schema.sh" "sql-bootstrap.sh" "vault-bootstrap.sh" "generate-credentials.sh" }}
+  {{- range $f := list "fetch-schema.sh" "sql-bootstrap.sh" "vault-bootstrap.sh" "generate-credentials.sh" "start-dev-vault.sh" }}
   {{ $f }}: |
     {{- $.Files.Get (printf "files/%s" $f) | nindent 4 }}
   {{- end }}

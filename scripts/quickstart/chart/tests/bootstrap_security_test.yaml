@@ -1,0 +1,76 @@
+suite: quickstart bootstrap credential boundaries
+release:
+  name: dev
+  namespace: qs-regression
+templates:
+  - bootstrap-job.yaml
+set:
+  acknowledgeDevelopment: true
+tests:
+  - it: never mounts the administrator password or Kubernetes JWT into Vault bootstrap
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.template.spec.volumes[7].secret.items
+          value:
+            - {key: postgres-admin-password, path: postgres-admin-password}
+            - {key: vault-permesi-password, path: vault-permesi-password}
+            - {key: vault-genesis-password, path: vault-genesis-password}
+      - equal:
+          path: spec.template.spec.volumes[8].secret.items
+          value:
+            - {key: vault-permesi-password, path: vault-permesi-password}
+            - {key: vault-genesis-password, path: vault-genesis-password}
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: sql-credentials
+          any: true
+      - notContains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: VAULT_TOKEN
+          any: true
+  - it: confines leaf DNS permission to the configured service and namespace
+    set:
+      bootstrap.services.permesi.serviceName: atlas-api
+      bootstrap.services.permesi.browserDnsNames: [api.localhost]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_DNS_NAMES
+            value: atlas-api,atlas-api.qs-regression,atlas-api.qs-regression.svc,atlas-api.qs-regression.svc.cluster.local,api.localhost
+  - it: uses supplied image digests instead of a mutable tag for bootstrap containers
+    set:
+      vault.image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      postgresql.image.digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/hashicorp/vault@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - equal:
+          path: spec.template.spec.initContainers[1].image
+          value: docker.io/library/postgres@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  - it: derives umbrella service and auth bindings from a nondefault release without tpl
+    release:
+      name: atlas
+      namespace: qs-regression
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_SA
+            value: atlas-permesi
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_SA
+            value: atlas-genesis
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DNS_NAMES
+            value: atlas-genesis,atlas-genesis.qs-regression,atlas-genesis.qs-regression.svc,atlas-genesis.qs-regression.svc.cluster.local,genesis.localhost

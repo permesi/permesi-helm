@@ -92,18 +92,17 @@ ensure_mount secret/permesi kv -version=2
 kv_version="$(vault read -format=json sys/mounts/secret/permesi | grep -o '"version": *"[0-9]*"' | grep -o '[0-9]*' || true)"
 [ "$kv_version" = "2" ] || die "secret/permesi/ is not KV version 2 (got '${kv_version}')"
 
-# Retained-database / lost-Vault guard: the SQL container records how many
-# Permesi users already exist. Their OPAQUE records are bound to the previous
-# seed, so generating a fresh one would silently break every account.
-existing_users="$(cat "${STATE_DIR}/permesi-user-count" 2>/dev/null || echo unknown)"
+# Retained database / lost Vault: never invent a replacement identity, even
+# when the retained databases currently contain no users.
+retained="$(cat "${STATE_DIR}/retained-database-count" 2>/dev/null || echo unknown)"
 
 seed=no; pepper=no
 vault kv get -mount=secret/permesi -field=opaque_server_seed config >/dev/null 2>&1 && seed=yes
 vault kv get -mount=secret/permesi -field=mfa_recovery_pepper config >/dev/null 2>&1 && pepper=yes
 if [ "$seed" = no ] && [ "$pepper" = no ]; then
-  case "$existing_users" in
+  case "$retained" in
     0) ;;
-    *) die "secret/permesi/config is absent but PostgreSQL already holds ${existing_users} Permesi user(s): retained database with lost dev Vault state is not recoverable by generating a new OPAQUE seed. Reset the development install (delete the release namespace) or restore Vault." ;;
+    *) die "secret/permesi/config is absent with ${retained} retained application database(s): lost dev Vault state is not recoverable by generating a new OPAQUE seed. Reset the development install (delete the release namespace) or restore Vault." ;;
   esac
   # 32 random bytes, standard base64 (matches Terraform random_id.b64_std).
   vault kv put -mount=secret/permesi config \

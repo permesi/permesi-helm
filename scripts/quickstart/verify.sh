@@ -11,11 +11,16 @@ set -euo pipefail
 CONTEXT=""
 NAMESPACE="permesi-quickstart"
 RELEASE="permesi"
+DEPS_ONLY=false
+RUNTIME_ARGS=()
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/quickstart/verify.sh --context <kube-context> \
-         [--namespace <ns>] [--release <name>]
+         [--namespace <ns>] [--release <name>] [--deps-only]
+         [--exercise-lifecycle] [--rotation-timeout SECONDS]
+Full mode requires python3, curl and Cargo (or QS_ADMISSION_BIN).
+Lifecycle mode restarts/scales backend pods and verifies leaf rotation.
 EOF
 }
 while [[ $# -gt 0 ]]; do
@@ -23,6 +28,9 @@ while [[ $# -gt 0 ]]; do
     --context) CONTEXT="${2:?}"; shift 2 ;;
     --namespace) NAMESPACE="${2:?}"; shift 2 ;;
     --release) RELEASE="${2:?}"; shift 2 ;;
+    --deps-only) DEPS_ONLY=true; shift ;;
+    --exercise-lifecycle) RUNTIME_ARGS+=(--exercise-lifecycle); shift ;;
+    --rotation-timeout) RUNTIME_ARGS+=(--rotation-timeout "${2:?}"); shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; echo "verify.sh: unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -32,7 +40,7 @@ done
 K=(kubectl --context "${CONTEXT}" -n "${NAMESPACE}")
 fullname() { if [[ "$1" == *"$2"* ]]; then echo "$1"; else echo "$1-$2"; fi; }
 QS_RELEASE="${RELEASE}-quickstart"
-QS_FULLNAME="$(fullname "${QS_RELEASE}" permesi-quickstart)"
+QS_FULLNAME="${QS_RELEASE}"
 PERMESI_NAME="$(fullname "${RELEASE}" permesi)"
 GENESIS_NAME="$(fullname "${RELEASE}-genesis" genesis)"
 VAULT_DEPLOY="${QS_FULLNAME}-vault"
@@ -205,6 +213,14 @@ section "Identity fingerprints (compare across reruns; no secret material)"
 echo "INFO: opaque_server_seed sha256[:12]=${seed_fp}"
 echo "INFO: pki-int ca_chain sha256[:12]=${ca_fp}"
 echo "INFO: transit genesis-signing latest_version=$(vroot read -field=latest_version transit/genesis/keys/genesis-signing)"
+echo "INFO: transit genesis-signing public keys sha256[:12]=$(vroot read -field=keys transit/genesis/keys/genesis-signing | sha256sum | cut -c1-12)"
+
+if [[ "$DEPS_ONLY" != true ]]; then
+  section "Real application runtime"
+  python3 "$(dirname "${BASH_SOURCE[0]}")/verify-runtime.py" \
+    --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" "${RUNTIME_ARGS[@]}" \
+    || fail "application runtime verification"
+fi
 
 echo
 if [[ ${FAILURES} -eq 0 ]]; then

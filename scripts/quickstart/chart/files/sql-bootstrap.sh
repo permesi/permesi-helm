@@ -36,6 +36,13 @@ EOF
 
 admin_psql() { psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U postgres -v ON_ERROR_STOP=1 "$@"; }
 
+# Conservatively couple ALL retained application databases to their Vault
+# identity, even before any user exists. Partial bootstrap requires explicit
+# dev reset if it created databases but never persisted the Vault seed.
+retained="$(admin_psql -d postgres -tA -c "SELECT count(*) FROM pg_database WHERE datname IN ('permesi','genesis')")"
+printf '%s\n' "$retained" > "${STATE_DIR}/retained-database-count"
+chmod 0644 "${STATE_DIR}/retained-database-count"
+
 # Pre-create non-superuser LOGIN CREATEROLE owners so 00_init.sql never falls
 # back to its 'change-me' placeholder. Never touch an existing role's password
 # (Vault may have rotated it).

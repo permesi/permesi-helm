@@ -71,9 +71,22 @@ capabilities:
 {{- printf "%s-%s-tokenreview" (include "quickstart.fullname" .) .Release.Namespace | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/* Component fullname convention shared by direct and umbrella installs.
+     Explicit names cover component fullnameOverride/serviceAccount.name. */}}
+{{- define "quickstart.applicationName" -}}
+{{- $explicit := (index .root.Values.bootstrap.services .service).serviceName -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else if contains .service .root.Release.Name -}}
+{{- .root.Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .root.Release.Name .service | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Per-service PKI role names: exact Service DNS forms + browser hostnames. */}}
 {{- define "quickstart.serviceDnsNames" -}}
-{{- $svc := .svc.serviceName -}}
+{{- $svc := .name -}}
 {{- $ns := .ns -}}
 {{- $names := list $svc (printf "%s.%s" $svc $ns) (printf "%s.%s.svc" $svc $ns) (printf "%s.%s.svc.cluster.local" $svc $ns) -}}
 {{- join "," (concat $names (.svc.browserDnsNames | default list)) -}}
@@ -94,13 +107,5 @@ capabilities:
 {{- end -}}
 {{- if and $hasUrl (not (regexMatch "^[0-9a-f]{64}$" ($schema.sha256 | default ""))) -}}
 {{- fail "permesi-quickstart: bootstrap.schema.sha256 (64 lowercase hex) is required with bootstrap.schema.sourceUrl" -}}
-{{- end -}}
-{{- range $svc := list "permesi" "genesis" -}}
-{{- if not (index $.Values.bootstrap.services $svc).serviceName -}}
-{{- fail (printf "permesi-quickstart: bootstrap.services.%s.serviceName is required" $svc) -}}
-{{- end -}}
-{{- if not (index $.Values.bootstrap.kubernetesRoles $svc).serviceAccount -}}
-{{- fail (printf "permesi-quickstart: bootstrap.kubernetesRoles.%s.serviceAccount is required" $svc) -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}

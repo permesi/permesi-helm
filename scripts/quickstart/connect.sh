@@ -16,7 +16,7 @@ done
 [[ -n "$CONTEXT" ]] || { echo '--context is required' >&2; exit 2; }
 K=(kubectl --context "$CONTEXT" -n "$NAMESPACE")
 fullname() { if [[ "$1" == *"$2"* ]]; then echo "$1"; else echo "$1-$2"; fi; }
-qs="$(fullname "${RELEASE}-quickstart" permesi-quickstart)"
+qs="${RELEASE}-quickstart"
 "${K[@]}" exec "deploy/${qs}-vault" -c vault -- vault read -field=certificate pki-root/cert/ca > "$CA_OUT"
 [[ -s "$CA_OUT" ]] || { echo 'Failed to export public root CA' >&2; exit 1; }
 echo "Public root CA: $CA_OUT (import explicitly into a disposable browser profile; no host trust changes)"

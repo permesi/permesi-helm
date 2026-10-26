@@ -74,3 +74,14 @@ tests:
       - matchRegex:
           path: data["agent.hcl"]
           pattern: 'paserk-ca.tpl'
+
+  - it: renders an explicit fractional renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.renewalThreshold: 0.8
+    asserts:
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'lease_renewal_threshold = 0.8'

@@ -252,7 +252,9 @@
                   "minLength": 1
                 },
                 "renewalThreshold": {
-                  "type": "number"
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "exclusiveMaximum": 1
                 }
               }
             },

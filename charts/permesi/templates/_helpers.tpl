@@ -286,8 +286,8 @@ false
 {{- fail "permesi: serviceAccount.automount must be false when vault.agent.enabled" -}}
 {{- end -}}
 
-{{- /* renewalThreshold strictly between 0 and 1. */ -}}
-{{- $rt := float64 (default 0.8 $agent.pki.renewalThreshold) -}}
+{{- /* renewalThreshold strictly between 0 and 1 (no truthiness default). */ -}}
+{{- $rt := float64 $agent.pki.renewalThreshold -}}
 {{- if or (le $rt 0.0) (ge $rt 1.0) -}}
 {{- fail "permesi: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}

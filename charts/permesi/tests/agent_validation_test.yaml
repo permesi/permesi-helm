@@ -209,7 +209,7 @@ tests:
       - failedTemplate:
           errorPattern: "serviceAccount.automount must be false"
 
-  - it: rejects an out-of-range renewal threshold
+  - it: rejects a renewal threshold of exactly 1
     set:
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200
@@ -221,7 +221,35 @@ tests:
       vault.agent.pki.renewalThreshold: 1
     asserts:
       - failedTemplate:
-          errorPattern: "renewalThreshold must be strictly between 0 and 1"
+          errorPattern: "renewalThreshold: Must be less than 1"
+
+  - it: rejects a zero renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be greater than 0"
+
+  - it: rejects a negative renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: -0.5
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be greater than 0"
 
   - it: rejects distinct destinations sharing a directory
     set:

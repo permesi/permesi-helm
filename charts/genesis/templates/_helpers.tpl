@@ -55,6 +55,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- regexFind "[^/]+$" . -}}
 {{- end -}}
 
+{{/* Reports "true" if any two normalized directory paths in the list overlap
+     (equal, or one is an ancestor of the other). */}}
+{{- define "genesis.dirsOverlap" -}}
+{{- $dirs := . -}}
+{{- $bad := false -}}
+{{- range $i, $a := $dirs -}}
+{{- range $j, $b := $dirs -}}
+{{- if gt $j $i -}}
+{{- $aa := toString $a -}}
+{{- $bb := toString $b -}}
+{{- if or (eq $aa $bb) (eq $aa "/") (eq $bb "/") (hasPrefix (printf "%s/" $aa) $bb) (hasPrefix (printf "%s/" $bb) $aa) -}}
+{{- $bad = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $bad -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
 {{- define "genesis.vaultIsTcp" -}}
 {{- $url := default "" .Values.vault.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
@@ -289,17 +308,47 @@ false
 {{- fail "genesis: serviceAccount.automount must be false when vault.agent.enabled" -}}
 {{- end -}}
 
-{{- /* renewalThreshold strictly between 0 and 1. */ -}}
-{{- $rt := float64 (default 0.8 $agent.pki.renewalThreshold) -}}
+{{- /* renewalThreshold strictly between 0 and 1 (no truthiness default). */ -}}
+{{- $rt := float64 $agent.pki.renewalThreshold -}}
 {{- if or (le $rt 0.0) (ge $rt 1.0) -}}
 {{- fail "genesis: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}
 
-{{- /* Distinct socket/TLS destinations. */ -}}
-{{- $socketPath := include "genesis.agentSocketPath" . -}}
-{{- $tlsPath := .Values.tls.pemBundlePath -}}
-{{- if eq $socketPath $tlsPath -}}
-{{- fail "genesis: vault socket and TLS bundle destinations must be distinct when vault.agent.enabled" -}}
+{{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
+     (TCP mode) or a legacy TLS Secret is requested. */ -}}
+{{- $mountTls := or (not $socketMode) (ne (include "genesis.tlsSecretName" .) "") -}}
+
+{{- /* Absolute writable artifact destinations. */ -}}
+{{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
+{{- fail "genesis: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Normalized chart-owned mount directories: fixed agent locations, the
+     socket and each active artifact. */ -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" (clean (include "genesis.agentSocketDir" .)) -}}
+{{- if $mountTls -}}
+{{- $chartDirs = append $chartDirs (clean (include "genesis.agentTlsDir" .)) -}}
+{{- end -}}
+{{- if .Values.vault.agent.ca.existingConfigMap -}}
+{{- $chartDirs = append $chartDirs "/vault/ca" -}}
+{{- end -}}
+{{- if eq (include "genesis.dirsOverlap" $chartDirs) "true" -}}
+{{- fail (printf "genesis: vault agent destination mount directories must not overlap (got: %s) when vault.agent.enabled" (join ", " $chartDirs)) -}}
+{{- end -}}
+
+{{- /* extraVolumeMounts must not collide with chart-owned mount directories. */ -}}
+{{- $extraCollision := false -}}
+{{- range $m := .Values.extraVolumeMounts -}}
+{{- $mp := clean (toString (default "" $m.mountPath)) -}}
+{{- range $d := $chartDirs -}}
+{{- $dd := toString $d -}}
+{{- if or (eq $mp $dd) (hasPrefix (printf "%s/" $dd) $mp) (hasPrefix (printf "%s/" $mp) $dd) -}}
+{{- $extraCollision = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $extraCollision -}}
+{{- fail "genesis: extraVolumeMounts must not overlap chart-managed mount directories when vault.agent.enabled" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

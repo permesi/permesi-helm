@@ -209,7 +209,7 @@ tests:
       - failedTemplate:
           errorPattern: "serviceAccount.automount must be false"
 
-  - it: rejects an out-of-range renewal threshold
+  - it: rejects a renewal threshold of exactly 1
     set:
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200
@@ -221,9 +221,126 @@ tests:
       vault.agent.pki.renewalThreshold: 1
     asserts:
       - failedTemplate:
-          errorPattern: "renewalThreshold must be strictly between 0 and 1"
+          errorPattern: "renewalThreshold: Must be less than 1"
 
-  - it: rejects overlapping socket and TLS destinations
+  - it: rejects a zero renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be greater than 0"
+
+  - it: rejects a negative renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: -0.5
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be greater than 0"
+
+  - it: rejects distinct destinations sharing a directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects nested destination directories
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/tls/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects a TLS destination colliding with the agent scratch mount
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      tls.pemBundlePath: /tmp/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects extra volume mounts colliding with a chart destination
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: extra
+          mountPath: /var/run/permesi/tls
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not overlap"
+
+  - it: rejects a relative TLS destination
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      tls.pemBundlePath: bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls.pemBundlePath must be an absolute path"
+
+  - it: accepts an inactive TLS destination in socket mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      serviceAccount.automount: false
+      config.socketPath: /run/app/app.sock
+      service.enabled: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
+    asserts:
+      - notFailedTemplate: {}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-bundle
+          any: true
+
+  - it: rejects an agent-managed TLS destination in the socket directory
     set:
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200
@@ -235,4 +352,51 @@ tests:
       tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
     asserts:
       - failedTemplate:
-          errorPattern: "destinations must be distinct"
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects a legacy TLS Secret mount in the socket directory in socket mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      serviceAccount.automount: false
+      config.socketPath: /run/app/app.sock
+      service.enabled: false
+      tls.existingSecret: permesi-tls
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: accepts an inactive PASERK CA destination when agent CA management is disabled
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.paserkCa.enabled: false
+      admission.paserkCaPath: /var/run/secrets/vaultproject.io/ca.pem
+    asserts:
+      - notFailedTemplate: {}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: admission-paserk-ca
+          any: true
+
+  - it: rejects an agent-managed PASERK CA destination in the socket directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      admission.paserkCaPath: /var/run/secrets/vaultproject.io/ca.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"

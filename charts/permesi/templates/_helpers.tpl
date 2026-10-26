@@ -55,6 +55,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- regexFind "[^/]+$" . -}}
 {{- end -}}
 
+{{/* Reports "true" if any two normalized directory paths in the list overlap
+     (equal, or one is an ancestor of the other). */}}
+{{- define "permesi.dirsOverlap" -}}
+{{- $dirs := . -}}
+{{- $bad := false -}}
+{{- range $i, $a := $dirs -}}
+{{- range $j, $b := $dirs -}}
+{{- if gt $j $i -}}
+{{- $aa := toString $a -}}
+{{- $bb := toString $b -}}
+{{- if or (eq $aa $bb) (eq $aa "/") (eq $bb "/") (hasPrefix (printf "%s/" $aa) $bb) (hasPrefix (printf "%s/" $bb) $aa) -}}
+{{- $bad = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $bad -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
 {{- define "permesi.vaultIsTcp" -}}
 {{- $url := default "" .Values.vault.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
@@ -267,18 +286,59 @@ false
 {{- fail "permesi: serviceAccount.automount must be false when vault.agent.enabled" -}}
 {{- end -}}
 
-{{- /* renewalThreshold strictly between 0 and 1. */ -}}
-{{- $rt := float64 (default 0.8 $agent.pki.renewalThreshold) -}}
+{{- /* renewalThreshold strictly between 0 and 1 (no truthiness default). */ -}}
+{{- $rt := float64 $agent.pki.renewalThreshold -}}
 {{- if or (le $rt 0.0) (ge $rt 1.0) -}}
 {{- fail "permesi: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}
 
-{{- /* Distinct socket/TLS/CA destinations. */ -}}
-{{- $socketPath := include "permesi.agentSocketPath" . -}}
-{{- $tlsPath := .Values.tls.pemBundlePath -}}
-{{- $caPath := include "permesi.agentAdmissionCaPath" . -}}
-{{- if or (eq $socketPath $tlsPath) (eq $socketPath $caPath) (eq $tlsPath $caPath) -}}
-{{- fail "permesi: vault socket, TLS bundle and PASERK CA destinations must be distinct when vault.agent.enabled" -}}
+{{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
+     (TCP mode) or a legacy TLS Secret is requested; the admission CA when the
+     agent manages it or a legacy CA Secret is requested. */ -}}
+{{- $agentManagesTls := not $socketMode -}}
+{{- $agentManagesCa := $agent.paserkCa.enabled -}}
+{{- $mountTls := or $agentManagesTls (ne (include "permesi.tlsSecretName" .) "") -}}
+{{- $mountCa := or $agentManagesCa (ne (include "permesi.admissionCaSecretName" .) "") -}}
+
+{{- /* Absolute writable artifact destinations. */ -}}
+{{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
+{{- fail "permesi: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
+{{- end -}}
+{{- if and $agentManagesCa (not (hasPrefix "/" (include "permesi.agentAdmissionCaPath" .))) -}}
+{{- fail "permesi: admission PASERK CA destination must be an absolute path when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Normalized chart-owned mount directories: fixed agent locations, the
+     socket and each active artifact. */ -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" (clean (include "permesi.agentSocketDir" .)) -}}
+{{- if $mountTls -}}
+{{- $chartDirs = append $chartDirs (clean (include "permesi.agentTlsDir" .)) -}}
+{{- end -}}
+{{- if $agentManagesCa -}}
+{{- $chartDirs = append $chartDirs (clean (include "permesi.agentAdmissionCaDir" .)) -}}
+{{- else if $mountCa -}}
+{{- $chartDirs = append $chartDirs (clean (toString .Values.admission.paserkCa.mountPath)) -}}
+{{- end -}}
+{{- if .Values.vault.agent.ca.existingConfigMap -}}
+{{- $chartDirs = append $chartDirs "/vault/ca" -}}
+{{- end -}}
+{{- if eq (include "permesi.dirsOverlap" $chartDirs) "true" -}}
+{{- fail (printf "permesi: vault agent destination mount directories must not overlap (got: %s) when vault.agent.enabled" (join ", " $chartDirs)) -}}
+{{- end -}}
+
+{{- /* extraVolumeMounts must not collide with chart-owned mount directories. */ -}}
+{{- $extraCollision := false -}}
+{{- range $m := .Values.extraVolumeMounts -}}
+{{- $mp := clean (toString (default "" $m.mountPath)) -}}
+{{- range $d := $chartDirs -}}
+{{- $dd := toString $d -}}
+{{- if or (eq $mp $dd) (hasPrefix (printf "%s/" $dd) $mp) (hasPrefix (printf "%s/" $mp) $dd) -}}
+{{- $extraCollision = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $extraCollision -}}
+{{- fail "permesi: extraVolumeMounts must not overlap chart-managed mount directories when vault.agent.enabled" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

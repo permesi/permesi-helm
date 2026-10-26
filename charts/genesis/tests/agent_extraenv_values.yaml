@@ -1,0 +1,3 @@
+extraEnv:
+  - name: GENESIS_VAULT_URL
+    value: https://other-vault:8200

@@ -1,0 +1,13 @@
+{{- if .Values.vault.agent.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "genesis.agentConfigName" . }}
+  labels:
+    {{- include "genesis.labels" . | nindent 4 }}
+data:
+  agent.hcl: |
+    {{- include "genesis.agentHCL" . | nindent 4 }}
+  tls-bundle.tpl: |
+    {{- include "genesis.agentTlsTemplate" . | nindent 4 }}
+{{- end }}

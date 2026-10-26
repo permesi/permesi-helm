@@ -6,7 +6,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 CONTEXT="${QS_CONTEXT:-$(kubectl config current-context)}"
-NAMESPACE="${QS_NAMESPACE:-qs-ci}"
+NAMESPACE="${QS_NAMESPACE:-qv-ci}"
+[[ "$NAMESPACE" == qv-* ]] || {
+  echo 'real-dependencies.sh requires a disposable qv-* namespace for fault injection' >&2
+  exit 1
+}
 RELEASE="${QS_RELEASE:-permesi}"
 APP_SOURCE="${QS_APP_SOURCE:-app}"
 CHARTS_DIR="${QS_CHARTS_DIR:-charts}"
@@ -26,6 +30,10 @@ verify=(bash scripts/quickstart/verify.sh --context "$CONTEXT" --namespace "$NAM
 
 "${install[@]}"
 "${verify[@]}" --exercise-lifecycle | tee "$log_dir/before.log"
+
+# A healthy stack must not conceal broken issuance or revocation contracts.
+python3 scripts/quickstart/tests/real-verifier-regressions.py \
+  --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" --faults
 
 # Snapshot existing application records BEFORE reinstall and before the second
 # verifier creates any new accounts. SQL verification itself is transactional.

@@ -1,0 +1,62 @@
+{{- $fullname := include "quickstart.fullname" . -}}
+{{- $tokenReview := include "quickstart.tokenReviewName" . -}}
+# TokenReview authority for the dev Vault ServiceAccount ONLY (Kubernetes auth
+# reviewer). Cluster-scoped: requires a cluster administrator.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $tokenReview }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $tokenReview }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $tokenReview }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-vault
+    namespace: {{ .Release.Namespace }}
+{{- if not .Values.bootstrap.credentialsSecret }}
+---
+# The credentials Job creates the bootstrap Secret once. RBAC cannot restrict
+# `create` by resourceNames, so the grant is namespace-scoped `create` only
+# (no get/list/update): the Job can never read or overwrite a Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-credentials
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-credentials
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-credentials
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-credentials
+    namespace: {{ .Release.Namespace }}
+{{- end }}

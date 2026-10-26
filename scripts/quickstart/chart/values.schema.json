@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["acknowledgeDevelopment", "bootstrap", "postgresql", "vault"],
+  "definitions": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string", "minLength": 1, "not": {"const": "latest"}},
+        "digest": {"type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    },
+    "appService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceName"],
+      "properties": {
+        "serviceName": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63},
+        "browserDnsNames": {"type": "array", "items": {"type": "string", "minLength": 1, "not": {"pattern": "[*]"}}}
+      }
+    },
+    "k8sRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serviceAccount"],
+      "properties": {
+        "serviceAccount": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
+      }
+    }
+  },
+  "properties": {
+    "acknowledgeDevelopment": {"type": "boolean"},
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "credentialsSecret": {"type": "string"},
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceUrl": {"type": "string"},
+            "sha256": {"type": "string"},
+            "revision": {"type": "string"},
+            "existingConfigMaps": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "kubernetes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"host": {"type": "string", "pattern": "^https://"}}
+        },
+        "kubernetesRoles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "audience": {"type": "string", "minLength": 1},
+            "ttl": {"type": "string"},
+            "maxTtl": {"type": "string"},
+            "permesi": {"$ref": "#/definitions/k8sRole"},
+            "genesis": {"$ref": "#/definitions/k8sRole"}
+          }
+        },
+        "pki": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rootCommonName": {"type": "string", "minLength": 1},
+            "intermediateCommonName": {"type": "string", "minLength": 1},
+            "ttl": {"type": "string", "minLength": 1},
+            "maxTtl": {"type": "string", "minLength": 1}
+          }
+        },
+        "oidcSigning": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}}
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "permesi": {"$ref": "#/definitions/appService"},
+            "genesis": {"$ref": "#/definitions/appService"}
+          }
+        }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {"$ref": "#/definitions/image"},
+        "service": {"$ref": "#/definitions/service"},
+        "resources": {"type": "object"}
+      }
+    },
+    "vault": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {"$ref": "#/definitions/image"},
+        "service": {"$ref": "#/definitions/service"},
+        "resources": {"type": "object"}
+      }
+    },
+    "credentialsJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"ttlSecondsAfterFinished": {"type": "integer", "minimum": 0}}
+    },
+    "bootstrapJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ttlSecondsAfterFinished": {"type": "integer", "minimum": 0},
+        "backoffLimit": {"type": "integer", "minimum": 0},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "nodeSelector": {"type": "object"},
+    "tolerations": {"type": "array"},
+    "global": {"type": "object"}
+  }
+}

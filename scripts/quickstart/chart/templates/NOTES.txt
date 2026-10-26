@@ -1,0 +1,18 @@
+permesi-quickstart: DISPOSABLE DEVELOPMENT DEPENDENCIES. NOT FOR PRODUCTION.
+
+- Vault runs in dev mode (in-memory, auto-unsealed, HTTP on ClusterIP):
+  {{ include "quickstart.vaultAddr" . }}
+  Recreating the Vault pod loses all keys, PKI issuers and the OPAQUE seed.
+- PostgreSQL 18 data is ephemeral (emptyDir):
+  {{ include "quickstart.postgresqlServiceName" . }}.{{ .Release.Namespace }}.svc:{{ .Values.postgresql.service.port }}
+- Database and Vault lifecycles are coupled: a retained database with a lost
+  Vault is NOT recoverable by generating a new seed; the bootstrap refuses it.
+  Reset by deleting the namespace (or restore Vault).
+- Bootstrap-only exception: the dev Vault root token and PostgreSQL
+  administrator/owner passwords live in Secret
+  "{{ include "quickstart.credentialsSecretName" . }}" (never in Helm values or
+  release history). It is not Helm-owned and survives `helm uninstall`.
+- No backups, HA, TLS to Vault/PostgreSQL, or pg_cron maintenance scheduler.
+
+Bootstrap Job: {{ include "quickstart.fullname" . }}-bootstrap-{{ .Release.Revision }}
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "quickstart.fullname" . }}-bootstrap-{{ .Release.Revision }} --all-containers

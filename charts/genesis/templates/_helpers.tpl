@@ -314,17 +314,21 @@ false
 {{- fail "genesis: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}
 
-{{- /* Normalized destination mount directories. */ -}}
-{{- $socketDir := clean (include "genesis.agentSocketDir" .) -}}
-{{- $tlsDir := clean (include "genesis.agentTlsDir" .) -}}
+{{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
+     (TCP mode) or a legacy TLS Secret is requested. */ -}}
+{{- $mountTls := or (not $socketMode) (ne (include "genesis.tlsSecretName" .) "") -}}
 
 {{- /* Absolute writable artifact destinations. */ -}}
-{{- if not (hasPrefix "/" (clean .Values.tls.pemBundlePath)) -}}
+{{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
 {{- fail "genesis: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
 {{- end -}}
 
-{{- /* Chart-owned mount directories: fixed agent locations + socket/TLS. */ -}}
-{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir $tlsDir -}}
+{{- /* Normalized chart-owned mount directories: fixed agent locations, the
+     socket and each active artifact. */ -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" (clean (include "genesis.agentSocketDir" .)) -}}
+{{- if $mountTls -}}
+{{- $chartDirs = append $chartDirs (clean (include "genesis.agentTlsDir" .)) -}}
+{{- end -}}
 {{- if .Values.vault.agent.ca.existingConfigMap -}}
 {{- $chartDirs = append $chartDirs "/vault/ca" -}}
 {{- end -}}

@@ -292,21 +292,33 @@ false
 {{- fail "permesi: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}
 
-{{- /* Normalized destination mount directories. */ -}}
-{{- $socketDir := clean (include "permesi.agentSocketDir" .) -}}
-{{- $tlsDir := clean (include "permesi.agentTlsDir" .) -}}
-{{- $caDir := clean (include "permesi.agentAdmissionCaDir" .) -}}
+{{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
+     (TCP mode) or a legacy TLS Secret is requested; the admission CA when the
+     agent manages it or a legacy CA Secret is requested. */ -}}
+{{- $agentManagesTls := not $socketMode -}}
+{{- $agentManagesCa := $agent.paserkCa.enabled -}}
+{{- $mountTls := or $agentManagesTls (ne (include "permesi.tlsSecretName" .) "") -}}
+{{- $mountCa := or $agentManagesCa (ne (include "permesi.admissionCaSecretName" .) "") -}}
 
 {{- /* Absolute writable artifact destinations. */ -}}
-{{- if not (hasPrefix "/" (clean .Values.tls.pemBundlePath)) -}}
+{{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
 {{- fail "permesi: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
 {{- end -}}
-{{- if not (hasPrefix "/" $caDir) -}}
+{{- if and $agentManagesCa (not (hasPrefix "/" (include "permesi.agentAdmissionCaPath" .))) -}}
 {{- fail "permesi: admission PASERK CA destination must be an absolute path when vault.agent.enabled" -}}
 {{- end -}}
 
-{{- /* Chart-owned mount directories: fixed agent locations + socket/TLS/CA. */ -}}
-{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir $tlsDir $caDir -}}
+{{- /* Normalized chart-owned mount directories: fixed agent locations, the
+     socket and each active artifact. */ -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" (clean (include "permesi.agentSocketDir" .)) -}}
+{{- if $mountTls -}}
+{{- $chartDirs = append $chartDirs (clean (include "permesi.agentTlsDir" .)) -}}
+{{- end -}}
+{{- if $agentManagesCa -}}
+{{- $chartDirs = append $chartDirs (clean (include "permesi.agentAdmissionCaDir" .)) -}}
+{{- else if $mountCa -}}
+{{- $chartDirs = append $chartDirs (clean (toString .Values.admission.paserkCa.mountPath)) -}}
+{{- end -}}
 {{- if .Values.vault.agent.ca.existingConfigMap -}}
 {{- $chartDirs = append $chartDirs "/vault/ca" -}}
 {{- end -}}

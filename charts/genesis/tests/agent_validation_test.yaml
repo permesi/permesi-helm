@@ -308,3 +308,48 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "tls.pemBundlePath must be an absolute path"
+
+  - it: accepts an inactive TLS destination in socket mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      serviceAccount.automount: false
+      config.socketPath: /run/app/app.sock
+      service.enabled: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
+    asserts:
+      - notFailedTemplate: {}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-bundle
+          any: true
+
+  - it: rejects an agent-managed TLS destination in the socket directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects a legacy TLS Secret mount in the socket directory in socket mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      serviceAccount.automount: false
+      config.socketPath: /run/app/app.sock
+      service.enabled: false
+      tls.existingSecret: genesis-tls
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"

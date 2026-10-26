@@ -92,6 +92,46 @@ vault:
   kvMount: secret/permesi
   kvPath: config
   transitMount: transit/permesi
+  # Managed Vault Agent sidecar (native sidecar, Kubernetes >= 1.29).
+  # Off by default: existing renders are byte-identical with agent disabled.
+  agent:
+    enabled: false
+    # HTTP(S) origin of Vault the agent authenticates against. Independent of
+    # vault.url (the Unix socket the application connects to).
+    address: ""
+    image:
+      repository: hashicorp/vault
+      tag: 1.20.4
+      pullPolicy: IfNotPresent
+    auth:
+      mount: kubernetes
+      role: ""
+      audience: vault
+      tokenExpirationSeconds: 3600
+    ca:
+      existingConfigMap: ""
+      key: ca.crt
+    pki:
+      mount: pki-int
+      role: ""
+      commonName: ""
+      dnsNames: []
+      ttl: 24h
+      renewalThreshold: 0.8
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    startupProbe:
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 120
+    paserkCa:
+      enabled: true
+      path: pki-int/cert/ca_chain
 
 auth:
   frontendBaseUrl: https://permesi.dev

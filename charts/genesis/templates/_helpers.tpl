@@ -179,10 +179,127 @@ false
 
 {{- $vaultIsTcp := eq (include "genesis.vaultIsTcp" .) "true" -}}
 {{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEsoActive -}}
-{{- if and $vaultIsTcp (not $roleSet) -}}
+{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not $roleSet) -}}
 {{- fail "genesis: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
 {{- fail "genesis: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
+{{- end -}}
+
+{{- if .Values.vault.agent.enabled -}}
+{{- $agent := .Values.vault.agent -}}
+{{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+
+{{- /* Kubernetes >= 1.29 (native sidecars). */ -}}
+{{- if or (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt (.Capabilities.KubeVersion.Minor | int) 29)) -}}
+{{- fail "genesis: vault.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
+{{- end -}}
+
+{{- /* Unix target. */ -}}
+{{- $url := default "" .Values.vault.url -}}
+{{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
+{{- fail "genesis: vault.url must be a Unix socket path when vault.agent.enabled" -}}
+{{- end -}}
+{{- $urlNoScheme := $url -}}
+{{- if hasPrefix "unix://" $url -}}
+{{- $urlNoScheme = trimPrefix "unix://" $url -}}
+{{- end -}}
+{{- if not (hasPrefix "/" $urlNoScheme) -}}
+{{- fail "genesis: vault.url must be an absolute socket path when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Vault origin address. */ -}}
+{{- if not (or (hasPrefix "http://" (default "" $agent.address)) (hasPrefix "https://" (default "" $agent.address))) -}}
+{{- fail "genesis: vault.agent.address must be an http(s) URL when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Kubernetes auth role. */ -}}
+{{- if eq (default "" $agent.auth.role) "" -}}
+{{- fail "genesis: vault.agent.auth.role must be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reject AppRole credentials / wrapped tokens. */ -}}
+{{- $approleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- if $approleSet -}}
+{{- fail "genesis: vault.roleId/secretId/wrappedToken must not be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reject Vault ESO credentials. */ -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- fail "genesis: vault.externalSecret.remoteKey must not be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* TLS managed by the agent in TCP mode. */ -}}
+{{- if not $socketMode -}}
+{{- if or (ne (default "" .Values.tls.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "")) -}}
+{{- fail "genesis: tls Secret/ESO must not be set when vault.agent.enabled manages TLS" -}}
+{{- end -}}
+{{- if eq (default "" $agent.pki.role) "" -}}
+{{- fail "genesis: vault.agent.pki.role must be set when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- if eq (default "" $agent.pki.commonName) "" -}}
+{{- fail "genesis: vault.agent.pki.commonName must be set when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- $dnsOk := false -}}
+{{- range $agent.pki.dnsNames -}}
+{{- if ne (toString .) "" -}}{{- $dnsOk = true -}}{{- end -}}
+{{- end -}}
+{{- if not $dnsOk -}}
+{{- fail "genesis: vault.agent.pki.dnsNames must contain at least one SAN when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Injector annotations. */ -}}
+{{- $hasInjector := false -}}
+{{- range $k, $v := .Values.podAnnotations -}}
+{{- if hasPrefix "vault.hashicorp.com/agent" $k -}}{{- $hasInjector = true -}}{{- end -}}
+{{- end -}}
+{{- if $hasInjector -}}
+{{- fail "genesis: vault.hashicorp.com/agent-* injector annotations must not be used when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Duplicate chart-owned env entries. */ -}}
+{{- $dupEnv := false -}}
+{{- range $e := .Values.extraEnv -}}
+{{- if or (eq (toString $e.name) "GENESIS_VAULT_URL") (eq (toString $e.name) "GENESIS_TLS_PEM_BUNDLE") (eq (toString $e.name) "GENESIS_VAULT_ROLE_ID") (eq (toString $e.name) "GENESIS_VAULT_SECRET_ID") (eq (toString $e.name) "GENESIS_VAULT_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
+{{- end -}}
+{{- if $dupEnv -}}
+{{- fail "genesis: extraEnv must not redefine chart-managed Vault/TLS env entries when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reserved mount collisions. */ -}}
+{{- $reservedVol := false -}}
+{{- range $v := .Values.extraVolumes -}}
+{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "vault-agent-socket") (eq (toString $v.name) "vault-agent-config") (eq (toString $v.name) "vault-agent-token") (eq (toString $v.name) "vault-agent-ca") (eq (toString $v.name) "vault-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
+{{- end -}}
+{{- if $reservedVol -}}
+{{- fail "genesis: extraVolumes must not use reserved volume names when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Nonroot UID/GID + fsGroup. */ -}}
+{{- $ru := int (default 0 .Values.securityContext.runAsUser) -}}
+{{- $rg := int (default 0 .Values.securityContext.runAsGroup) -}}
+{{- $fsg := int (default 0 .Values.podSecurityContext.fsGroup) -}}
+{{- if or (le $ru 0) (le $rg 0) (le $fsg 0) -}}
+{{- fail "genesis: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* automount must be false. */ -}}
+{{- if .Values.serviceAccount.automount -}}
+{{- fail "genesis: serviceAccount.automount must be false when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* renewalThreshold strictly between 0 and 1. */ -}}
+{{- $rt := float64 (default 0.8 $agent.pki.renewalThreshold) -}}
+{{- if or (le $rt 0.0) (ge $rt 1.0) -}}
+{{- fail "genesis: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
+{{- end -}}
+
+{{- /* Distinct socket/TLS destinations. */ -}}
+{{- $socketPath := include "genesis.agentSocketPath" . -}}
+{{- $tlsPath := .Values.tls.pemBundlePath -}}
+{{- if eq $socketPath $tlsPath -}}
+{{- fail "genesis: vault socket and TLS bundle destinations must be distinct when vault.agent.enabled" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

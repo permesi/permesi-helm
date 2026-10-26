@@ -1,0 +1,3 @@
+extraVolumes:
+  - name: vault-agent-socket
+    emptyDir: {}

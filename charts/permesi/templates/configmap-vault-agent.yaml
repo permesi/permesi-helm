@@ -1,0 +1,15 @@
+{{- if .Values.vault.agent.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "permesi.agentConfigName" . }}
+  labels:
+    {{- include "permesi.labels" . | nindent 4 }}
+data:
+  agent.hcl: |
+    {{- include "permesi.agentHCL" . | nindent 4 }}
+  tls-bundle.tpl: |
+    {{- include "permesi.agentTlsTemplate" . | nindent 4 }}
+  paserk-ca.tpl: |
+    {{- include "permesi.agentCaTemplate" . | nindent 4 }}
+{{- end }}

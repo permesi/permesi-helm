@@ -163,6 +163,134 @@
         "transitMount": {
           "type": "string",
           "minLength": 1
+        },
+        "agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "address": {
+              "type": "string"
+            },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tag": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": ["Always", "IfNotPresent", "Never"]
+                }
+              }
+            },
+            "auth": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mount": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string"
+                },
+                "audience": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tokenExpirationSeconds": {
+                  "type": "integer",
+                  "minimum": 600,
+                  "maximum": 2147483647
+                }
+              }
+            },
+            "ca": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "existingConfigMap": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "pki": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mount": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string"
+                },
+                "commonName": {
+                  "type": "string"
+                },
+                "dnsNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "ttl": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "renewalThreshold": {
+                  "type": "number"
+                }
+              }
+            },
+            "resources": {
+              "type": "object"
+            },
+            "startupProbe": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "periodSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "timeoutSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "failureThreshold": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "paserkCa": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
         }
       }
     },

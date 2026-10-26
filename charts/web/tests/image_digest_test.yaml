@@ -1,0 +1,41 @@
+suite: web image digest
+release:
+  name: web
+  namespace: web
+templates:
+  - deployment.yaml
+tests:
+  - it: falls back to repository:tag when no digest is set
+    set:
+      runtimeConfig.allowBuildDefaults: true
+      image.tag: 9.9.9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/permesi/web:9.9.9
+
+  - it: pins repository@digest when a digest is set, ignoring the tag
+    set:
+      runtimeConfig.allowBuildDefaults: true
+      image.tag: 9.9.9
+      image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/permesi/web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+  - it: rejects a malformed digest via the schema
+    set:
+      runtimeConfig.allowBuildDefaults: true
+      image.digest: sha256:ABC
+    asserts:
+      - failedTemplate:
+          errorPattern: "image\\.digest: Does not match pattern"
+
+  - it: rejects a digest without the sha256 prefix
+    set:
+      runtimeConfig.allowBuildDefaults: true
+      image.digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    asserts:
+      - failedTemplate:
+          errorPattern: "image\\.digest: Does not match pattern"

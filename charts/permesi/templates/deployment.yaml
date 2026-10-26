@@ -58,7 +58,7 @@ spec:
       {{- if $agentEnabled }}
       initContainers:
         - name: vault-agent
-          image: "{{ .Values.vault.agent.image.repository }}:{{ .Values.vault.agent.image.tag }}"
+          image: {{ include "permesi.image" .Values.vault.agent.image | quote }}
           imagePullPolicy: {{ .Values.vault.agent.image.pullPolicy }}
           command: ["/bin/vault"]
           args:
@@ -115,7 +115,7 @@ spec:
       {{- end }}
       containers:
         - name: permesi
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "permesi.image" .Values.image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}

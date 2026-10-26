@@ -360,3 +360,16 @@ false
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Image reference for an image values block ({repository, tag, digest}).
+A non-empty digest pins the image as repository@digest and takes precedence
+over the tag; otherwise renders repository:tag.
+*/}}
+{{- define "permesi.image" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%v" .repository .tag -}}
+{{- end -}}
+{{- end -}}

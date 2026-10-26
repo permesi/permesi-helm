@@ -1,0 +1,25 @@
+{
+  "client_payload": {
+    "version": "0.4.3",
+    "source_repo": "permesi/permesi",
+    "source_sha": "04783bc009cdef4e8ba71910c12ecbd25aa74dfd",
+    "source_tag": "v0.4.3",
+    "images": {
+      "permesi": {
+        "repository": "ghcr.io/permesi/permesi",
+        "tag": "0.4.3",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "genesis": {
+        "repository": "ghcr.io/permesi/genesis",
+        "tag": "0.4.3",
+        "digest": "sha256:NOT-A-DIGEST"
+      },
+      "web": {
+        "repository": "ghcr.io/permesi/web",
+        "tag": "0.4.3",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  }
+}

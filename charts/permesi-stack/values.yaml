@@ -17,6 +17,7 @@ permesi:
   image:
     repository: ghcr.io/permesi/permesi
     tag: 0.4.3  # managed-by-release-bot
+    digest: ""  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 genesis:
@@ -24,6 +25,7 @@ genesis:
   image:
     repository: ghcr.io/permesi/genesis
     tag: 0.4.3  # managed-by-release-bot
+    digest: ""  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 web:
@@ -31,4 +33,5 @@ web:
   image:
     repository: ghcr.io/permesi/web
     tag: 0.4.3  # managed-by-release-bot
+    digest: ""  # managed-by-release-bot
     pullPolicy: IfNotPresent

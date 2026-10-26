@@ -62,6 +62,15 @@ tls:
 
 vault:
   url: /var/run/secrets/vaultproject.io/agent.sock
+  # Explicit native auth needs a newly built supporting app image (unreleased).
+  # auto preserves socket -> Agent and TCP -> AppRole behavior.
+  authMethod: auto
+  kubernetes:
+    authMount: kubernetes
+    role: ""
+    tokenPath: /var/run/secrets/vault-native/token
+    audience: vault
+    tokenExpirationSeconds: 3600
   externalSecret:
     remoteKey: ""
     roleIdProperty: ""

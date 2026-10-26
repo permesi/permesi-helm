@@ -150,6 +150,7 @@ false
 {{- end -}}
 
 {{- define "genesis.validateValues" -}}
+{{- include "genesis.validateVaultAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- if and $socketMode .Values.service.enabled -}}
 {{- fail "genesis: service.enabled must be false when config.socketPath is set" -}}
@@ -198,10 +199,10 @@ false
 
 {{- $vaultIsTcp := eq (include "genesis.vaultIsTcp" .) "true" -}}
 {{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEsoActive -}}
-{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not $roleSet) -}}
+{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not $roleSet) -}}
 {{- fail "genesis: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
 {{- fail "genesis: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
 {{- end -}}
 

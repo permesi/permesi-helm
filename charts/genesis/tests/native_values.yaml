@@ -1,0 +1,7 @@
+vault:
+  authMethod: kubernetes
+  url: https://vault.example.com:8200
+  kubernetes:
+    role: genesis-runtime
+serviceAccount:
+  automount: false

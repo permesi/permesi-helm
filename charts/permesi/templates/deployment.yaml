@@ -4,6 +4,7 @@
 {{- $admissionCaSecret := include "permesi.admissionCaSecretName" . -}}
 {{- $tlsSecret := include "permesi.tlsSecretName" . -}}
 {{- $agentEnabled := .Values.vault.agent.enabled -}}
+{{- $nativeEnabled := eq .Values.vault.authMethod "kubernetes" -}}
 {{- $agentManagesTls := and $agentEnabled (not $socketMode) -}}
 {{- $agentManagesCa := and $agentEnabled .Values.vault.agent.paserkCa.enabled -}}
 {{- $admissionCaPath := default "" .Values.admission.paserkCaPath -}}
@@ -165,6 +166,18 @@ spec:
 
             - name: PERMESI_VAULT_URL
               value: {{ .Values.vault.url | quote }}
+            {{- if ne .Values.vault.authMethod "auto" }}
+            - name: PERMESI_VAULT_AUTH_METHOD
+              value: {{ .Values.vault.authMethod | quote }}
+            {{- if $nativeEnabled }}
+            - name: PERMESI_VAULT_KUBERNETES_AUTH_MOUNT
+              value: {{ .Values.vault.kubernetes.authMount | quote }}
+            - name: PERMESI_VAULT_KUBERNETES_ROLE
+              value: {{ .Values.vault.kubernetes.role | quote }}
+            - name: PERMESI_VAULT_KUBERNETES_TOKEN_PATH
+              value: {{ .Values.vault.kubernetes.tokenPath | quote }}
+            {{- end }}
+            {{- end }}
             {{- if $vaultEso }}
             - name: PERMESI_VAULT_ROLE_ID
               valueFrom:
@@ -252,7 +265,7 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $mountTls $mountCa $agentEnabled .Values.extraVolumeMounts }}
+          {{- if or $mountTls $mountCa $agentEnabled $nativeEnabled .Values.extraVolumeMounts }}
           volumeMounts:
             {{- if $mountTls }}
             - name: tls-bundle
@@ -267,6 +280,11 @@ spec:
             {{- if $agentEnabled }}
             - name: vault-agent-socket
               mountPath: {{ $agentSocketDir | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if $nativeEnabled }}
+            - name: vault-native-token
+              mountPath: {{ include "permesi.pathDir" .Values.vault.kubernetes.tokenPath | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -306,7 +324,7 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or $mountTls $mountCa $agentEnabled .Values.extraVolumes }}
+      {{- if or $mountTls $mountCa $agentEnabled $nativeEnabled .Values.extraVolumes }}
       volumes:
         {{- if $mountTls }}
         - name: tls-bundle
@@ -357,6 +375,16 @@ spec:
         - name: vault-agent-scratch
           emptyDir:
             medium: Memory
+        {{- end }}
+        {{- if $nativeEnabled }}
+        - name: vault-native-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: {{ include "permesi.pathBase" .Values.vault.kubernetes.tokenPath | quote }}
+                  audience: {{ .Values.vault.kubernetes.audience | quote }}
+                  expirationSeconds: {{ .Values.vault.kubernetes.tokenExpirationSeconds }}
+            defaultMode: 0400
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

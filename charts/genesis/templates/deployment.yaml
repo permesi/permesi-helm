@@ -5,6 +5,7 @@
 {{- $vaultRoleIdSecret := include "genesis.vaultRoleIdSecretName" . -}}
 {{- $vaultSecretIdSecret := include "genesis.vaultSecretIdSecretName" . -}}
 {{- $agentEnabled := .Values.vault.agent.enabled -}}
+{{- $nativeEnabled := eq .Values.vault.authMethod "kubernetes" -}}
 {{- $agentManagesTls := and $agentEnabled (not $socketMode) -}}
 {{- $agentSocketDir := include "genesis.agentSocketDir" . -}}
 {{- $agentTlsDir := include "genesis.agentTlsDir" . -}}
@@ -140,6 +141,18 @@ spec:
 
             - name: GENESIS_VAULT_URL
               value: {{ .Values.vault.url | quote }}
+            {{- if ne .Values.vault.authMethod "auto" }}
+            - name: GENESIS_VAULT_AUTH_METHOD
+              value: {{ .Values.vault.authMethod | quote }}
+            {{- if $nativeEnabled }}
+            - name: GENESIS_VAULT_KUBERNETES_AUTH_MOUNT
+              value: {{ .Values.vault.kubernetes.authMount | quote }}
+            - name: GENESIS_VAULT_KUBERNETES_ROLE
+              value: {{ .Values.vault.kubernetes.role | quote }}
+            - name: GENESIS_VAULT_KUBERNETES_TOKEN_PATH
+              value: {{ .Values.vault.kubernetes.tokenPath | quote }}
+            {{- end }}
+            {{- end }}
             {{- if $vaultRoleIdSecret }}
             - name: GENESIS_VAULT_ROLE_ID
               valueFrom:
@@ -179,7 +192,7 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $mountTls $agentEnabled .Values.extraVolumeMounts }}
+          {{- if or $mountTls $agentEnabled $nativeEnabled .Values.extraVolumeMounts }}
           volumeMounts:
             {{- if $mountTls }}
             - name: tls-bundle
@@ -189,6 +202,11 @@ spec:
             {{- if $agentEnabled }}
             - name: vault-agent-socket
               mountPath: {{ $agentSocketDir | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if $nativeEnabled }}
+            - name: vault-native-token
+              mountPath: {{ include "genesis.pathDir" .Values.vault.kubernetes.tokenPath | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -228,7 +246,7 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or $mountTls $agentEnabled .Values.extraVolumes }}
+      {{- if or $mountTls $agentEnabled $nativeEnabled .Values.extraVolumes }}
       volumes:
         {{- if $mountTls }}
         - name: tls-bundle
@@ -266,6 +284,16 @@ spec:
         - name: vault-agent-scratch
           emptyDir:
             medium: Memory
+        {{- end }}
+        {{- if $nativeEnabled }}
+        - name: vault-native-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: {{ include "genesis.pathBase" .Values.vault.kubernetes.tokenPath | quote }}
+                  audience: {{ .Values.vault.kubernetes.audience | quote }}
+                  expirationSeconds: {{ .Values.vault.kubernetes.tokenExpirationSeconds }}
+            defaultMode: 0400
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

@@ -219,6 +219,9 @@ A chart-only release (no application release) bumps chart versions while keeping
 3. Leave `appVersion` and every `image.tag` (including the
    `# managed-by-release-bot` tags in `charts/permesi-stack/values.yaml`) at the
    current application version.
+4. Update the chart install `--version X.Y.Z` references in `README.md` (and any
+   chart README using the same pattern) to the new chart version.
 
 Do **not** use `scripts/bump-release.sh` for chart-only releases: it couples
-chart, appVersion, and image tag bumps for application releases.
+chart, appVersion, and image tag bumps for application releases, and also
+rewrites the README install `--version` references alongside them.

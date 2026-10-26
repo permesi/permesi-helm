@@ -57,4 +57,19 @@ stack_values_file="charts/permesi-stack/values.yaml"
 sed -E -i.bak "s|^(\s*tag:\s*)\"?[^\"#]+\"?\s*# managed-by-release-bot\s*$|\1${version}  # managed-by-release-bot|" "${stack_values_file}"
 rm -f "${stack_values_file}.bak"
 
+# Keep chart install `--version X.Y.Z` references in the docs in sync.
+readme_files=(
+    "README.md"
+    "charts/permesi/README.md"
+    "charts/genesis/README.md"
+    "charts/web/README.md"
+    "charts/permesi-stack/README.md"
+)
+
+for file in "${readme_files[@]}"; do
+    [[ -f "${file}" ]] || continue
+    sed -E -i.bak "s/(--version[[:space:]]+)[0-9]+\.[0-9]+\.[0-9]+/\1${version}/g" "${file}"
+    rm -f "${file}.bak"
+done
+
 echo "Bumped charts to ${version}"

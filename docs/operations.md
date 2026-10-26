@@ -13,8 +13,8 @@ source paths below are relative to the application repository (`permesi/`).
 1. **Production external PostgreSQL with backups.** Production charts do not
    provision database storage. The opt-in quickstart is disposable, not a
    production database. Helm rollback does **not** roll back schema or data.
-2. **Apply canonical SQL before rollout.** Precreate non-superuser Vault managers
-   with strong passwords, then run `00_init.sql` against `postgres` with
+2. **Apply canonical SQL before rollout.** Precreate non-superuser schema owners
+   with strong static passwords, then run `00_init.sql` against `postgres` with
    `ON_ERROR_STOP=1` and authenticated owner credentials. It includes both service
    schemas and verification; do not separately apply all files as administrator.
    Reapply additive schema changes as the existing owner before upgrading the
@@ -132,12 +132,13 @@ templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
   changes. The Kubernetes auth role's `bound_service_account_names`/`namespaces`
   must match the rendered SA name and exact namespace; a mismatched audience/role
   denies login.
-- **DB lease fail-closed recovery.** DB lease renewal is owned by the application,
-  not the Agent (the Agent has no cache block, so it does not hold a competing
-  lease owner). Renewal failure shuts the pod down fail-closed; a replacement pod
-  re-acquires fresh credentials via the Agent's socket. If a lease expires or its
-  parent token is revoked, restart the pod — do not assume the Agent repairs an
-  existing pool automatically.
+- **DB lease fail-closed recovery.** The application, not Agent, owns DB lease
+  renewal. The corrected verifier synchronously revoked each service's real pool
+  leases, observed exact old roles disappear, a nonzero application exit and
+  same-pod restart with new pool identities, then trusted HTTPS/admission
+  recovery. Restore Vault/DB connectivity and allow the Deployment to restart
+  the app; do not assume Agent repairs a live pool. This DB-lease proof does not
+  qualify revocation of the Agent workload auth token itself.
 - **No exposed TCP proxy / no cache / no quit endpoint.** The socket proxy is the
   only listener; it preserves an explicitly supplied operator `X-Vault-Token`
   (never `use_auto_auth_token = "force"`), and Unix requests do not set
@@ -373,40 +374,86 @@ the real-dependencies cluster driver and from remote release execution.
 
 ## 11. Quickstart qualification and known boundaries
 
-The local M-QS and independent R-QS drivers reported successful default-path
-Agent HTTPS/admission/signup, leaf reload, restart/scaling and reinstall
-identity/data preservation. The M-UQ report separately exercised direct Helm
-install/upgrades and the runtime verifier. Those runs are not evidence of
-GitHub-hosted execution or production qualification.
+Bootstrap correction `de750e5` separates static canonical schema owners
+`vault_permesi`/`vault_genesis` from non-owner credential managers
+`vault_permesi_manager`/`vault_genesis_manager`. Managers get only their matching
+runtime role's ADMIN option with INHERIT/SET disabled, own-DB CONNECT,
+CREATEROLE and pg_signal_backend. Vault rotates the manager password immediately
+after first configuration and never resets it on rerun. Schema-owner passwords
+remain stable for authenticated schema bootstrap and maintenance.
 
-The independent R-QS review also reproduced boundaries not disproved by a passing
-normal driver. Until their implementation fixes are integrated:
+The bootstrap correction report runtime-qualified both manager rotations plus
+rerun/data/identity preservation, colon/backslash passwords and CR/LF rejection,
+filtered root/unseal banner output with correct signal/exit handling, hashed
+namespace-safe reviewer RBAC names, and a real limited-privilege pregranted
+installation. Older owner-as-manager dev configs fail explicitly: use a
+manager-separated restore or reset only the disposable namespace. Do not reset
+the schema-owner password or automatically migrate an unknown legacy config.
 
-- **Treat dev Vault logs as credentials.** The dev startup banner can print its
-  root token/unseal key. Restrict `pods/log`, log collection and retention; never
-  attach raw Vault logs to an issue. The narrow Secret mount is not the only
-  exposure boundary.
-- **Manager password rotation needs coordinated schema credentials.** Explicit
-  Vault `database/rotate-root` leaves the helper's owner-authenticated SQL
-  bootstrap input stale; subsequent bootstrap/install can fail. Do not reset the
-  database owner password back to its original Secret to hide that failure.
-  Production requires an independently managed owner-credential lifecycle.
-- **Existing credentials have a serialization limit.** The current helper does
-  not escape `:`/`\` when producing `.pgpass`; externally provided passwords
-  containing those characters can fail bootstrap. This is a helper defect, not
-  advice to weaken production credentials. The manual production PGPASSFILE must
-  follow libpq escaping rules.
-- **Verifier success has limits.** Shell-issued DB membership/revocation checks
-  can report success for the wrong issued identity; fixed verifier ports can
-  attach to pre-existing forwards. Do not interpret the default pass as proof of
-  exact lease revocation or independent concurrent-run isolation.
-- **RBAC names can collide for long namespaces.** Truncation can remove
-  namespace uniqueness; the cluster-scoped reviewer resource ownership error
-  does not authorize deleting another installation's grant.
+Verifier correction `a81d64b` privately tracks each exact issued role/lease,
+checks its privileges, propagates synchronous revocation errors and verifies
+that role disappears. Fault-injected missing membership and broken revocation
+both failed verification. Runtime forwards parse their own child process's
+dynamic loopback announcement; simultaneous verifiers with different CAs passed
+while the old fixed ports were occupied. These verifier ports are separate from
+the fixed user-facing browser ports in `connect.sh`.
 
-Natural projected-JWT expiry/rotation, revoked live application DB-pool/token
-recovery, outbound PASERK wrong-CA/hostname negatives, CA-root rotation, production
-Vault/DB TLS, persistence/restores, NetworkPolicy enforcement, SMTP, browser/WASM
-signup and verified-email/login/OIDC E2E remain separate qualifications.
-Existing-binding/non-admin install support and example-only CI-trigger coverage
-are not established by the current default-path driver.
+The correction report's complete driver passed in 296.19s, including both
+services' actual pool-lease fail-closed restart/new-credential/admission recovery,
+leaf reload, Agent restart, replacement/scaling and reinstall preservation.
+Its complete umbrella wrapper also passed with explicit
+`--helper-release permesi --helper-fullname permesi-quickstart`. These are
+attributed report results, not a fresh driver run by the documentation builder.
+
+Natural projected-JWT expiry/rotation, exact Agent workload-token revocation,
+outbound PASERK wrong-CA/SAN negatives, CA-root rotation, production durability/
+HA/TLS, NetworkPolicy enforcement, SMTP, browser/WASM signup and verified-email/
+login/OIDC E2E remain separate qualifications. GitHub-hosted execution is not
+implied. The disposable quickstart still has no pg_cron scheduler; production
+scheduler execution and external reviewer provisioning are separate manual-guide
+procedures, not claims derived from the dev driver.
+
+### CI driver and external qualifications
+
+The corrected full CI driver defaults to the disposable namespace **`qv-ci`**.
+Its fault-injection harness requires `qv-*`; the driver rejects other namespace
+prefixes before installing resources. This restriction applies to the CI driver,
+not ordinary `install.sh`. Use an isolated context and a matching locked app SQL
+checkout; the admission helper must be compatible with the tooling environment:
+
+```bash
+QS_CONTEXT=kind-permesi-helm-test QS_NAMESPACE=qv-ci \
+  QS_APP_SOURCE=/path/to/locked/permesi QS_CHARTS_DIR=charts \
+  QS_ADMISSION_BIN=/path/to/compatible/quickstart-admission \
+  bash scripts/ci/real-dependencies.sh
+```
+
+Lead's final evidence at implementation `9742558` reports this default-path run
+passed in **302.47s**, including independent missing-GRANT/broken-revocation
+faults, both services' actual pool-lease recovery and reinstall preservation.
+It separately reports the integrated Helm-only profile and complete explicitly
+mapped wrapper passed. These supersede earlier preflight-failed/pre-correction
+driver attempts; they do not prove natural JWT/token-max-TTL expiry or production
+operation.
+
+The documentation qualification separately exercised
+[external Vault reviewer replacement](install-guide.md#external-vault-dedicated-reviewer-and-explicit-configuration)
+and [pg_cron background-worker execution](install-guide.md#23-production-scheduler-pg_cron-and-verification).
+External Vault ran outside Kind: both application logins succeeded before/after a
+distinct reviewer replacement, wrong SA/audience/cross-role requests failed,
+apps lacked TokenReview, and scoped management identities were enforced. JWT
+expiry, periodic management-token renewal and the operator-host timer were not
+elapsed-time tested.
+
+The PostgreSQL qualification executed both canonical maintenance jobs before and
+after changing both non-owner manager passwords; all 12 runs succeeded, including
+partition rollover/retention and expired-row cleanup effects. Owner credentials
+and job/function ownership remained unchanged. That scheduler experiment changed
+passwords via SQL, not Vault's rotate-root API; the bootstrap report supplies its
+separate API/rerun proof. Neither experiment certifies production TLS, failover,
+capacity or a managed service's permissions.
+
+Initial manager-config creation and first root rotation are distinct steps.
+Treat an interruption between them as incomplete provisioning: require successful
+authorized manager rotation before enabling workloads. No automatic repair of
+that interruption is claimed here.

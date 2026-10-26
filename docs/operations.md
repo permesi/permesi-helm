@@ -116,12 +116,14 @@ templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
   reissued, not renewed in place. CA/intermediate rotation is different: the
   PASERK roots are startup-loaded, so roll with overlapping trusted roots before
   an issuer change, then `kubectl rollout restart` the backends.
-- **Agent restart.** The Agent's startup probe re-authenticates and re-renders
-  before releasing the pod: a stale socket/file from a prior Agent must not pass
-  the gate. Restarting only the Agent must not leave a dead socket; the native
-  sidecar outlives the app container during graceful shutdown. A stopped Agent
-  whose auth token and runtime certificates expire cannot re-issue until restarted
-  with valid bootstrap credentials (projected JWT + Kubernetes auth).
+- **Agent restart.** The startup probe checks authenticated proxy access and
+  nonempty required files before initial backend startup; existence alone is not
+  sufficient. `pkiCert` may reuse a valid cached bundle after restart, so a probe
+  success does not prove fresh certificate issuance. An independent sidecar
+  restart does not re-run the initial startup gate for the already-running
+  backend. Verify socket access and application requests after restart; full
+  restart/JWT-rotation qualification remains pending M-QS. The native sidecar
+  outlives the app container during graceful shutdown.
 - **JWT rotation.** The Agent re-reads the projected service-account JWT, so
   service-account token rotation (audience `vault`) is absorbed without pod
   changes. The Kubernetes auth role's `bound_service_account_names`/`namespaces`
@@ -137,6 +139,11 @@ templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
   only listener; it preserves an explicitly supplied operator `X-Vault-Token`
   (never `use_auto_auth_token = "force"`), and Unix requests do not set
   `X-Vault-Request`, so `require_request_header` must stay off.
+- **Issuer chains.** The TLS template writes one private key, the leaf, then
+  the ordered, deduplicated `.Data.CAChain` returned by Vault, including a root if
+  returned. Import the complete chain into the issuing mount; a partial import
+  yields a partial served chain. The PASERK CA is a separate JSON-endpoint
+  template, not a substitute for the listener's issuer chain.
 
 
 

@@ -110,6 +110,18 @@ renders the bundle), `vault.hashicorp.com/agent-*` annotations, duplicate
 chart-owned env entries, and reserved volume names. `config.socketPath` omits the
 inbound PKI template but keeps the Vault socket.
 
+Managed socket/TLS files need absolute paths inside dedicated directories,
+not directly under `/`. After path normalization, active mount directories must
+be disjoint (neither equal nor ancestors/descendants), including `extraVolumeMounts`
+and the Agent's `/vault/config`, `/var/run/secrets/vault-token`, `/tmp`, and
+optional `/vault/ca` mounts. Inactive TLS destinations do not reserve a mount;
+a legacy TLS Secret mount still does.
+
+The bundle contains one private key, the leaf, then the ordered, deduplicated
+`pkiCert` `.Data.CAChain` returned by Vault. Import the complete issuer chain into
+Vault; the Agent cannot reconstruct missing intermediates. A valid cached bundle
+may be reused on Agent restart.
+
 ## Image digest precedence
 
 Set `image.digest` (`sha256:<64 hex>`) to pin by digest: the chart renders

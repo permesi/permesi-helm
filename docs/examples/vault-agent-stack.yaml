@@ -21,6 +21,11 @@
 #   - Genesis Service:   permesi-genesis.permesi.svc.cluster.local:8080
 #   - Permesi Service:   permesi.permesi.svc.cluster.local:8080
 #   - Web Service:       permesi-web.permesi.svc.cluster.local:8080
+#
+# Import the full issuer chain into Vault. Agent bundles contain key + leaf +
+# Vault's ordered CAChain, including the root if returned.
+# Keep socket, TLS, PASERK CA and extra-volume mount directories disjoint; managed
+# files must live inside dedicated directories, not directly under /.
 
 permesi:
   enabled: true
@@ -73,6 +78,7 @@ permesi:
         commonName: permesi.permesi.svc.cluster.local
         dnsNames:
           - permesi.permesi.svc.cluster.local
+          - api.permesi.example.com
         ttl: 24h
         renewalThreshold: 0.8
       paserkCa:
@@ -253,6 +259,7 @@ genesis:
         commonName: permesi-genesis.permesi.svc.cluster.local
         dnsNames:
           - permesi-genesis.permesi.svc.cluster.local
+          - genesis.permesi.example.com
         ttl: 24h
         renewalThreshold: 0.8
 

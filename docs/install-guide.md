@@ -324,14 +324,22 @@ vault write pki-int/config/urls \
   crl_distribution_points="https://vault.example.com/v1/pki-int/crl"
 ```
 
+Import the complete signed issuer chain at `intermediate/set-signed`, including
+each parent intermediate. The Agent writes the ordered, deduplicated
+`pkiCert` `.Data.CAChain` after the leaf; it cannot reconstruct a chain missing
+from Vault's issuance response. A self-signed root is included in the bundle if
+Vault returns it. Verify the leaf against your independently trusted root, not
+against a CA accepted solely because it arrived in the bundle.
+
 ### 3.7 PKI runtime roles (service-scoped SANs)
 
-ServerAuth suffices for these listener certificates. `allowed_domains` is the
-exact service DNS name; subdomain/glob/wildcard/any-name/IP issuance is disabled:
+ServerAuth suffices for these listener certificates. `allowed_domains` lists the
+exact service and public passthrough DNS names; subdomain/glob/wildcard/any-name/IP
+issuance is disabled:
 
 ```bash
 vault write pki-int/roles/permesi-runtime \
-  allowed_domains="permesi.permesi.svc.cluster.local" \
+  allowed_domains="permesi.permesi.svc.cluster.local,api.permesi.example.com" \
   allow_bare_domains=true allow_subdomains=false allow_glob_domains=false \
   allow_wildcard_certificates=false allow_any_name=false enforce_hostnames=true \
   allow_ip_sans=false \
@@ -340,7 +348,7 @@ vault write pki-int/roles/permesi-runtime \
   ttl="24h" max_ttl="72h"
 
 vault write pki-int/roles/genesis-runtime \
-  allowed_domains="permesi-genesis.permesi.svc.cluster.local" \
+  allowed_domains="permesi-genesis.permesi.svc.cluster.local,genesis.permesi.example.com" \
   allow_bare_domains=true allow_subdomains=false allow_glob_domains=false \
   allow_wildcard_certificates=false allow_any_name=false enforce_hostnames=true \
   allow_ip_sans=false \
@@ -463,7 +471,7 @@ permesi:
         mount: pki-int
         role: permesi-runtime
         commonName: permesi.permesi.svc.cluster.local
-        dnsNames: [permesi.permesi.svc.cluster.local]
+        dnsNames: [permesi.permesi.svc.cluster.local, api.permesi.example.com]
         ttl: 24h
         renewalThreshold: 0.8
       paserkCa:
@@ -480,6 +488,8 @@ the full table.
   atomically-replaced file: exactly one private key, the leaf, then the issuer
   chain. Directory mounts, never `subPath`. File mode `0600` (private key bundle),
   `0644` for the public PASERK CA, socket `0600`.
+  The issuer chain is the complete ordered `.Data.CAChain` supplied by Vault,
+  including any returned root. Configure Vault with the full chain (§3.6).
 - Permesi's PASERK CA is rendered at `admission.paserkCaPath` (or the derived
   `paserkCa.mountPath`/`fileName` default `/var/run/permesi/admission-ca/ca.pem`).
 - The socket, TLS bundle, and PASERK CA live in memory-backed `emptyDir` volumes —
@@ -492,14 +502,23 @@ the full table.
   supplied operator token is still forwarded.
 - `config.socketPath` (an unrelated application-listener setting) omits the inbound
   PKI template/volume but keeps the Vault socket and Permesi PASERK CA.
+- Active socket/TLS/CA destinations must be absolute files inside dedicated
+  directories, never `/agent.sock`, `/bundle.pem`, or `/ca.pem`. Normalized
+  mount directories must not overlap each other or the Agent's `/vault/config`,
+  `/var/run/secrets/vault-token`, `/tmp`, and optional `/vault/ca` mounts.
+  `extraVolumeMounts` obey the same ancestor/descendant rule; mounting `/` is
+  rejected. Inactive TLS/CA paths do not reserve directories, but legacy Secret
+  mounts still count.
 
 ### 4.3 Startup gate
 
-A startup probe on the native sidecar blocks backend initialization until: the
-socket answers an authenticated tokenless `vault token lookup` through
-`-address=unix://...`, and the bundle/CA files have completed rendering. Template
-failures fail the gate rather than producing `<no value>`. A stale socket/file
-from a previous Agent must not release startup before fresh auth.
+A startup probe on the native sidecar blocks initial backend startup until a
+tokenless `vault token lookup` through `-address=unix://...` succeeds and required
+bundle/CA files are nonempty. File/socket existence alone is insufficient.
+`pkiCert` may reuse a valid cached certificate after Agent restart; the probe does
+not prove fresh issuance, current certificate validity, or application recovery.
+The initial startup gate is not a promise to pause an already-running backend
+during an independent sidecar restart.
 
 ### 4.4 Production HTTPS
 
@@ -619,8 +638,11 @@ TLS.
 
 ### 7.2 Agent restart and JWT rotation
 
-- The Agent re-reads rotated service-account JWTs; restarting the Agent must not
-  leave a dead socket. The startup probe re-authenticates before release.
+- The Agent re-reads rotated service-account JWTs. Its probe checks authenticated
+  proxy access and required file presence, not new certificate issuance; a valid
+  cached bundle can be reused. Verify socket recovery and backend requests after
+  an independent Agent restart. End-to-end restart/JWT-rotation evidence remains
+  pending M-QS.
 - A stopped Agent whose auth token and runtime certificates expire cannot re-issue
   until restarted with valid bootstrap credentials (in the managed chart, this is
   the projected JWT + Kubernetes auth — no cert-auth bootstrap).

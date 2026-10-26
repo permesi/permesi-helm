@@ -8,9 +8,34 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version to bump (X.Y.Z or vX.Y.Z)
+        description: App release version to bump (X.Y.Z or vX.Y.Z)
         required: true
         type: string
+      chart_version:
+        description: Chart version (X.Y.Z); empty = app version, or next patch when that would not advance the charts
+        required: false
+        type: string
+        default: ''
+      permesi_digest:
+        description: Digest of ghcr.io/permesi/permesi (sha256:...)
+        required: false
+        type: string
+        default: ''
+      genesis_digest:
+        description: Digest of ghcr.io/permesi/genesis (sha256:...)
+        required: false
+        type: string
+        default: ''
+      web_digest:
+        description: Digest of ghcr.io/permesi/web (sha256:...)
+        required: false
+        type: string
+        default: ''
+      tag_only:
+        description: Acknowledge a tag-only release without digests (clears existing digests)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -24,37 +49,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Resolve version
+      - name: Resolve release
         id: meta
         shell: bash
+        # Reads the event JSON with jq only; no event value is interpolated into shell.
+        run: ./scripts/ci/release-event.sh
+
+      - name: Bump chart versions
+        id: bump
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          CHART_VERSION: ${{ steps.meta.outputs.chart_version }}
+          MODE: ${{ steps.meta.outputs.mode }}
+          PERMESI_DIGEST: ${{ steps.meta.outputs.permesi_digest }}
+          GENESIS_DIGEST: ${{ steps.meta.outputs.genesis_digest }}
+          WEB_DIGEST: ${{ steps.meta.outputs.web_digest }}
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            raw="${{ github.event.client_payload.version }}"
-            source_repo="${{ github.event.client_payload.source_repo }}"
-            source_sha="${{ github.event.client_payload.source_sha }}"
-            source_tag="${{ github.event.client_payload.source_tag }}"
-          else
-            raw="${{ inputs.version }}"
-            source_repo="manual"
-            source_sha="manual"
-            source_tag="manual"
+          args=()
+          if [[ -n "${CHART_VERSION}" ]]; then
+            args+=(--chart-version "${CHART_VERSION}")
           fi
+          case "${MODE}" in
+            digest)
+              args+=(
+                --digest "permesi=${PERMESI_DIGEST}"
+                --digest "genesis=${GENESIS_DIGEST}"
+                --digest "web=${WEB_DIGEST}"
+              )
+              ;;
+            tag-only)
+              args+=(--tag-only)
+              ;;
+            *)
+              echo "Unexpected mode '${MODE}'" >&2
+              exit 1
+              ;;
+          esac
 
-          version="${raw#v}"
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Expected X.Y.Z or vX.Y.Z, got '${raw}'" >&2
-            exit 1
-          fi
+          ./scripts/bump-release.sh "${args[@]}" "${VERSION}"
 
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "source_repo=${source_repo}" >> "$GITHUB_OUTPUT"
-          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
-          echo "source_tag=${source_tag}" >> "$GITHUB_OUTPUT"
-
-      - name: Bump chart versions
-        run: ./scripts/bump-release.sh "${{ steps.meta.outputs.version }}"
+          chart_version="$(awk '/^version:/{print $2; exit}' charts/permesi-stack/Chart.yaml)"
+          echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
 
       - name: Create pull request
         id: cpr
@@ -63,12 +101,18 @@ jobs:
           branch: chore/release-${{ steps.meta.outputs.version }}
           delete-branch: true
           sign-commits: true
-          commit-message: 'chore(release): bump charts to ${{ steps.meta.outputs.version }}'
-          title: 'chore(release): bump charts to ${{ steps.meta.outputs.version }}'
+          commit-message: 'chore(release): bump charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
+          title: 'chore(release): bump charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
           body: |
             Automated release bump.
 
-            - Version: `${{ steps.meta.outputs.version }}`
+            - App version: `${{ steps.meta.outputs.version }}`
+            - Chart version: `${{ steps.bump.outputs.chart_version }}`
+            - Image mode: `${{ steps.meta.outputs.mode }}`
+            - `ghcr.io/permesi/permesi:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.permesi_digest || 'none (tag-only)' }}`
+            - `ghcr.io/permesi/genesis:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.genesis_digest || 'none (tag-only)' }}`
+            - `ghcr.io/permesi/web:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.web_digest || 'none (tag-only)' }}`
+            - Trigger: `${{ github.event_name }}` by `${{ steps.meta.outputs.source_actor }}`
             - Source repo: `${{ steps.meta.outputs.source_repo }}`
             - Source SHA: `${{ steps.meta.outputs.source_sha }}`
             - Source tag: `${{ steps.meta.outputs.source_tag }}`

@@ -41,6 +41,8 @@ tests:
 
   - it: pins the Vault Agent image by digest independently of the app image
     set:
+      image.tag: 9.9.9
+      vault.agent.image.tag: 9.8.7
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200
       vault.agent.auth.role: genesis
@@ -55,10 +57,11 @@ tests:
           value: hashicorp/vault@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/permesi/genesis:0.4.3
+          value: ghcr.io/permesi/genesis:9.9.9
 
   - it: falls back to the Vault Agent repository:tag without a digest
     set:
+      vault.agent.image.tag: 9.8.7
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200
       vault.agent.auth.role: genesis
@@ -70,7 +73,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: hashicorp/vault:1.20.4
+          value: hashicorp/vault:9.8.7
       - equal:
           path: spec.template.spec.containers[0].image
           value: ghcr.io/permesi/genesis@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

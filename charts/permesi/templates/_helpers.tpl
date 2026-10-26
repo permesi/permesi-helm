@@ -150,10 +150,135 @@ false
 
 {{- $vaultIsTcp := eq (include "permesi.vaultIsTcp" .) "true" -}}
 {{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEso -}}
-{{- if and $vaultIsTcp (not $roleSet) -}}
+{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not $roleSet) -}}
 {{- fail "permesi: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
 {{- fail "permesi: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
+{{- end -}}
+
+{{- if .Values.vault.agent.enabled -}}
+{{- $agent := .Values.vault.agent -}}
+{{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+
+{{- /* Kubernetes >= 1.29 (native sidecars). */ -}}
+{{- if or (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt (.Capabilities.KubeVersion.Minor | int) 29)) -}}
+{{- fail "permesi: vault.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
+{{- end -}}
+
+{{- /* Unix target. */ -}}
+{{- $url := default "" .Values.vault.url -}}
+{{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
+{{- fail "permesi: vault.url must be a Unix socket path when vault.agent.enabled" -}}
+{{- end -}}
+{{- $urlNoScheme := $url -}}
+{{- if hasPrefix "unix://" $url -}}
+{{- $urlNoScheme = trimPrefix "unix://" $url -}}
+{{- end -}}
+{{- if not (hasPrefix "/" $urlNoScheme) -}}
+{{- fail "permesi: vault.url must be an absolute socket path when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Vault origin address. */ -}}
+{{- if not (or (hasPrefix "http://" (default "" $agent.address)) (hasPrefix "https://" (default "" $agent.address))) -}}
+{{- fail "permesi: vault.agent.address must be an http(s) URL when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Kubernetes auth role. */ -}}
+{{- if eq (default "" $agent.auth.role) "" -}}
+{{- fail "permesi: vault.agent.auth.role must be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reject AppRole credentials / wrapped tokens. */ -}}
+{{- $approleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- if $approleSet -}}
+{{- fail "permesi: vault.roleId/secretId/wrappedToken must not be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reject Vault ESO credentials. */ -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- fail "permesi: vault.externalSecret.remoteKey must not be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* TLS managed by the agent in TCP mode. */ -}}
+{{- if not $socketMode -}}
+{{- if or (ne (default "" .Values.tls.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "")) -}}
+{{- fail "permesi: tls Secret/ESO must not be set when vault.agent.enabled manages TLS" -}}
+{{- end -}}
+{{- if eq (default "" $agent.pki.role) "" -}}
+{{- fail "permesi: vault.agent.pki.role must be set when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- if eq (default "" $agent.pki.commonName) "" -}}
+{{- fail "permesi: vault.agent.pki.commonName must be set when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- $dnsOk := false -}}
+{{- range $agent.pki.dnsNames -}}
+{{- if ne (toString .) "" -}}{{- $dnsOk = true -}}{{- end -}}
+{{- end -}}
+{{- if not $dnsOk -}}
+{{- fail "permesi: vault.agent.pki.dnsNames must contain at least one SAN when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* PASERK CA managed by the agent. */ -}}
+{{- if $agent.paserkCa.enabled -}}
+{{- if or (ne (default "" .Values.admission.paserkCa.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa) "")) -}}
+{{- fail "permesi: admission.paserkCa Secret/ESO must not be set when vault.agent.paserkCa.enabled" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Injector annotations. */ -}}
+{{- $hasInjector := false -}}
+{{- range $k, $v := .Values.podAnnotations -}}
+{{- if hasPrefix "vault.hashicorp.com/agent" $k -}}{{- $hasInjector = true -}}{{- end -}}
+{{- end -}}
+{{- if $hasInjector -}}
+{{- fail "permesi: vault.hashicorp.com/agent-* injector annotations must not be used when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Duplicate chart-owned env entries. */ -}}
+{{- $dupEnv := false -}}
+{{- range $e := .Values.extraEnv -}}
+{{- if or (eq (toString $e.name) "PERMESI_VAULT_URL") (eq (toString $e.name) "PERMESI_TLS_PEM_BUNDLE") (eq (toString $e.name) "PERMESI_ADMISSION_PASERK_CA_PATH") (eq (toString $e.name) "PERMESI_VAULT_ROLE_ID") (eq (toString $e.name) "PERMESI_VAULT_SECRET_ID") (eq (toString $e.name) "PERMESI_VAULT_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
+{{- end -}}
+{{- if $dupEnv -}}
+{{- fail "permesi: extraEnv must not redefine chart-managed Vault/TLS/CA env entries when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reserved mount collisions. */ -}}
+{{- $reservedVol := false -}}
+{{- range $v := .Values.extraVolumes -}}
+{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "admission-paserk-ca") (eq (toString $v.name) "vault-agent-socket") (eq (toString $v.name) "vault-agent-config") (eq (toString $v.name) "vault-agent-token") (eq (toString $v.name) "vault-agent-ca") (eq (toString $v.name) "vault-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
+{{- end -}}
+{{- if $reservedVol -}}
+{{- fail "permesi: extraVolumes must not use reserved volume names when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Nonroot UID/GID + fsGroup. */ -}}
+{{- $ru := int (default 0 .Values.securityContext.runAsUser) -}}
+{{- $rg := int (default 0 .Values.securityContext.runAsGroup) -}}
+{{- $fsg := int (default 0 .Values.podSecurityContext.fsGroup) -}}
+{{- if or (le $ru 0) (le $rg 0) (le $fsg 0) -}}
+{{- fail "permesi: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* automount must be false. */ -}}
+{{- if .Values.serviceAccount.automount -}}
+{{- fail "permesi: serviceAccount.automount must be false when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* renewalThreshold strictly between 0 and 1. */ -}}
+{{- $rt := float64 (default 0.8 $agent.pki.renewalThreshold) -}}
+{{- if or (le $rt 0.0) (ge $rt 1.0) -}}
+{{- fail "permesi: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
+{{- end -}}
+
+{{- /* Distinct socket/TLS/CA destinations. */ -}}
+{{- $socketPath := include "permesi.agentSocketPath" . -}}
+{{- $tlsPath := .Values.tls.pemBundlePath -}}
+{{- $caPath := include "permesi.agentAdmissionCaPath" . -}}
+{{- if or (eq $socketPath $tlsPath) (eq $socketPath $caPath) (eq $tlsPath $caPath) -}}
+{{- fail "permesi: vault socket, TLS bundle and PASERK CA destinations must be distinct when vault.agent.enabled" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

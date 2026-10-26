@@ -1,0 +1,73 @@
+suite: permesi vault agent configmap
+release:
+  name: permesi
+  namespace: permesi
+templates:
+  - configmap-vault-agent.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 29
+tests:
+  - it: renders the agent HCL with proxy auth token, no force, no cache
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+    asserts:
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'use_auto_auth_token = true'
+      - notMatchRegex:
+          path: data["agent.hcl"]
+          pattern: 'use_auto_auth_token = "?force"?'
+      - notMatchRegex:
+          path: data["agent.hcl"]
+          pattern: '(?m)^cache\s*\{'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'mount_path = "auth/kubernetes"'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'token_path = "/var/run/secrets/vault-token/token"'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'socket_mode  = "0600"'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'socket_user  = "10001"'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'error_on_missing_key = true'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'backup      = false'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'lease_renewal_threshold = 0.8'
+      - matchRegex:
+          path: data["tls-bundle.tpl"]
+          pattern: '\{\{ \.Data\.Key \}\}\{\{ \.Data\.Cert \}\}\{\{ \.Data\.CA \}\}'
+      - matchRegex:
+          path: data["tls-bundle.tpl"]
+          pattern: '"pki-int/issue/permesi-runtime"'
+      - matchRegex:
+          path: data["paserk-ca.tpl"]
+          pattern: 'secret "pki-int/cert/ca_chain"'
+
+  - it: omits the inbound PKI template in socket mode but keeps the PASERK CA
+    set:
+      config.socketPath: /var/run/permesi/permesi.sock
+      service.enabled: false
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+    asserts:
+      - notMatchRegex:
+          path: data["agent.hcl"]
+          pattern: 'tls-bundle.tpl'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'paserk-ca.tpl'

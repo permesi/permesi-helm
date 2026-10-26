@@ -256,8 +256,13 @@ log "bootstrap Job ${boot_job} succeeded"
 
 if [[ "${DEPS_ONLY}" != true ]]; then
   VALUES_TMP="$(mktemp -d)"
-  pg_host="${QS_FULLNAME}-postgresql.${NAMESPACE}.svc"
-  vault_address="http://${QS_FULLNAME}-vault.${NAMESPACE}.svc:8200"
+  helper_settings="$("${H[@]}" -n "$NAMESPACE" get values "$QS_RELEASE" --all -o json \
+    | python3 "$SCRIPT_DIR/settings.py" --fullname "$QS_FULLNAME" --namespace "$NAMESPACE" --lines)" \
+    || die "cannot resolve effective dependency settings"
+  mapfile -t helper_fields <<< "$helper_settings"
+  pg_host="${helper_fields[1]}"
+  pg_port="${helper_fields[2]}"
+  vault_address="${helper_fields[4]}"
   for svc in genesis permesi; do
     if [[ "$svc" == genesis ]]; then app_release="$GENESIS_RELEASE"; app_name="$GENESIS_NAME"; else app_release="$PERMESI_RELEASE"; app_name="$PERMESI_NAME"; fi
     cat > "${VALUES_TMP}/${svc}.yaml" <<EOF
@@ -267,7 +272,7 @@ serviceAccount:
   name: "${app_name}"
 database:
   dsn:
-    value: "postgres://placeholder@${pg_host}:5432/${svc}?sslmode=disable"
+    value: "postgres://placeholder@${pg_host}:${pg_port}/${svc}?sslmode=disable"
 vault:
   agent:
     enabled: true

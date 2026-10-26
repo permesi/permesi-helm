@@ -55,6 +55,12 @@ Options:
   (success or failure); it refuses pre-existing namespaces. Without it, failed
   installs remain for diagnosis.
 
+Custom `postgresql.service.name`/`port` and `vault.service.name`/`port` values
+propagate to generated application DSNs and Agent addresses. Installation,
+verification and connection helpers resolve effective merged Helm values;
+verification also supports the umbrella's `quickstart` values subtree. Invalid
+settings fail rather than falling back to another endpoint or OIDC mode.
+
 For **dependency-only** Helm bootstrap (not a full-stack substitute):
 
 ```bash
@@ -160,6 +166,22 @@ at install for that run. The corrected verifier tracks each exact issued
 username/lease, requires synchronous revocation and disappearance of that role,
 and owns dynamically allocated loopback forwards rather than probing fixed ports.
 
+Verification requires a deployed helper Helm release. A retained latest bootstrap
+Job must have succeeded; after normal Job collection, all durable SQL/Vault,
+manager-rotation and service-policy checks remain mandatory before runtime checks
+run. A failed Helm release remains a failure even after its Job disappears.
+Completed retries are accepted; failed or incomplete Jobs are rejected.
+
+With `bootstrap.oidcSigning.enabled=false`, verification requires denial of
+Permesi OIDC signing instead of requiring an RSA key. Disabling OIDC on an existing
+installation preserves its signing key while removing signing permission.
+
+The direct port-forwards are useful for API tools. Browser cookie sessions need
+a same-origin edge, or HTTPS frontend/API hosts on the same site. Mixing the HTTP
+web forward with cross-site HTTPS API hosts does not establish browser-session
+compatibility. Preserve `SameSite=Lax`, secure cookies and WebAuthn origin checks;
+configure the frontend/CORS/runtime URLs consistently instead of relaxing them.
+
 For a Helm-only umbrella install, explicitly map its helper:
 
 ```bash
@@ -168,15 +190,77 @@ bash scripts/quickstart/verify.sh --context kind-permesi-helm-test \
   --helper-release permesi --helper-fullname permesi-quickstart
 ```
 
-The verifier-correction report records both services' actual pool-lease
-revocation, nonzero fail-closed exits, same-pod application restarts, new disjoint
-pool identities, trusted readiness and real OPAQUE signup **201** after recovery.
-Its complete umbrella wrapper and concurrent independent verifiers also passed.
-This is native test-client OPAQUE, **not native Vault auth** or browser/WASM
-signup. Natural projected-JWT expiry/rotation, Agent workload-token revocation,
-CA-root rotation, outbound PASERK wrong-CA/SAN negatives and production
-durability/TLS remain separate qualifications; see
+Earlier verifier qualification established pool-lease recovery, replacement,
+scaling and native test-client OPAQUE; it did not establish native Vault login or
+browser/WASM signup. The candidate runners below exercise those additional paths;
+their failures remain qualification blockers.
+Natural projected-JWT expiry/rotation, CA-root rotation and production durability
+remain separate qualifications; see
 [operations](operations.md#11-quickstart-qualification-and-known-boundaries).
+
+### Qualifying candidate application images
+
+Build Permesi and Genesis with telemetry using their application Dockerfiles,
+and build web from a freshly compiled distribution. Load these images into an
+owned disposable Kind cluster. Record the imported manifest digests and ensure
+containerd has both tag and repository-at-digest references; `imagePullPolicy:
+Never` must resolve the exact loaded images. Both service `--version` outputs
+must identify the application commit being qualified.
+
+`scripts/ci/prepare-application-fixture.py` copies the charts and tooling outside
+the Helm checkout and replaces only the fixture's application image/source pins.
+Supply all three actual `repository:tag@sha256:...` references:
+
+```bash
+python3 scripts/ci/prepare-application-fixture.py \
+  --app-source /path/to/permesi --destination /var/tmp/permesi-candidate \
+  --image "permesi=$PERMESI_TEST_IMAGE" \
+  --image "genesis=$GENESIS_TEST_IMAGE" \
+  --image "web=$WEB_TEST_IMAGE"
+
+QS_CONTEXT=kind-permesi-compat QS_NAMESPACE=qv-candidate \
+  QS_APP_SOURCE=/path/to/permesi QS_ADMISSION_BIN=/path/to/quickstart-admission \
+  bash /var/tmp/permesi-candidate/scripts/ci/real-dependencies.sh
+```
+
+The application checkout must be clean and match the fixture revision. Its actual
+SQL files are packaged into ConfigMaps, so a passing older published-image gate
+cannot stand in for candidate runtime proof. Committed default pins remain intact.
+
+Run `scripts/quickstart/tests/real-auth-modes.py` with explicit context, absent
+`qv-auth-*` namespace, application source, candidate `--charts-dir` and
+`--admission-bin` to exercise Agent, native Kubernetes auth, AppRole and restoration
+to Agent. It checks real HTTPS/admission, wrong-audience rejection without a DB
+lease, and native token revocation with fail-closed application restart.
+
+`scripts/quickstart/tests/real-browser-upgrade.py` accepts an explicit context,
+absent `qv-browser-*` namespace, application source and generated `--fixture`.
+It requires the application's Chromium/Node/NSS browser-runner image, selectable
+with `--browser-image`. It packages the umbrella with external disposable helper
+dependencies, imports only the public test CA into a disposable browser container,
+and uses a loopback TLS edge that verifies backend TLS. Real signup, mailbox
+verification, OPAQUE login, MFA and passkey creation run on published baseline
+images; candidate upgrade must preserve persisted records and allow the existing
+password and passkey to authenticate. The fixed embedded-quickstart profile and
+its validation remain unchanged. These runners remove only their owned releases,
+namespaces and test containers.
+
+Qualification on 2026-10-26 used application sandbox commit
+`6f32b5376806ff6ba259f1b2aeb1cffea706c3bc`, freshly built telemetry-enabled
+backends and web, and canonical SQL. The real Agent lifecycle, native Kubernetes
+auth, AppRole and packaged embedded umbrella passed. Browser upgrade preserved
+the OPAQUE and passkey records byte-for-byte and password/MFA sign-in passed.
+Full browser passkey qualification remains blocked: published baseline 0.4.3
+registers a nonresident credential with the virtual authenticator, while login
+requests a discoverable credential. The default browser runner rejects this
+baseline explicitly. `--password-only` qualifies password/MFA and record
+preservation, and explicitly excludes passkey authentication. Requiring resident
+registration is an application authentication change outside these Helm fixes.
+
+The application Rust security audit also remains blocked by
+`crypto-bigint 0.5.5` (`RUSTSEC-2026-0387`). The published dependency chains still
+require that version; normal `cargo upgrade`/`cargo update` did not resolve it.
+No new audit exception, fork or backport is introduced by this qualification.
 
 ### Bootstrap secret exception and reset
 
@@ -1168,8 +1252,7 @@ web:
   `00000000-0000-0000-0000-000000000000` is a **test-only** fixture, never
   production onboarding.
 - Email: `PERMESI_EMAIL_DELIVERY=smtp` (via `extraEnv`) delivers through a relay;
-  the default `outbox` mode only queues rows. Production needs a real SMTP relay and
-  `PERMESI_AUTH_TRUSTED_PROXIES` scoped to your ingress peers (never `0.0.0.0/0`).
+  the default `outbox` mode only queues rows. Production needs a real SMTP relay.
 
 ---
 
@@ -1221,6 +1304,13 @@ ingress-nginx termination example uses Kubernetes TLS Secrets and is
 HTTP-only: an external Vault-backed TLS edge is still required for public HTTPS web
 hosting. The Agent does **not** supply ingress/web certificates or database-server
 TLS.
+
+Keep forwarding headers untrusted when using TLS passthrough: the encrypted HTTP
+headers reach Permesi unchanged, so a client could forge `X-Real-IP`. Permesi uses
+the transport peer for IP attribution and throttling in this profile. To preserve
+the original client address, use an L7 edge that terminates TLS, overwrites
+`X-Real-IP`, and verifies TLS again upstream. Only then configure
+`PERMESI_AUTH_TRUSTED_PROXIES` with that edge's narrowly scoped peer addresses.
 
 ---
 

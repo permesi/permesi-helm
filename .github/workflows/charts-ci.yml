@@ -67,11 +67,24 @@ jobs:
         with:
           version: v3.16.4
 
+      - name: Setup Python for chart-testing
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - name: Setup chart-testing
         uses: helm/chart-testing-action@v2.7.0
 
+      - name: Check chart-testing Python
+        run: python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+
       - name: Install helm-unittest plugin
         run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2
+
+      - name: Test chart consumer contracts
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          python3 scripts/ci/test-chart-contracts.py -v
 
       - name: Resolve chart test mode
         id: meta
@@ -181,8 +194,16 @@ jobs:
         with:
           version: v3.16.4
 
+      - name: Setup Python for chart-testing
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - name: Setup chart-testing
         uses: helm/chart-testing-action@v2.7.0
+
+      - name: Check chart-testing Python
+        run: python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
 
       - name: Setup Kind
         uses: helm/kind-action@v1.12.0
@@ -268,3 +289,9 @@ jobs:
         env:
           QS_APP_SOURCE: app
         run: bash scripts/ci/real-dependencies.sh
+
+      - name: Test custom endpoints and bootstrap lifecycle
+        run: |
+          python3 scripts/quickstart/tests/real-configuration-regressions.py \
+            --context "$(kubectl config current-context)" --namespace qv-config-ci --release config \
+            --app-source app

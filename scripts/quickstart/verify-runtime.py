@@ -90,6 +90,8 @@ def main():
     parser.add_argument('--namespace', required=True)
     parser.add_argument('--release', default='permesi')
     parser.add_argument('--helper-fullname', help='Dependency object prefix; defaults to <release>-quickstart')
+    parser.add_argument('--vault-deployment', help='Vault workload name resolved from effective helper values')
+    parser.add_argument('--postgres-pod', help='PostgreSQL pod resolved from effective helper values')
     parser.add_argument('--exercise-lifecycle', action='store_true')
     parser.add_argument('--rotation-timeout', type=int, default=240)
     a = parser.parse_args()
@@ -119,6 +121,8 @@ def main():
     require(ns['metadata'].get('labels', {}).get('pod-security.kubernetes.io/enforce') == 'restricted',
             f'{a.namespace}: Restricted PSA enforced')
     qs = a.helper_fullname or a.release + '-quickstart'
+    vault_deployment = a.vault_deployment or qs + '-vault'
+    postgres_pod = a.postgres_pod or qs + '-postgresql-0'
     names = {'permesi': fullname(a.release, 'permesi'),
              'genesis': fullname(a.release + '-genesis', 'genesis')}
     web = fullname(a.release + '-web', 'web')
@@ -182,7 +186,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='permesi-verify-') as tmp:
         tmp = Path(tmp)
         ca = tmp / 'root.pem'
-        ca.write_text(run(k + ['exec', f'deploy/{qs}-vault', '-c', 'vault', '--', 'vault',
+        ca.write_text(run(k + ['exec', f'deploy/{vault_deployment}', '-c', 'vault', '--', 'vault',
                               'read', '-field=certificate', 'pki-root/cert/ca']) + '\n')
         wrong_ca = tmp / 'wrong-ca.pem'
         wrong_ca.write_text(kj('get', 'configmap', 'kube-root-ca.crt')['data']['ca.crt'])
@@ -220,7 +224,7 @@ def main():
                 email = email.group(1)
                 query = ("SELECT (SELECT count(*) FROM users WHERE email='" + email + "' AND status='pending_verification')||','||"
                          "(SELECT count(*) FROM email_outbox WHERE to_email='" + email + "' AND payload_json IS NOT NULL)")
-                counts = run(k + ['exec', qs + '-postgresql-0', '-c', 'postgresql', '--', 'psql', '-X', '-U', 'postgres', '-d', 'permesi', '-tAc', query])
+                counts = run(k + ['exec', postgres_pod, '-c', 'postgresql', '--', 'psql', '-X', '-U', 'postgres', '-d', 'permesi', '-tAc', query])
                 require(counts == '1,1', 'PostgreSQL contains pending OPAQUE user and verification outbox receipt (payload not printed)')
         def status_snapshot(pod):
             p = kj('get', 'pod', pod)
@@ -321,7 +325,7 @@ def main():
                     query = ("SELECT DISTINCT a.usename FROM pg_stat_activity a JOIN pg_roles r ON r.rolname=a.usename "
                              f"WHERE a.datname='{svc}' AND a.client_addr='{ip}'::inet "
                              f"AND pg_has_role(r.oid,'{svc}_runtime','MEMBER') ORDER BY a.usename")
-                    return set(run(k + ['exec', qs + '-postgresql-0', '-c', 'postgresql', '--',
+                    return set(run(k + ['exec', postgres_pod, '-c', 'postgresql', '--',
                                        'psql', '-X', '-U', 'postgres', '-d', svc, '-tAc', query]).splitlines())
                 for svc, p in selected.items():
                     pod = p['metadata']['name']
@@ -329,10 +333,10 @@ def main():
                     old_status = next(s for s in before_pod['status']['containerStatuses'] if s['name'] == svc)
                     old_users = pool_users(svc, before_pod)
                     require(bool(old_users), f'{svc}: identified active application DB pool credentials privately')
-                    run(k + ['exec', f'deploy/{qs}-vault', '-c', 'vault', '--',
+                    run(k + ['exec', f'deploy/{vault_deployment}', '-c', 'vault', '--',
                              'vault', 'lease', 'revoke', '-sync', '-prefix', f'database/creds/{svc}'])
                     quoted = ','.join("'" + user.replace("'", "''") + "'" for user in old_users)
-                    remaining = run(k + ['exec', qs + '-postgresql-0', '-c', 'postgresql', '--',
+                    remaining = run(k + ['exec', postgres_pod, '-c', 'postgresql', '--',
                                          'psql', '-X', '-U', 'postgres', '-d', svc, '-tAc',
                                          f'SELECT count(*) FROM pg_roles WHERE rolname IN ({quoted})'])
                     require(remaining == '0', f'{svc}: revoked actual pool roles are absent')
@@ -383,7 +387,8 @@ def main():
         # Re-run non-mutating proof against replacement pods, including actual
         # admission, not just Deployment status.
         cmd = ['python3', __file__, '--context', a.context, '--namespace', a.namespace,
-               '--release', a.release, '--helper-fullname', qs]
+               '--release', a.release, '--helper-fullname', qs,
+               '--vault-deployment', vault_deployment, '--postgres-pod', postgres_pod]
         print(run(cmd, env=dict(os.environ, QS_ADMISSION_BIN=binary)), flush=True)
 
 

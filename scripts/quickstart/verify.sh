@@ -46,13 +46,23 @@ done
 [[ -n "${CONTEXT}" ]] || { usage >&2; echo "verify.sh: --context is required" >&2; exit 2; }
 
 K=(kubectl --context "${CONTEXT}" -n "${NAMESPACE}")
+H=(helm --kube-context "${CONTEXT}" -n "${NAMESPACE}")
 fullname() { if [[ "$1" == *"$2"* ]]; then echo "$1"; else echo "$1-$2"; fi; }
 QS_RELEASE="${HELPER_RELEASE:-${RELEASE}-quickstart}"
 QS_FULLNAME="${HELPER_FULLNAME:-${QS_RELEASE}}"
 PERMESI_NAME="$(fullname "${RELEASE}" permesi)"
 GENESIS_NAME="$(fullname "${RELEASE}-genesis" genesis)"
-VAULT_DEPLOY="${QS_FULLNAME}-vault"
-PG_POD="${QS_FULLNAME}-postgresql-0"
+helper_settings="$("${H[@]}" get values "$QS_RELEASE" --all -o json \
+  | python3 "$(dirname "${BASH_SOURCE[0]}")/settings.py" --fullname "$QS_FULLNAME" --namespace "$NAMESPACE" --lines)" \
+  || { echo 'verify.sh: cannot resolve effective helper settings' >&2; exit 1; }
+mapfile -t helper_fields <<< "$helper_settings"
+PG_STATEFULSET="${helper_fields[0]}"
+VAULT_DEPLOY="${helper_fields[3]}"
+PG_POD="${PG_STATEFULSET}-0"
+OIDC_ENABLED="${helper_fields[5]}"
+HELPER_STATUS="$("${H[@]}" status "$QS_RELEASE" -o json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["status"])')" \
+  || { echo 'verify.sh: cannot inspect helper release status' >&2; exit 1; }
 
 FAILURES=0
 pass() { echo "PASS: $*"; }
@@ -96,11 +106,24 @@ trap cleanup EXIT
 echo "verify.sh: context=${CONTEXT} namespace=${NAMESPACE} release=${RELEASE}"
 
 section "Dependencies"
-check "PostgreSQL StatefulSet ready" test "$("${K[@]}" get statefulset "${QS_FULLNAME}-postgresql" -o jsonpath='{.status.readyReplicas}')" = 1
+check "helper Helm release deployed" test "$HELPER_STATUS" = deployed
+check "PostgreSQL StatefulSet ready" test "$("${K[@]}" get statefulset "${PG_STATEFULSET}" -o jsonpath='{.status.readyReplicas}')" = 1
 check "dev Vault Deployment ready" test "$("${K[@]}" get deployment "${VAULT_DEPLOY}" -o jsonpath='{.status.readyReplicas}')" = 1
-boot_job="$("${K[@]}" get jobs -l "app.kubernetes.io/instance=${QS_RELEASE},app.kubernetes.io/component=bootstrap" \
-  --sort-by=.metadata.creationTimestamp -o name | tail -n 1)"
-check "latest bootstrap Job (${boot_job#job.batch/}) succeeded" test "$("${K[@]}" get "${boot_job}" -o jsonpath='{.status.succeeded}')" = 1
+if boot_status="$("${K[@]}" get jobs -l "app.kubernetes.io/instance=${QS_RELEASE},app.kubernetes.io/component=bootstrap" \
+  --sort-by=.metadata.creationTimestamp -o json | python3 -c '
+import json,sys
+jobs=json.load(sys.stdin)["items"]
+status=jobs[-1].get("status", {}) if jobs else {}
+failed=any(c.get("type")=="Failed" and c.get("status")=="True" for c in status.get("conditions", []))
+print("collected" if not jobs else "succeeded" if status.get("succeeded")==1 and not failed else "incomplete")')"; then
+  if [[ "$boot_status" == collected ]]; then
+    echo 'INFO: bootstrap Job collected; all durable PostgreSQL/Vault checks below remain required'
+  else
+    check "latest bootstrap Job succeeded" test "$boot_status" = succeeded
+  fi
+else
+  fail "cannot inspect bootstrap Jobs (not evidence of normal collection)"
+fi
 check "only ClusterIP Services" test -z "$("${K[@]}" get svc -l "app.kubernetes.io/instance=${QS_RELEASE}" -o jsonpath='{range .items[?(@.spec.type!="ClusterIP")]}{.metadata.name}{end}')"
 
 section "PostgreSQL schema, ownership and grants"
@@ -143,6 +166,8 @@ for m in transit/permesi:transit transit/genesis:transit database:database pki-r
 done
 check "dev-mode default secret/ mount removed" test -z "$(mount_type secret)"
 for k in transit/permesi/keys/totp:chacha20-poly1305 transit/genesis/keys/genesis-signing:ed25519 transit/permesi/keys/oidc-signing:rsa-2048; do
+  # Disabled mode may retain a prior key; the permission-denial check below is mandatory.
+  [[ "$k" != transit/permesi/keys/oidc-signing:* || "$OIDC_ENABLED" == true ]] || continue
   key="${k%%:*}"
   check "${key} type ${k##*:}" test "$(vroot read -field=type "${key}" 2>/dev/null)" = "${k##*:}"
   check "${key} non-exportable, no plaintext backup, 30d rotation" test \
@@ -154,6 +179,11 @@ seed_len="$(vroot kv get -mount=secret/permesi -field=opaque_server_seed config 
 check "opaque_server_seed and mfa_recovery_pepper are 32-byte standard base64" test "${seed_len}/${pepper_len}" = "32/32"
 check "database/config/{permesi,genesis} restricted to their own role" test \
   "$(vroot read -field=allowed_roles database/config/permesi)/$(vroot read -field=allowed_roles database/config/genesis)" = "[permesi]/[genesis]"
+for svc in permesi genesis; do
+  check "database/config/${svc} initial manager rotation completed" test \
+    "$(vroot kv get -mount=secret/permesi -field=state "bootstrap/manager-rotation/${svc}")/$(vroot kv get -mount=secret/permesi -field=manager "bootstrap/manager-rotation/${svc}")" \
+    = "completed/vault_${svc}_manager"
+done
 ca_chain="$(vroot read -field=certificate pki-int/cert/ca_chain 2>/dev/null || true)"
 check "pki-int CA chain = intermediate + root (2 certificates)" test "$(grep -c 'BEGIN CERTIFICATE' <<<"${ca_chain}")" = 2
 ca_fp="$(printf '%s' "${ca_chain}" | sha256sum | cut -c1-12)"
@@ -209,7 +239,11 @@ deny()  { local desc="$1" tok="$2"; shift 2; local out; if out="$(vas "${tok}" "
 
 allow "permesi reads secret/permesi/data/config" "${PT}" kv get -mount=secret/permesi -field=opaque_server_seed config
 allow "permesi generates a TOTP data key (transit/permesi/datakey/plaintext/totp)" "${PT}" write -f -field=ciphertext transit/permesi/datakey/plaintext/totp
-allow "permesi signs with transit/permesi/sign/oidc-signing" "${PT}" write -field=signature transit/permesi/sign/oidc-signing input=cXVpY2tzdGFydA==
+if [[ "$OIDC_ENABLED" == true ]]; then
+  allow "permesi signs with transit/permesi/sign/oidc-signing" "${PT}" write -field=signature transit/permesi/sign/oidc-signing input=cXVpY2tzdGFydA==
+else
+  deny "OIDC-disabled permesi -> transit/permesi/sign/oidc-signing" "${PT}" write -field=signature transit/permesi/sign/oidc-signing input=cXVpY2tzdGFydA==
+fi
 allow "permesi issues its listener certificate" "${PT}" write -field=serial_number pki-int/issue/permesi-runtime common_name="${svc_fqdn}" ttl=5m
 allow "permesi reads pki-int/cert/ca_chain" "${PT}" read -field=certificate pki-int/cert/ca_chain
 allow "genesis signs with transit/genesis/sign/genesis-signing" "${GT}" write -field=signature transit/genesis/sign/genesis-signing input=cXVpY2tzdGFydA==
@@ -281,7 +315,8 @@ echo "INFO: transit genesis-signing public keys sha256[:12]=$(vroot read -field=
 if [[ "$DEPS_ONLY" != true && "${FAILURES}" -eq 0 ]]; then
   section "Real application runtime (temporary verifier credentials already revoked)"
   python3 "$(dirname "${BASH_SOURCE[0]}")/verify-runtime.py" \
-    --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" --helper-fullname "$QS_FULLNAME" "${RUNTIME_ARGS[@]}" \
+    --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" --helper-fullname "$QS_FULLNAME" \
+    --vault-deployment "$VAULT_DEPLOY" --postgres-pod "$PG_POD" "${RUNTIME_ARGS[@]}" \
     || fail "application runtime verification"
 fi
 

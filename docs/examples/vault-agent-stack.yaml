@@ -112,8 +112,6 @@ permesi:
       value: "https://api.permesi.example.com"
     - name: PERMESI_OAUTH_AUDIENCE
       value: "permesi-api"
-    - name: PERMESI_AUTH_TRUSTED_PROXIES
-      value: "10.244.0.0/16"
 
   extraVolumes:
     - name: db-ca
@@ -160,6 +158,7 @@ permesi:
       # Permesi serves TLS itself (Agent-rendered bundle). Prefer passthrough so
       # no Kubernetes TLS Secret terminates the backend's certificate. Requires a
       # controller with ssl-passthrough enabled.
+      # Forwarding headers remain untrusted: a TCP proxy cannot overwrite them.
       nginx.ingress.kubernetes.io/ssl-passthrough: "true"
     hosts:
       - host: api.permesi.example.com

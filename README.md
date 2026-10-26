@@ -62,11 +62,13 @@ For a released chart (check that its version contains the features you need):
 
 ```bash
 helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.4.4 --namespace permesi --create-namespace -f values.yaml
+  --version 0.4.3 --namespace permesi --create-namespace -f values.yaml
 ```
 
 For integrated source features, rebuild local dependencies and use the manual
 guide's source-install command; no new chart publication is implied.
+The source backend and umbrella charts are 0.4.5; the web chart remains 0.4.4.
+Default application images remain the published 0.4.3 images.
 
 ## Validation and release automation
 
@@ -76,6 +78,19 @@ The dev gate covers real HTTPS, admission/OPAQUE signup, leaf reload and restart
 it does not qualify production infrastructure or browser/WASM signup.
 The independent `release-contracts` job runs the 13 parser/bump regression tests
 with `python3 scripts/ci/test-release.py`.
+
+Consumer regressions additionally exercise real discovery-version values,
+passthrough/header trust, generated installer values, effective helper settings
+and verifier lifecycle decisions. Chart-testing uses Python 3.12 in both jobs
+that install it, including its Yamale virtual environment. The real-dependency
+job also tests custom dependency endpoints, collected/failed bootstrap Jobs,
+failed Helm releases and OIDC enable/disable transitions against actual Vault
+and PostgreSQL.
+
+For application changes newer than the published pins, use the
+[candidate qualification procedure](docs/install-guide.md#qualifying-candidate-application-images).
+It tests actual loaded image manifests and the exact application SQL revision
+without changing release defaults or publishing images.
 
 `release-bump-pr.yml` validates nested per-service image digests and source
 metadata through `scripts/ci/release-event.sh`. Tags never override a nonempty

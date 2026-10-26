@@ -182,7 +182,8 @@ false
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 
 {{- /* Kubernetes >= 1.29 (native sidecars). */ -}}
-{{- if or (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt (.Capabilities.KubeVersion.Minor | int) 29)) -}}
+{{- $minor := trimSuffix "+" (toString .Capabilities.KubeVersion.Minor) -}}
+{{- if or (not (regexMatch "^[0-9]+$" $minor)) (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt ($minor | int) 29)) -}}
 {{- fail "permesi: vault.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
 {{- end -}}
 

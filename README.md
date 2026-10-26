@@ -24,8 +24,8 @@ pg_cron maintenance guarantee. Bootstrap-only administrator/root credentials liv
 in a retained Kubernetes Secret; application TLS private keys stay in pod memory.
 See [install, verify, connect and teardown](docs/install-guide.md#disposable-quickstart).
 
-Use an isolated development context. Current dev Vault startup logs can contain
-root/unseal material; restrict `pods/log` access and downstream log retention.
+Use an isolated development context. Canonical schema owners stay static;
+separate Vault credential managers rotate without changing owner passwords.
 
 ### Helm-only umbrella quickstart
 

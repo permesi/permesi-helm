@@ -23,9 +23,10 @@ hostnames, networks, client ID and trust anchors for your environment.
 
 Requires Bash, Helm, kubectl, Python 3, an explicit reachable kube context and a
 Linux/amd64 node. Installation into an existing cluster needs no local Kind or
-container runtime. Cluster-admin permissions are needed for the helper's narrowly
-scoped reviewer RBAC; only Vault's SA receives TokenReview. New namespaces enforce
-Restricted PSA. Managed Agent requires Kubernetes ≥1.29 with SidecarContainers.
+container runtime. Default helper setup preflights cluster RBAC creation rights;
+an administrator can instead pregrant Vault-only TokenReview (§below). New
+namespaces enforce Restricted PSA. Managed Agent requires Kubernetes ≥1.29 with
+SidecarContainers.
 
 ```bash
 bash scripts/quickstart/install.sh --context kind-permesi-helm-test \
@@ -70,6 +71,57 @@ Script install supplies its own complete wiring. For a complete Helm-only stack,
 use the [umbrella profile](../charts/permesi-stack/README.md#quickstart-mode),
 not the dependency-only command above.
 
+### Namespaced installer with pregranted reviewer
+
+Default `rbac.createTokenReviewBinding: true` creates a TokenReview-only
+ClusterRole/Binding. Its namespace-safe hashed identity includes the complete
+release/namespace, avoiding truncation collisions. The installer checks creation
+authority before mutating namespace/SQL inputs.
+
+For the fixed script/umbrella profile, a cluster administrator can pregrant only
+the eventual Vault SA:
+
+```bash
+kubectl --context kind-permesi-helm-test create namespace permesi-quickstart
+kubectl --context kind-permesi-helm-test label namespace permesi-quickstart \
+  pod-security.kubernetes.io/enforce=restricted
+kubectl --context kind-permesi-helm-test create clusterrole permesi-quickstart-pregranted-reviewer \
+  --verb=create --resource=tokenreviews.authentication.k8s.io
+kubectl --context kind-permesi-helm-test create clusterrolebinding permesi-quickstart-pregranted-reviewer \
+  --clusterrole=permesi-quickstart-pregranted-reviewer \
+  --serviceaccount=permesi-quickstart:permesi-quickstart-vault
+```
+
+Using an operator-owned protected values file, the namespaced installer selects:
+
+```yaml
+# /secure/operator/quickstart-pregrant.yaml (helper-chart values)
+rbac:
+  createTokenReviewBinding: false
+```
+
+```bash
+bash scripts/quickstart/install.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi --acknowledge-development \
+  --quickstart-values /secure/operator/quickstart-pregrant.yaml
+```
+
+The installer still needs normal namespace resource privileges and get access to
+the target Namespace, but not cluster-RBAC creation. Generated credential Job
+Role/RoleBinding remain enabled unless an existing credentials Secret disables
+that Job. For umbrella values use `quickstart.rbac.createTokenReviewBinding=false`.
+For other names, bind the actual `<helper-fullname>-vault` SA in the exact target
+namespace; never app/bootstrap/credential SAs.
+
+Pregranted grants are operator-owned. Before changing an existing Helm-owned grant
+to false mode, establish a distinct operator-owned grant: Helm removes its own
+binding on upgrade. After teardown the administrator removes these exact grants:
+
+```bash
+kubectl --context kind-permesi-helm-test delete clusterrolebinding permesi-quickstart-pregranted-reviewer
+kubectl --context kind-permesi-helm-test delete clusterrole permesi-quickstart-pregranted-reviewer
+```
+
 ### Verify and connect
 
 The full verifier needs curl and Cargo (or an executable `QS_ADMISSION_BIN` built
@@ -102,23 +154,29 @@ curl --cacert quickstart-ca.pem --resolve genesis.localhost:9443:127.0.0.1 \
 The quickstart uses test client `00000000-0000-0000-0000-000000000000`,
 OPAQUE server ID `api.localhost`, allowed dev domain `example.test`, and outbox
 email (no SMTP delivery). `verify.sh --exercise-lifecycle` mutates only this dev
-installation: independent wrong-claim negatives, leaf rotation, Agent restart,
-backend replacement and scaling. Use a short PKI TTL at install for that run.
+installation: wrong-claim negatives, leaf rotation, Agent restart, application DB
+lease revocation/recovery, backend replacement and scaling. Use a short PKI TTL
+at install for that run. The corrected verifier tracks each exact issued
+username/lease, requires synchronous revocation and disappearance of that role,
+and owns dynamically allocated loopback forwards rather than probing fixed ports.
 
-The reported M-QS local driver exercised two Ready backend replicas, trusted HTTPS
-and wrong-CA/hostname rejection, real OPAQUE signup start **200**/finish **201**,
-pending user/outbox, cross-service denials, same-pod leaf reload, Agent restart,
-scaling, and reinstall identity/data preservation. This is native test-client
-OPAQUE, **not native Vault auth** and not browser/WASM signup. GitHub execution,
-verified-email login/OIDC/SMTP E2E, expiry-driven JWT rotation, revoked live DB
-pool recovery, CA rotation, production TLS, HA/backups, NetworkPolicy enforcement
-and pg_cron are not implied.
+For a Helm-only umbrella install, explicitly map its helper:
 
-The independent R-QS review also found dev root/unseal material in Vault startup
-logs, a manager-password-rotation/rerun mismatch, `.pgpass` escaping defects and
-verifier isolation/assertion limits. Treat dev logs as credentials and consult
-the [current qualifications](operations.md#11-quickstart-qualification-and-known-boundaries);
-normal-path success does not establish that those adversarial cases are fixed.
+```bash
+bash scripts/quickstart/verify.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi \
+  --helper-release permesi --helper-fullname permesi-quickstart
+```
+
+The verifier-correction report records both services' actual pool-lease
+revocation, nonzero fail-closed exits, same-pod application restarts, new disjoint
+pool identities, trusted readiness and real OPAQUE signup **201** after recovery.
+Its complete umbrella wrapper and concurrent independent verifiers also passed.
+This is native test-client OPAQUE, **not native Vault auth** or browser/WASM
+signup. Natural projected-JWT expiry/rotation, Agent workload-token revocation,
+CA-root rotation, outbound PASERK wrong-CA/SAN negatives and production
+durability/TLS remain separate qualifications; see
+[operations](operations.md#11-quickstart-qualification-and-known-boundaries).
 
 ### Bootstrap secret exception and reset
 
@@ -128,8 +186,20 @@ must exist before Vault can bootstrap. The helper creates a narrowly mounted
 these inputs never reach application pods. Alternatively
 `bootstrap.credentialsSecret` names a precreated Secret with keys
 `postgres-admin-password`, `vault-root-token`, `vault-permesi-password`,
-`vault-genesis-password`. Private application TLS keys remain in memory volumes,
-never synchronized to Kubernetes Secrets.
+`vault-genesis-password`. These remain the static canonical schema-owner inputs.
+The helper creates separate `vault_permesi_manager`/`vault_genesis_manager` logins,
+then immediately rotates their passwords through Vault after first configuration.
+Steady-state manager passwords stay only in Vault. Existing configs are reused
+only for the expected manager and exact allowed role; legacy owner-as-manager
+configs require a manager-separated restore or explicit disposable reset, never
+an automatic migration/password reset. Private application TLS keys stay in
+memory volumes, never synchronized to Kubernetes Secrets.
+
+Existing-Secret passwords preserve colon/backslash bytes via `.pgpass` escaping;
+CR/LF are rejected before connecting. The Vault startup wrapper filters only
+anchored root/unseal banner lines, streams remaining diagnostics and preserves
+signals/exit status. The bootstrap correction report runtime-qualified these
+behaviors, manager rotation/rerun and a restricted pregranted installation.
 
 Both dependencies are ephemeral. Losing dev Vault while retaining **any**
 application database (even empty) deliberately fails bootstrap; generating a new
@@ -177,10 +247,10 @@ only place shell probes, certificate rendering, and preparation happen.
   narrowly scoped ClusterRole, or the upstream `system:auth-delegator` cluster role
   bound to Vault's SA alone. Do not grant TokenReview to backend or bootstrap
   ServiceAccounts.
-- **External Vault** needs operator-managed API/CA connectivity and a *renewable*
-  Kubernetes reviewer token (a long-lived service-account token the operator
-  rotates on a documented schedule), plus its Kubernetes auth config pointed at
-  the cluster API server.
+- **External Vault** needs API connectivity, Kubernetes CA trust, a dedicated
+  TokenReview-only reviewer SA and an explicitly refreshed short-lived
+  TokenRequest JWT. A Kubernetes JWT is not renewable like a Vault token.
+  Follow the complete provisioning/replacement procedure in §3.1.
 - **Operators** need permission to create the namespace, ServiceAccounts, Secrets
   (legacy paths only), ConfigMaps (public trust anchors), and to write Vault
   policies/roles via the Vault API.
@@ -201,9 +271,13 @@ pg_cron-capable deployment if you use the canonical scheduled jobs (`cron_jobs.s
 
 ### Ownership model
 
-- `vault_permesi` / `vault_genesis`: non-superuser roles used by Vault's database
-  secrets engine. They must have `LOGIN`, `CREATEROLE`, and `pg_signal_backend`
-  (to terminate sessions on lease revocation). They own their respective database.
+- `vault_permesi` / `vault_genesis`: static non-superuser canonical schema owners.
+  They own their service database/objects and authenticate schema bootstrap and
+  maintenance. Do not configure Vault's rotate-root against these identities.
+- `vault_permesi_manager` / `vault_genesis_manager`: separate non-owner
+  `LOGIN CREATEROLE` credential managers used only by Vault's database engine.
+  They receive own-DB CONNECT, pg_signal_backend and the matching runtime role's
+  ADMIN membership with INHERIT/SET disabled; no schema/database ownership.
 - `permesi_runtime` / `genesis_runtime`: `NOLOGIN` roles that hold all
   schema/table grants. Vault-minted short-lived login roles receive membership in
   the matching runtime role only — they never own objects, create schemas, or hold
@@ -212,9 +286,9 @@ pg_cron-capable deployment if you use the canonical scheduled jobs (`cron_jobs.s
   `ALTER ROLE ... VALID UNTIL` (renewal), and terminate-sessions → revoke-membership
   → drop-role (revocation). Default TTL 1h / max 4h.
 
-### 2.1 Pre-create the Vault manager roles
+### 2.1 Pre-create the canonical schema owners
 
-Create the two Vault manager roles with strong, unique passwords **before** running
+Create the two static owners with strong, unique passwords **before** running
 the canonical bootstrap, so `00_init.sql` does not fall back to its development
 `change-me` password:
 
@@ -263,19 +337,147 @@ db.example.com:5432:*:vault_genesis:<strong-password>
 In each `.pgpass` password field, escape literal `:` as `\:` and `\` as `\\`;
 protect the file outside the repository and do not log its contents.
 
-### 2.3 Production scheduler (pg_cron) and verification
+#### Separate credential managers after schema bootstrap
 
-On a pg_cron-capable PostgreSQL, register the scheduled jobs and run the full
-verification (both against `postgres`):
+The canonical include tree creates the runtime roles. Then create independent
+manager identities; do not change schema/table ownership or inherit runtime
+privileges into these managers:
 
 ```bash
-psql -h db.example.com -U postgres -d postgres -v ON_ERROR_STOP=1 -f db/sql/cron_jobs.sql
-psql -h db.example.com -U postgres -d postgres -v ON_ERROR_STOP=1 -f db/sql/check.sql
+psql -X -v ON_ERROR_STOP=1 -h db.example.com -U postgres -d postgres <<'SQL'
+CREATE ROLE vault_permesi_manager LOGIN CREATEROLE NOSUPERUSER NOCREATEDB;
+\password vault_permesi_manager
+CREATE ROLE vault_genesis_manager LOGIN CREATEROLE NOSUPERUSER NOCREATEDB;
+\password vault_genesis_manager
+GRANT permesi_runtime TO vault_permesi_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT genesis_runtime TO vault_genesis_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT CONNECT ON DATABASE permesi TO vault_permesi_manager;
+GRANT CONNECT ON DATABASE genesis TO vault_genesis_manager;
+GRANT pg_signal_backend TO vault_permesi_manager, vault_genesis_manager;
+SQL
 ```
 
-`verify_permesi.sql` (already run by `00_init.sql`) is the schema smoke check.
-`check.sql` additionally requires pg_cron and both registered jobs; do not claim
-`check.sql` passed on a scheduler-less deployment.
+Keep administrator/schema-owner credentials in the protected operator workflow;
+only each manager's initial password goes to its first Vault connection config.
+The dev helper initially reuses the matching owner bootstrap password for its
+new manager, then immediately rotates the manager. Production can start managers
+with separate unique bootstrap passwords. Either way, owner passwords stay
+static and credential-manager rotation must not change scheduler/schema owners.
+
+### 2.3 Production scheduler (pg_cron) and verification
+
+An operator `PGPASSFILE` authenticates the operator's psql connection; it does
+**not** configure pg_cron's server-side execution. This guide chooses the
+[upstream-supported background-worker mode](https://github.com/citusdata/pg_cron/blob/v1.6.8/README.md#ensuring-pg_cron-can-start-jobs)
+instead of libpq job connections. It avoids rotating-password/HBA/peer-map
+dependencies without granting runtime roles ownership or weakening TCP auth.
+
+Install the PostgreSQL-major-compatible pg_cron extension package in the server
+image/operator environment (for PGDG PostgreSQL 18, `postgresql-18-cron`).
+Configure the following before registration and **restart PostgreSQL** through
+its service/operator. Preserve other entries in `shared_preload_libraries`:
+
+```conf
+shared_preload_libraries = 'pg_cron'
+cron.database_name = 'postgres'
+cron.use_background_workers = on
+cron.log_run = on
+max_worker_processes = 20
+cron.max_running_jobs = 4
+```
+
+The worker settings above are the isolated qualified values, not universal
+capacity sizing: budget launcher, maintenance jobs, parallel queries and other
+extensions. Restart-required settings are not applied by `pg_reload_conf()`.
+With background workers, `cron.host` has no effect; workers initialize database
+sessions as each registered job username without libpq/password authentication.
+No server `.pgpass`, peer mapping or broad `trust` rule is needed for this mode.
+Keep ordinary operator/application connections TLS/SCRAM-authenticated.
+
+```bash
+psql -X -h db.example.com -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -c "SELECT name,setting,pending_restart FROM pg_settings WHERE name IN ('shared_preload_libraries','cron.database_name','cron.use_background_workers','cron.log_run','max_worker_processes','cron.max_running_jobs') ORDER BY name;"
+psql -X -h db.example.com -U postgres -d postgres -v ON_ERROR_STOP=1 -f db/sql/cron_jobs.sql
+psql -X -h db.example.com -U postgres -d postgres -v ON_ERROR_STOP=1 -f db/sql/check.sql
+```
+
+Require `cron.use_background_workers=on`, `cron.log_run=on`,
+`cron.database_name=postgres` and no pending restart before declaring the mode
+configured. The canonical SQL creates the extension in `postgres` and registers:
+
+| Job | Database / static owner | Command / schedule |
+|---|---|---|
+| `genesis_tokens_rollover` | `genesis` / `vault_genesis` | `SELECT genesis_tokens_rollover(7, 2);` at `5 0 * * *` |
+| `permesi_cleanup_expired_tokens` | `permesi` / `vault_permesi` | `SELECT cleanup_expired_tokens();` at `15 0 * * *` |
+
+Do not change these usernames to the new credential managers. `check.sql` verifies
+registration/schema, **not job execution**. Capture a baseline after registration
+(and again after any manager-rotation event), then allow both scheduled jobs to
+run and require successful completed executions after that baseline:
+
+```bash
+BASELINE="$(psql -X -w -h db.example.com -U postgres -d postgres -At \
+  -v ON_ERROR_STOP=1 -c 'SELECT coalesce(max(runid),0) FROM cron.job_run_details')"
+# Wait for the actual daily maintenance window before the following check.
+psql -X -w -h db.example.com -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -v baseline="$BASELINE" <<'SQL'
+SELECT j.jobname,r.runid,r.database,r.username,r.status,
+       r.return_message,r.start_time,r.end_time
+FROM cron.job_run_details r JOIN cron.job j USING (jobid)
+WHERE r.runid > :baseline
+  AND j.jobname IN ('genesis_tokens_rollover','permesi_cleanup_expired_tokens')
+ORDER BY r.runid;
+SELECT count(DISTINCT j.jobname) = 2 AS both_completed
+FROM cron.job_run_details r JOIN cron.job j USING (jobid)
+WHERE r.runid > :baseline AND r.status = 'succeeded' AND r.end_time IS NOT NULL
+  AND j.jobname IN ('genesis_tokens_rollover','permesi_cleanup_expired_tokens')
+\gset
+\if :both_completed
+\echo 'Both maintenance jobs completed after the baseline'
+\else
+\echo 'Maintenance execution is not yet qualified'
+\quit 1
+\endif
+SQL
+```
+
+Inspect failed runs as failures, not just the eventual successful row. Also
+observe intended state changes: Genesis creates the premade daily partitions and
+drops expired dated partitions; Permesi removes retention-eligible rows while
+retaining live sessions/tokens/exchanges. Do not create synthetic accounts or
+accelerate cleanup on production just to make this check pass.
+
+In a **disposable qualification database only**, bounded execution can be
+accelerated without changing either canonical command, identity or database:
+
+```sql
+SELECT cron.alter_job(jobid, schedule := '5 seconds')
+FROM cron.job
+WHERE jobname IN ('genesis_tokens_rollover','permesi_cleanup_expired_tokens');
+-- Restore both canonical schedules before running check.sql again.
+SELECT cron.alter_job(jobid, schedule := CASE jobname
+  WHEN 'genesis_tokens_rollover' THEN '5 0 * * *'
+  WHEN 'permesi_cleanup_expired_tokens' THEN '15 0 * * *' END)
+FROM cron.job
+WHERE jobname IN ('genesis_tokens_rollover','permesi_cleanup_expired_tokens');
+```
+
+The isolated docs qualification used PostgreSQL 18.6 with package
+`postgresql-18-cron 1.6.8-1.pgdg13+2` (SQL extension version `1.6`): both jobs
+completed before/after replacement of both manager passwords, 12 successful runs
+and zero failures. Partition creation/retention and six cleanup targets changed
+as intended; live rows and canonical function/owner definitions remained intact.
+Old manager passwords failed and new ones worked; static owner credentials stayed
+unchanged. This used SQL password replacement, **not Vault rotate-root API calls**;
+the bootstrap correction report separately exercised those APIs and reruns.
+No production/managed-service/TLS/HA qualification is implied.
+
+The canonical file's comments describe a different, local-libpq peer-mapping
+alternative. Do not combine only half of that mode with password jobs: if workers
+are unavailable, implement its complete socket `cron.host`, exact
+`pg_ident.conf`/ordered `pg_hba.conf` peer rules and reload workflow instead.
+That alternative was not runtime-qualified here. The disposable Helm quickstart
+intentionally contains no pg_cron scheduler.
 
 ### 2.4 Schema upgrades and OAuth reapplication
 
@@ -332,9 +534,186 @@ kubectl create clusterrolebinding vault-auth-delegator \
   --serviceaccount=vault:vault
 ```
 
-**External Vault** — arrange API connectivity and trusted Kubernetes CA plus an
-operator-managed reviewer-token renewal/rotation strategy. Do not permanently
-configure an expiring `kubectl create token` result or grant app SAs TokenReview.
+#### External Vault: dedicated reviewer and explicit configuration
+
+Run provisioning with a cluster administrator and a Vault management session;
+do not use an application token. The examples use auth mount `kubernetes`,
+reviewer namespace `vault-auth` and SA `vault-reviewer`. The external Vault host
+must reach the API endpoint with a hostname covered by its certificate and trust
+the Kubernetes CA. A kubeconfig endpoint reachable from your laptop is not
+necessarily reachable from Vault; do not fix that with TLS verification bypass.
+
+Have the operator-host administrator prepare `/secure/operator` as a private
+`0700` directory owned by the dedicated `vault-reviewer-operator` account used
+below. The CA/token/script paths in this example are inside that directory.
+
+```bash
+KUBE_CONTEXT=production
+kubectl --context "$KUBE_CONTEXT" create namespace vault-auth
+kubectl --context "$KUBE_CONTEXT" -n vault-auth create serviceaccount vault-reviewer
+kubectl --context "$KUBE_CONTEXT" create clusterrole external-vault-token-reviewer \
+  --verb=create --resource=tokenreviews.authentication.k8s.io
+kubectl --context "$KUBE_CONTEXT" create clusterrolebinding external-vault-token-reviewer \
+  --clusterrole=external-vault-token-reviewer \
+  --serviceaccount=vault-auth:vault-reviewer
+```
+
+TokenReview is cluster-scoped, so this is a ClusterRole/ClusterRoleBinding, not a
+namespaced Role. Only the reviewer gets it; application SAs never do. Provision
+API-audience reviewer credentials into a private temporary directory:
+
+```bash
+set +x
+set -euo pipefail
+umask 077
+private="$(mktemp -d /var/tmp/vault-reviewer.XXXXXXXX)"
+trap 'rm -rf "$private"' EXIT
+KUBERNETES_HOST="$(kubectl --context "$KUBE_CONTEXT" config view --raw --minify \
+  -o jsonpath='{.clusters[0].cluster.server}')"
+kubectl --context "$KUBE_CONTEXT" config view --raw --minify --flatten \
+  -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+  | base64 --decode > "$private/kubernetes-ca.crt"
+test -s "$private/kubernetes-ca.crt"
+kubectl --context "$KUBE_CONTEXT" -n vault-auth create token vault-reviewer \
+  --duration=1h > "$private/reviewer.jwt"
+test -s "$private/reviewer.jwt"
+vault write auth/kubernetes/config \
+  kubernetes_host="$KUBERNETES_HOST" \
+  kubernetes_ca_cert=@"$private/kubernetes-ca.crt" \
+  token_reviewer_jwt=@"$private/reviewer.jwt" \
+  disable_local_ca_jwt=true >/dev/null
+cp "$private/kubernetes-ca.crt" /secure/operator/kubernetes-ca.crt
+```
+
+Do **not** set the reviewer's audience to `vault`: it authenticates to the
+Kubernetes API. Workload JWTs use audience `vault` as in §3.2. `@file` keeps the
+reviewer JWT out of argv/history; disable shell tracing and never log its contents.
+Use your API's actual audience/lifetime policy. A TokenRequest JWT expires and
+cannot be renewed through Vault.
+
+The first configuration is not the end of provisioning. Replace the reviewer
+before expiry using the **same config-write sequence** with a newly minted token.
+Vault uses the replacement for future TokenReviews. Keep the previous reviewer
+valid while the write is in progress; alert on a failed refresh rather than
+silently waiting for auth outages. The requested one-hour duration may be capped
+by Kubernetes; schedule against the actual issued lifetime.
+
+#### Automated external reviewer replacement
+
+Use a dedicated external operator identity, never an application identity. The
+Kubernetes kubeconfig used by the automation must have its own maintained
+authentication (for example, your organization's managed client certificate or
+OIDC exec credentials), independent of the expiring reviewer JWT. Bind its exact
+authenticated username to only the named SA's TokenRequest subresource:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n vault-auth create role vault-reviewer-token-issuer \
+  --verb=create --resource=serviceaccounts/token --resource-name=vault-reviewer
+kubectl --context "$KUBE_CONTEXT" -n vault-auth create rolebinding vault-reviewer-token-issuer \
+  --role=vault-reviewer-token-issuer --user=vault-reviewer-updater
+```
+
+Replace `vault-reviewer-updater` with that kubeconfig's actual authenticated
+username. This identity needs neither application JWTs nor TokenReview itself.
+Use a separately scoped Vault policy and a renewable periodic management token:
+
+```bash
+vault policy write external-kubernetes-reviewer - <<'HCL'
+path "auth/kubernetes/config" { capabilities = ["update"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }
+path "auth/token/renew-self" { capabilities = ["update"] }
+HCL
+umask 077
+vault token create -orphan -period=1h -no-default-policy \
+  -policy=external-kubernetes-reviewer -field=token \
+  > /secure/operator/vault-reviewer-management.token
+```
+
+The administrator performs this initial token creation. Protect the operator
+directory as `0700`, token as `0600`, and do not put it in a unit file or Helm
+values. This management token can update reviewer trust, so treat it as privileged
+infrastructure access despite its narrow policy. An organization-managed
+workload-auth session with the same policy is an alternative.
+
+Install the following operator-owned script outside this repository as
+`/secure/operator/refresh-vault-reviewer.sh` (mode `0700`). Its environment supplies
+`KUBE_CONTEXT`, the dedicated `KUBECONFIG`, `KUBERNETES_HOST`, `VAULT_ADDR` and, for
+private Vault transport TLS, `VAULT_CACERT`. Persist only the public Kubernetes CA
+at `/secure/operator/kubernetes-ca.crt`; it is the trusted CA obtained above:
+
+```bash
+#!/usr/bin/env bash
+set +x
+set -euo pipefail
+umask 077
+private="$(mktemp -d /var/tmp/vault-reviewer.XXXXXXXX)"
+trap 'rm -rf "$private"' EXIT
+export VAULT_TOKEN="$(cat /secure/operator/vault-reviewer-management.token)"
+test -n "$VAULT_TOKEN"
+vault token renew -self >/dev/null
+kubectl --context "$KUBE_CONTEXT" -n vault-auth create token vault-reviewer \
+  --duration=1h > "$private/reviewer.jwt"
+test -s "$private/reviewer.jwt"
+# Refuse an unexpectedly short-lived replacement instead of assuming one hour.
+python3 - "$private/reviewer.jwt" <<'PY'
+import base64, json, pathlib, sys, time
+part = pathlib.Path(sys.argv[1]).read_text().strip().split(".")[1]
+expiry = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))["exp"]
+if expiry - time.time() < 1800:
+    raise SystemExit("reviewer token lifetime is too short for this refresh schedule")
+PY
+vault write auth/kubernetes/config \
+  kubernetes_host="$KUBERNETES_HOST" \
+  kubernetes_ca_cert=@/secure/operator/kubernetes-ca.crt \
+  token_reviewer_jwt=@"$private/reviewer.jwt" \
+  disable_local_ca_jwt=true >/dev/null
+```
+
+Payload decoding here checks the newly API-issued token's refresh deadline; it
+does not replace signature verification by Kubernetes. Run every 15 minutes, for
+example with these operator-host systemd units (no secrets in the environment
+file):
+
+```ini
+# vault-kubernetes-reviewer.service
+[Service]
+Type=oneshot
+User=vault-reviewer-operator
+UMask=0077
+EnvironmentFile=/secure/operator/vault-reviewer.env
+ExecStart=/secure/operator/refresh-vault-reviewer.sh
+```
+
+```ini
+# vault-kubernetes-reviewer.timer
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=vault-kubernetes-reviewer.service
+[Install]
+WantedBy=timers.target
+```
+
+The environment file contains only nonsecret endpoints/context/credential-file
+paths; provide read access to those protected files only to this operator account.
+Enable/start the timer through your normal operator-host service deployment.
+Alert on service failure and monitor successful refresh timestamps and both
+credential expiries. The management token is renewed on each run; if automation
+is down longer than its one-hour period, reauthenticate/reprovision it through an
+authorized administrator. There is no permanent expiring reviewer token, no
+unattended root token and no fallback that gives app SAs TokenReview.
+
+The isolated external-Vault qualification used rootless Podman Vault 1.20.4
+outside Kind, a trusted host-network-reachable Kubernetes API and protected
+one-hour reviewer JWTs. Both exact app SA roles logged in before and after a
+distinct reviewer replacement; wrong SA/audience and cross-role requests failed.
+Reviewer TokenReview was allowed and both apps were denied. A scoped non-root
+Vault management identity updated config but could not mutate roles; an actual
+scoped Kubernetes operator could mint only the reviewer token, not other/self
+tokens. No JWT expiry wait, installed external scheduler, periodic-management
+renewal, production network/TLS deployment or global trust modification was
+claimed by that scenario. The refresh units above are the operator deployment
+procedure, not an assertion they ran here.
 
 ### 3.2 Kubernetes auth roles (SA-bound, exact namespace/audience)
 
@@ -347,7 +726,7 @@ vault write auth/kubernetes/role/permesi \
   bound_service_account_names="permesi" \
   bound_service_account_namespaces="permesi" \
   audience="vault" \
-  token_policies="permesi" \
+  token_policies="permesi" token_type=service token_no_default_policy=true \
   token_ttl="1h" \
   token_max_ttl="4h"
 
@@ -355,7 +734,7 @@ vault write auth/kubernetes/role/genesis \
   bound_service_account_names="permesi-genesis" \
   bound_service_account_namespaces="permesi" \
   audience="vault" \
-  token_policies="genesis" \
+  token_policies="genesis" token_type=service token_no_default_policy=true \
   token_ttl="1h" \
   token_max_ttl="4h"
 ```
@@ -402,36 +781,54 @@ vault write -f transit/permesi/keys/oidc-signing \
 
 ### 3.5 Database secrets engine
 
+This is initial provisioning only. Supply the matching initial manager passwords
+through protected mode-`0600` operator files
+`/secure/operator/vault_permesi_manager.password` and
+`/secure/operator/vault_genesis_manager.password`, not literals/argv/history.
+Vault must trust the PostgreSQL CA for the `verify-full` connection.
+
 ```bash
 vault secrets enable database
-
-vault write database/config/permesi \
-  plugin_name=postgresql-database-plugin \
-  allowed_roles="permesi" \
-  connection_url="postgresql://{{username}}:{{password}}@db.example.com:5432/permesi?sslmode=verify-full" \
-  username="vault_permesi" \
-  password="<vault_permesi-password>" \
-  max_connection_lifetime="120" \
-  root_rotation_statements='ALTER ROLE "{{username}}" WITH PASSWORD '"'"'{{password}}'"'"';'
-
-vault write database/roles/permesi \
-  db_name="permesi" \
-  creation_statements='CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '"'"'{{password}}'"'"' VALID UNTIL '"'"'{{expiration}}'"'"'; GRANT permesi_runtime TO "{{name}}";' \
-  renew_statements='ALTER ROLE "{{name}}" WITH VALID UNTIL '"'"'{{expiration}}'"'"';' \
-  revocation_statements='SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.usename = '"'"'{{name}}'"'"'; REVOKE permesi_runtime FROM "{{name}}"; DROP ROLE IF EXISTS "{{name}}";' \
-  default_ttl="1h" \
-  max_ttl="4h"
+for service in permesi genesis; do
+  vault write "database/config/${service}" \
+    plugin_name=postgresql-database-plugin \
+    allowed_roles="${service}" \
+    connection_url="postgresql://{{username}}:{{password}}@db.example.com:5432/${service}?sslmode=verify-full" \
+    username="vault_${service}_manager" \
+    password=@"/secure/operator/vault_${service}_manager.password" \
+    max_connection_lifetime=120s \
+    root_rotation_statements="ALTER ROLE \"vault_${service}_manager\" WITH PASSWORD '{{password}}';" >/dev/null
+  vault write -f "database/rotate-root/${service}" >/dev/null
+  vault write "database/roles/${service}" \
+    db_name="${service}" \
+    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT ${service}_runtime TO \"{{name}}\";" \
+    renew_statements="ALTER ROLE \"{{name}}\" WITH VALID UNTIL '{{expiration}}';" \
+    revocation_statements="SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.usename = '{{name}}'; REVOKE ${service}_runtime FROM \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";" \
+    default_ttl=1h max_ttl=4h >/dev/null
+done
 ```
 
-Repeat for `genesis` with `database/config/genesis`, `database/roles/genesis`, the
-`genesis` database name, and `GRANT genesis_runtime`. Each connection's
-`allowed_roles` is restricted to itself.
+After the first successful root rotation the bootstrap manager password is no
+longer valid; remove its protected staging file through the operator credential
+workflow. The steady-state password stays in Vault. Later operator-authorized
+manager rotations are:
 
-Configure connections only on initial provisioning: reruns must not overwrite a
-manager password that Vault has rotated. Manager/root rotation and its scheduling
-are operator-owned; do not assume Terraform Enterprise scheduling is available
-in community Vault. Use protected operator input rather than real credentials
-in command history, values files or Helm release data.
+```bash
+vault write -f database/rotate-root/permesi
+vault write -f database/rotate-root/genesis
+```
+
+Reruns reuse existing manager configs and must not overwrite rotated passwords.
+Check the exact `connection_details.username` and `allowed_roles` before reuse.
+Initial config creation and the first manager rotation are separate operations:
+a persisted config alone is not proof the rotation finished. If provisioning is
+interrupted between them, require an authorized successful rotate-root for that
+manager before declaring bootstrap complete. Do not reset an owner password or
+assume an automatic interrupted-first-rotation repair.
+Legacy owner-as-manager installs require a reviewed manager-separated restore/
+migration; the disposable helper instead accepts only explicit reset or restore.
+No automatic owner-password reset is supported. Rotation scheduling is
+operator-owned; Terraform Enterprise scheduling is not assumed available.
 
 > The application always replaces DSN username/password with Vault-issued
 > credentials from `/v1/database/creds/{permesi,genesis}`; the DSN Secret carries
@@ -911,9 +1308,12 @@ helm --kube-context "$CTX" uninstall "$R-web" "$R" "$R-genesis" "$R-quickstart" 
 kubectl --context "$CTX" delete namespace "$NS"
 ```
 
-Uninstall the helper **before** deleting the namespace so its cluster-scoped
-reviewer binding is removed. The retained bootstrap Secret is removed by namespace
-deletion. Stop `connect.sh` first. Inspect any failed uninstall before deleting;
+Uninstall the helper **before** deleting the namespace so its Helm-owned
+cluster-scoped reviewer binding is removed. With pregrant mode, the administrator
+must separately delete the operator-owned Role/Binding using the exact commands
+in [the pregrant procedure](#namespaced-installer-with-pregranted-reviewer).
+The retained bootstrap Secret is removed by namespace deletion. Stop
+`connect.sh` first. Inspect any failed uninstall before deleting;
 do not hide errors. Delete a Kind cluster only if you created it solely for this
 run; never delete shared namespaces/clusters or external production dependencies.
 

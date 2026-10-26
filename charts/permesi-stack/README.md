@@ -57,8 +57,10 @@ helm --kube-context kind-permesi-helm-test upgrade --install permesi charts/perm
 ```
 
 Use a namespace you own; if it already exists, inspect it rather than treating it
-as disposable. Helm/kubectl need permission for the helper's cluster-scoped
-reviewer RBAC. Kubernetes ≥1.29 with native sidecars and Linux/amd64 are the
+as disposable. By default Helm needs cluster-scoped reviewer RBAC creation
+permission; a pregranted Vault-only binding supports a namespaced installer
+(set `quickstart.rbac.createTokenReviewBinding=false`; see the installation guide).
+Kubernetes ≥1.29 with native sidecars and Linux/amd64 are the
 tested requirements. The profile configures Agent, canonical SQL bootstrap,
 service identities, DSNs, exact SANs, admission trust, outbox-only `example.test`
 signup and public browser URLs. No sibling-value mutation is used.
@@ -92,25 +94,34 @@ loopback and explicitly import only the exported public CA into a disposable
 browser profile. No `-k`, silent trust change or automatic public HTTPS web edge.
 See the [connection guide](../../docs/install-guide.md#verify-and-connect).
 
-Use the runtime verifier directly (requires curl and Cargo or a compatible
-`QS_ADMISSION_BIN`):
+Use the complete verifier with explicit umbrella helper mapping (requires Python
+3, curl and Cargo or a compatible `QS_ADMISSION_BIN`):
 
 ```bash
-python3 scripts/quickstart/verify-runtime.py --context kind-permesi-helm-test \
-  --namespace permesi-quickstart --release permesi
+bash scripts/quickstart/verify.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi \
+  --helper-release permesi --helper-fullname permesi-quickstart
 ```
 
-Do not substitute `verify.sh`: its bootstrap-Job selector expects the script's
-separate helper release label `permesi-quickstart`, whereas umbrella resources
-belong to Helm release `permesi`. The direct runtime verifier was exercised in
-the M-UQ report before/after upgrades; the complete shell wrapper was not.
+`--helper-release` selects the helper Helm-label identity; `--helper-fullname`
+selects its object-name prefix. Split installs default both to
+`<release>-quickstart`; umbrella Jobs belong to release `permesi` but use object
+prefix `permesi-quickstart`, so pass both overrides. The corrected complete
+wrapper was runtime-qualified with these options. The direct Python verifier
+also accepts `--helper-fullname permesi-quickstart`.
+
+Verifier forwards use dynamic child-owned loopback ports; they do not attach to
+an unrelated existing listener. `connect.sh` intentionally retains the fixed
+browser ports above. `--exercise-lifecycle` additionally revokes application DB
+leases, checks fail-closed container restart/new pool identities and real
+admission recovery; run it only against a disposable installation.
 
 This is **development only**: single ephemeral PostgreSQL and in-memory HTTP dev
 Vault, no HA/backups/pg_cron/production support. Bootstrap administrator/owner/root
 credentials use a retained, narrowly mounted Kubernetes Secret; application
-TLS/DB/AppRole secrets are not synchronized to Kubernetes. Current Vault dev
-startup logs can contain credentials: restrict log readers and sinks. Lost Vault
-with retained databases is not repaired by generating replacement seeds.
+TLS/DB/AppRole secrets are not synchronized to Kubernetes. The helper filters
+root-token/unseal-key dev banner lines without hiding other Vault diagnostics.
+Lost Vault with retained databases is not repaired by generating replacement seeds.
 Outbox signup is not delivered email, verified login, OIDC E2E or browser/WASM
 qualification. See [current quickstart qualifications](../../docs/operations.md#11-quickstart-qualification-and-known-boundaries).
 
@@ -121,9 +132,12 @@ helm --kube-context kind-permesi-helm-test uninstall permesi -n permesi-quicksta
 kubectl --context kind-permesi-helm-test delete namespace permesi-quickstart
 ```
 
-Uninstall first to remove cluster-scoped reviewer RBAC; namespace deletion removes
-the retained bootstrap Secret and ephemeral state. Remove imported development CA
-trust from the browser when finished. Never delete an unrelated namespace/cluster.
+Uninstall first to remove Helm-owned cluster-scoped reviewer RBAC; pregranted
+operator-owned grants need separate administrator cleanup from
+[the pregrant procedure](../../docs/install-guide.md#namespaced-installer-with-pregranted-reviewer).
+Namespace deletion removes the retained bootstrap Secret and ephemeral state.
+Remove imported development CA trust from the browser when finished. Never delete
+an unrelated namespace/cluster.
 
 ## Image digest precedence
 

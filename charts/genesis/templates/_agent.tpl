@@ -73,9 +73,12 @@ template_config {
 }
 {{- end -}}
 
+{{/* TLS bundle Go-template source: one key, leaf first, then the complete
+     issuer chain (consul-template v0.41.1 pkiCert exposes .Data.CAChain, the
+     ordered deduplicated list of CA certificates; .Data.CA is only the first). */}}
 {{- define "genesis.agentTlsTemplate" -}}
 {{ "{{- with pkiCert" }} {{ printf "%s/issue/%s" .Values.vault.agent.pki.mount .Values.vault.agent.pki.role | quote }} {{ printf "common_name=%s" .Values.vault.agent.pki.commonName | quote }} {{ printf "alt_names=%s" (join "," .Values.vault.agent.pki.dnsNames) | quote }} {{ printf "ttl=%s" .Values.vault.agent.pki.ttl | quote }} {{ "}}" }}
-{{ "{{ .Data.Key }}{{ .Data.Cert }}{{ .Data.CA }}" }}
+{{ "{{ .Data.Key }}{{ .Data.Cert }}{{ range .Data.CAChain }}{{ . }}{{ end }}" }}
 {{ "{{- end" }} {{ "}}" }}
 {{- end -}}
 

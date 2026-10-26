@@ -40,7 +40,10 @@ tests:
           pattern: 'lease_renewal_threshold = 0.8'
       - matchRegex:
           path: data["tls-bundle.tpl"]
-          pattern: '\{\{ \.Data\.Key \}\}\{\{ \.Data\.Cert \}\}\{\{ \.Data\.CA \}\}'
+          pattern: '\{\{ \.Data\.Key \}\}\{\{ \.Data\.Cert \}\}\{\{ range \.Data\.CAChain \}\}\{\{ \. \}\}\{\{ end \}\}'
+      - notMatchRegex:
+          path: data["tls-bundle.tpl"]
+          pattern: '\{\{ \.Data\.CA \}\}'
       - matchRegex:
           path: data["tls-bundle.tpl"]
           pattern: '"pki-int/issue/genesis-runtime"'

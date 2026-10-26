@@ -126,29 +126,56 @@ fi
 
 # --- 4. database secrets engine ---------------------------------------------
 ensure_mount database database
-# Connection config is written once: a rerun must never overwrite a manager
-# password that an operator may since have rotated via rotate-root.
+# Connection credentials are written only for an absent config. A root-only KV
+# marker separately records initial rotation, so interruption after config
+# creation (or after rotation but before its marker write) is safe to retry.
 db_config() {
   name="$1"; user="$2"; pw_file="$3"
-  if vault read "database/config/${name}" >/dev/null 2>&1; then
-    vault read -format=json -field=connection_details "database/config/${name}" \
-      | grep -Eq '^[[:space:]]*"username": "'"${user}"'"[,]?[[:space:]]*$' \
-      || die "database/config/${name} must use ${user}; legacy owner-as-manager installs require restoring a manager-separated Vault configuration or an explicit disposable development namespace reset (no automatic password reset)"
-    allowed="$(vault read -format=json -field=allowed_roles "database/config/${name}" | tr -d '[:space:]')"
-    [ "$allowed" = "[\"${name}\"]" ] \
-      || die "database/config/${name} allowed_roles must be exactly ${name}; repair the Vault configuration before rerunning"
-    log "database/config/${name} exists; leaving manager credentials untouched"
-    return 0
+  rotation_path="bootstrap/manager-rotation/${name}"
+  if existing="$(vault read "database/config/${name}" 2>&1)"; then
+    : # Validate below; never overwrite Vault's current private credentials.
+  else
+    [ "$existing" = "No value found at database/config/${name}" ] \
+      || die "cannot inspect database/config/${name}; refusing to overwrite manager credentials"
+    # Reset even a stale completed marker BEFORE creating a new connection.
+    vault kv put -mount=secret/permesi "$rotation_path" state=pending manager="$user" >/dev/null
+    vault write "database/config/${name}" \
+      plugin_name=postgresql-database-plugin \
+      allowed_roles="${name}" \
+      connection_url="postgresql://{{username}}:{{password}}@${PG_HOST}:${PG_PORT}/${name}?sslmode=disable" \
+      max_connection_lifetime=120s \
+      username="${user}" password=@"${pw_file}" \
+      root_rotation_statements="ALTER ROLE \"${user}\" WITH PASSWORD '{{password}}';" >/dev/null
+    log "configured database/config/${name}"
   fi
-  vault write "database/config/${name}" \
-    plugin_name=postgresql-database-plugin \
-    allowed_roles="${name}" \
-    connection_url="postgresql://{{username}}:{{password}}@${PG_HOST}:${PG_PORT}/${name}?sslmode=disable" \
-    max_connection_lifetime=120s \
-    username="${user}" password=@"${pw_file}" \
-    root_rotation_statements="ALTER ROLE \"${user}\" WITH PASSWORD '{{password}}';" >/dev/null
+  vault read -format=json -field=connection_details "database/config/${name}" \
+    | grep -Eq '^[[:space:]]*"username": "'"${user}"'"[,]?[[:space:]]*$' \
+    || die "database/config/${name} must use ${user}; legacy owner-as-manager installs require restoring a manager-separated Vault configuration or an explicit disposable development namespace reset (no automatic password reset)"
+  allowed="$(vault read -format=json -field=allowed_roles "database/config/${name}" | tr -d '[:space:]')"
+  [ "$allowed" = "[\"${name}\"]" ] \
+    || die "database/config/${name} allowed_roles must be exactly ${name}; repair the Vault configuration before rerunning"
+
+  if rotation_state="$(vault kv get -mount=secret/permesi -field=state "$rotation_path" 2>&1)"; then
+    rotation_manager="$(vault kv get -mount=secret/permesi -field=manager "$rotation_path")" \
+      || die "cannot read initial rotation marker manager for ${name}"
+    [ "$rotation_manager" = "$user" ] \
+      || die "initial rotation marker for ${name} must identify ${user}; repair the bootstrap marker before rerunning"
+    case "$rotation_state" in
+      completed)
+        log "database/config/${name} initial rotation complete; leaving manager credentials untouched"
+        return 0 ;;
+      pending) ;;
+      *) die "invalid initial rotation marker state for ${name}; repair the bootstrap marker before rerunning" ;;
+    esac
+  else
+    # Only a confirmed missing KV value is an incomplete legacy/cutpoint state.
+    # Authorization, transport and malformed-marker errors must fail closed.
+    [ "$rotation_state" = "No value found at secret/permesi/data/${rotation_path}" ] \
+      || die "cannot read initial rotation marker for ${name}; refusing to skip rotation"
+  fi
   vault write -force "database/rotate-root/${name}" >/dev/null
-  log "configured database/config/${name} and rotated bootstrap manager password"
+  vault kv put -mount=secret/permesi "$rotation_path" state=completed manager="$user" >/dev/null
+  log "completed initial manager rotation for database/config/${name}"
 }
 db_role() {
   name="$1"; runtime="$2"

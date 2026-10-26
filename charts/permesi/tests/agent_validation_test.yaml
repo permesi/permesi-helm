@@ -274,8 +274,9 @@ tests:
       vault.agent.pki.commonName: api.permesi.dev
       vault.agent.pki.dnsNames[0]: api.permesi.dev
       serviceAccount.automount: false
-      extraVolumeMounts[0].name: extra
-      extraVolumeMounts[0].mountPath: /var/run/permesi/tls
+      extraVolumeMounts:
+        - name: extra
+          mountPath: /var/run/permesi/tls
     asserts:
       - failedTemplate:
           errorPattern: "extraVolumeMounts must not overlap"

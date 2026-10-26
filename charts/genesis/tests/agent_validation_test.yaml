@@ -260,8 +260,9 @@ tests:
       vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
       vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
       serviceAccount.automount: false
-      extraVolumeMounts[0].name: extra
-      extraVolumeMounts[0].mountPath: /var/run/genesis/tls
+      extraVolumeMounts:
+        - name: extra
+          mountPath: /var/run/genesis/tls
     asserts:
       - failedTemplate:
           errorPattern: "extraVolumeMounts must not overlap"

@@ -1,0 +1,116 @@
+# DEVELOPMENT ONLY. Fixed profile: release permesi, namespace permesi-quickstart.
+# Create a disposable namespace (Kubernetes >=1.29), preferably Restricted PSA:
+# kubectl create namespace permesi-quickstart
+# kubectl label namespace permesi-quickstart pod-security.kubernetes.io/enforce=restricted
+# helm dependency build charts/permesi-stack
+# helm upgrade --install permesi charts/permesi-stack -n permesi-quickstart \
+#   -f charts/permesi-stack/examples/quickstart.yaml --wait --wait-for-jobs --timeout 12m
+#
+# For another namespace/release, explicitly update all namespace-qualified DSNs,
+# Agent origins, commonName/dnsNames, PASERK URL and helper service/SA names.
+# No tpl or parent-to-sibling mutation is performed. Bootstrap Jobs are ordinary
+# resources; --wait-for-jobs is REQUIRED to avoid false-success on failed SQL.
+# Vault and PostgreSQL are ephemeral, single-replica and ClusterIP-only. Never
+# retain PostgreSQL after losing Vault: the OPAQUE seed cannot be regenerated.
+# SQL archive/checksum is locked in the helper to app 0.4.3 commit 04783bc0.
+quickstart:
+  enabled: true
+  acknowledgeDevelopment: true
+  fullnameOverride: permesi-quickstart
+  bootstrap:
+    services:
+      permesi:
+        serviceName: permesi
+        browserDnsNames: [api.localhost]
+      genesis:
+        serviceName: permesi-genesis
+        browserDnsNames: [genesis.localhost]
+    kubernetesRoles:
+      audience: vault
+      permesi:
+        serviceAccount: permesi
+      genesis:
+        serviceAccount: permesi-genesis
+
+permesi:
+  enabled: true
+  replicaCount: 2
+  serviceAccount:
+    automount: false
+    name: permesi
+  database:
+    dsn:
+      value: postgres://placeholder@permesi-quickstart-postgresql.permesi-quickstart.svc:5432/permesi?sslmode=disable
+  tls:
+    pemBundlePath: /var/run/permesi/tls/bundle.pem
+  vault:
+    authMethod: auto
+    url: /var/run/secrets/vaultproject.io/agent.sock
+    agent:
+      enabled: true
+      address: http://permesi-quickstart-vault.permesi-quickstart.svc:8200
+      auth:
+        mount: kubernetes
+        role: permesi
+        audience: vault
+      pki:
+        mount: pki-int
+        role: permesi-runtime
+        commonName: permesi.permesi-quickstart.svc.cluster.local
+        dnsNames: [permesi, permesi.permesi-quickstart, permesi.permesi-quickstart.svc, permesi.permesi-quickstart.svc.cluster.local, api.localhost]
+      paserkCa:
+        enabled: true
+        path: pki-int/cert/ca_chain
+  admission:
+    paserkUrl: https://permesi-genesis.permesi-quickstart.svc.cluster.local:8080/paserk.json
+    issuer: https://genesis.localhost:9443
+    audience: permesi
+    paserkCa:
+      mountPath: /var/run/permesi/admission-ca
+  auth:
+    frontendBaseUrl: http://localhost:8080
+    corsAllowedOrigins: http://localhost:8080
+    opaqueServerId: api.localhost
+  extraEnv:
+    - {name: PERMESI_EMAIL_DELIVERY, value: outbox}
+    - {name: PERMESI_SIGNUP_MODE, value: restricted}
+    - {name: PERMESI_SIGNUP_ALLOWED_DOMAINS, value: example.test}
+    - {name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS, value: example.test}
+
+genesis:
+  enabled: true
+  replicaCount: 2
+  serviceAccount:
+    automount: false
+    name: permesi-genesis
+  database:
+    dsn:
+      value: postgres://placeholder@permesi-quickstart-postgresql.permesi-quickstart.svc:5432/genesis?sslmode=disable
+  tls:
+    pemBundlePath: /var/run/genesis/tls/bundle.pem
+  vault:
+    authMethod: auto
+    url: /var/run/secrets/vaultproject.io/agent.sock
+    agent:
+      enabled: true
+      address: http://permesi-quickstart-vault.permesi-quickstart.svc:8200
+      auth:
+        mount: kubernetes
+        role: genesis
+        audience: vault
+      pki:
+        mount: pki-int
+        role: genesis-runtime
+        commonName: permesi-genesis.permesi-quickstart.svc.cluster.local
+        dnsNames: [permesi-genesis, permesi-genesis.permesi-quickstart, permesi-genesis.permesi-quickstart.svc, permesi-genesis.permesi-quickstart.svc.cluster.local, genesis.localhost]
+  extraEnv:
+    - {name: GENESIS_ADMISSION_ISS, value: "https://genesis.localhost:9443"}
+    - {name: GENESIS_ADMISSION_AUD, value: permesi}
+
+web:
+  enabled: true
+  runtimeConfig:
+    apiBaseUrl: https://api.localhost:8443
+    tokenBaseUrl: https://genesis.localhost:9443
+    clientId: 00000000-0000-0000-0000-000000000000
+    opaqueServerId: api.localhost

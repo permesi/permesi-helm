@@ -35,3 +35,9 @@ web:
     tag: 0.4.3  # managed-by-release-bot
     digest: ""  # managed-by-release-bot
     pullPolicy: IfNotPresent
+
+# Optional disposable development infrastructure. Use examples/quickstart.yaml:
+# enabling this alone does not wire the component charts to these dependencies.
+quickstart:
+  enabled: false
+  acknowledgeDevelopment: false

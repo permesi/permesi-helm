@@ -1,0 +1,118 @@
+quickstart:
+  enabled: true
+  acknowledgeDevelopment: true
+  fullnameOverride: atlas-quickstart
+  bootstrap:
+    services:
+      permesi:
+        serviceName: api-backend
+        browserDnsNames:
+        - api.localhost
+      genesis:
+        serviceName: token-backend
+        browserDnsNames:
+        - genesis.localhost
+    kubernetesRoles:
+      audience: vault
+      permesi:
+        serviceAccount: api-backend-identity
+      genesis:
+        serviceAccount: token-backend-identity
+permesi:
+  enabled: true
+  replicaCount: 2
+  serviceAccount:
+    automount: false
+    name: api-backend-identity
+  database:
+    dsn:
+      value: postgres://placeholder@atlas-quickstart-postgresql.uq-alt.svc:5432/permesi?sslmode=disable
+  tls:
+    pemBundlePath: /var/run/permesi/tls/bundle.pem
+  vault:
+    authMethod: auto
+    url: /var/run/secrets/vaultproject.io/agent.sock
+    agent:
+      enabled: true
+      address: http://atlas-quickstart-vault.uq-alt.svc:8200
+      auth:
+        mount: kubernetes
+        role: permesi
+        audience: vault
+      pki:
+        mount: pki-int
+        role: permesi-runtime
+        commonName: api-backend.uq-alt.svc.cluster.local
+        dnsNames:
+        - api-backend
+        - api-backend.uq-alt
+        - api-backend.uq-alt.svc
+        - api-backend.uq-alt.svc.cluster.local
+        - api.localhost
+      paserkCa:
+        enabled: true
+        path: pki-int/cert/ca_chain
+  admission:
+    paserkUrl: https://token-backend.uq-alt.svc.cluster.local:8080/paserk.json
+    issuer: https://genesis.localhost:9443
+    audience: permesi
+    paserkCa:
+      mountPath: /var/run/permesi/admission-ca
+  auth:
+    frontendBaseUrl: http://localhost:8080
+    corsAllowedOrigins: http://localhost:8080
+    opaqueServerId: api.localhost
+  extraEnv:
+  - name: PERMESI_EMAIL_DELIVERY
+    value: outbox
+  - name: PERMESI_SIGNUP_MODE
+    value: restricted
+  - name: PERMESI_SIGNUP_ALLOWED_DOMAINS
+    value: example.test
+  - name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS
+    value: example.test
+  fullnameOverride: api-backend
+genesis:
+  enabled: true
+  replicaCount: 2
+  serviceAccount:
+    automount: false
+    name: token-backend-identity
+  database:
+    dsn:
+      value: postgres://placeholder@atlas-quickstart-postgresql.uq-alt.svc:5432/genesis?sslmode=disable
+  tls:
+    pemBundlePath: /var/run/genesis/tls/bundle.pem
+  vault:
+    authMethod: auto
+    url: /var/run/secrets/vaultproject.io/agent.sock
+    agent:
+      enabled: true
+      address: http://atlas-quickstart-vault.uq-alt.svc:8200
+      auth:
+        mount: kubernetes
+        role: genesis
+        audience: vault
+      pki:
+        mount: pki-int
+        role: genesis-runtime
+        commonName: token-backend.uq-alt.svc.cluster.local
+        dnsNames:
+        - token-backend
+        - token-backend.uq-alt
+        - token-backend.uq-alt.svc
+        - token-backend.uq-alt.svc.cluster.local
+        - genesis.localhost
+  extraEnv:
+  - name: GENESIS_ADMISSION_ISS
+    value: https://genesis.localhost:9443
+  - name: GENESIS_ADMISSION_AUD
+    value: permesi
+  fullnameOverride: token-backend
+web:
+  enabled: true
+  runtimeConfig:
+    apiBaseUrl: https://api.localhost:8443
+    tokenBaseUrl: https://genesis.localhost:9443
+    clientId: 00000000-0000-0000-0000-000000000000
+    opaqueServerId: api.localhost

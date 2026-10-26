@@ -18,3 +18,8 @@ dependencies:
     version: 0.4.4
     repository: file://../web
     condition: web.enabled
+  - name: permesi-quickstart
+    alias: quickstart
+    version: 0.1.0
+    repository: file://../../scripts/quickstart/chart
+    condition: quickstart.enabled

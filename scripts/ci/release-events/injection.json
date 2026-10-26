@@ -17,7 +17,7 @@
       },
       "web": {
         "repository": "ghcr.io/permesi/web",
-        "tag": "$(touch /tmp/dig-injection-executed)",
+        "tag": "$(touch __INJECTION_SENTINEL__)",
         "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       }
     }

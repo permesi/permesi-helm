@@ -493,3 +493,97 @@ tests:
   asserts:
   - failedTemplate:
       errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+- it: rejects relative extra mounts that can shadow the native JWT
+  set:
+    extraVolumes:
+    - name: shadow
+      emptyDir: {}
+    extraVolumeMounts:
+    - name: shadow
+      mountPath: var/run/secrets/vault-native
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumeMounts mountPath must be absolute
+- it: rejects chart-owned Vault URL overrides in explicit AppRole mode
+  set:
+    vault.authMethod: approle
+    vault.roleId.value: fixture-role
+    vault.secretId.value: fixture-secret
+    extraEnv:
+    - name: GENESIS_VAULT_URL
+      value: /run/agent.sock
+  asserts:
+  - failedTemplate:
+      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+- it: rejects auth mount auth/kubernetes
+  set:
+    vault.kubernetes.authMount: auth/kubernetes
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects auth mount v1/auth/kubernetes
+  set:
+    vault.kubernetes.authMount: v1/auth/kubernetes
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects native origins with out-of-range ports
+  set:
+    vault.url: https://vault.example.com:99999
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin port must be within 0-65535
+- it: rejects native IPv6 origins with out-of-range ports
+  set:
+    vault.url: https://[2001:db8::1]:65536/
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin port must be within 0-65535
+- it: rejects native origin ports too large for integer conversion
+  set:
+    vault.url: https://vault.example.com:99999999999999999999
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin port must be within 0-65535
+- it: accepts the highest native origin port and a trailing slash
+  set:
+    vault.url: https://vault.example.com:65535/
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: GENESIS_VAULT_URL
+        value: https://vault.example.com:65535/
+- it: accepts the lowest native origin port over HTTP
+  set:
+    vault.url: http://vault.example.com:0
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: GENESIS_VAULT_URL
+        value: http://vault.example.com:0
+- it: accepts native IPv6 origins without an explicit port
+  set:
+    vault.url: https://[2001:db8::1]
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: GENESIS_VAULT_URL
+        value: https://[2001:db8::1]
+- it: accepts native IPv6 origins with the highest port and a trailing slash
+  set:
+    vault.url: http://[2001:db8::1]:65535/
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: GENESIS_VAULT_URL
+        value: http://[2001:db8::1]:65535/
+- it: rejects projected token filenames beginning with two dots
+  set:
+    vault.kubernetes.tokenPath: /run/native/..jwt
+  asserts:
+  - failedTemplate:
+      errorPattern: tokenPath filename must not start with

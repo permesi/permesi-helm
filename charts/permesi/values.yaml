@@ -7,6 +7,9 @@ replicaCount: 2
 image:
   repository: ghcr.io/permesi/permesi
   tag: 0.4.3
+  # Optional sha256:<64 hex> digest. When set it replaces the tag in the
+  # image reference (repository@digest); clear it when changing the tag.
+  digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -102,6 +105,9 @@ vault:
     image:
       repository: hashicorp/vault
       tag: 1.20.4
+      # Optional sha256:<64 hex> digest. When set it replaces the tag in the
+      # image reference (repository@digest); clear it when changing the tag.
+      digest: ""
       pullPolicy: IfNotPresent
     auth:
       mount: kubernetes

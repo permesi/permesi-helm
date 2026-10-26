@@ -26,6 +26,10 @@
             "IfNotPresent",
             "Never"
           ]
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^$|^sha256:[0-9a-f]{64}$"
         }
       }
     },
@@ -189,6 +193,10 @@
                 "pullPolicy": {
                   "type": "string",
                   "enum": ["Always", "IfNotPresent", "Never"]
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^$|^sha256:[0-9a-f]{64}$"
                 }
               }
             },

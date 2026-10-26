@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Release contracts: python3 scripts/ci/test-release.py (requires jq, git, PyYAML).
 
-Runs the actual event parser against JSON fixtures and the bump command in a
-throwaway worktree at /var/tmp/dig-bumptest. Never changes the caller's values.
+Runs the actual event parser against JSON fixtures and the bump command in an
+isolated TemporaryDirectory worktree. Never changes the caller's values.
 The worktree is removed even when an assertion fails.
 """
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -18,7 +19,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 SERVICES = ("permesi", "genesis", "web")
 DIGESTS = {svc: "sha256:" + c * 64 for svc, c in zip(SERVICES, "abc")}
-WORKTREE = Path("/var/tmp/dig-bumptest")
 FIXTURES = ROOT / "scripts/ci/release-events"
 
 
@@ -31,11 +31,20 @@ def load(path):
 
 
 class EventTests(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory(prefix="dig-event-", dir="/var/tmp")
+        self.addCleanup(scratch.cleanup)
+        self.scratch = Path(scratch.name)
+        self.sentinel = self.scratch / "injection-executed"
+
+    def tearDown(self):
+        self.assertFalse(self.sentinel.exists(), "payload was evaluated as shell")
+
     def parse(self, event, kind="repository_dispatch", succeeds=True):
-        with tempfile.TemporaryDirectory(prefix="dig-event-", dir="/var/tmp") as tmp:
+        with tempfile.TemporaryDirectory(prefix="parse-", dir=self.scratch) as tmp:
             path = Path(tmp) / "event.json"
             output = Path(tmp) / "output"
-            path.write_text(json.dumps(event))
+            path.write_text(json.dumps(event).replace("__INJECTION_SENTINEL__", str(self.sentinel)))
             result = run(
                 "bash", str(ROOT / "scripts/ci/release-event.sh"),
                 env={**os.environ, "GITHUB_EVENT_NAME": kind,
@@ -49,6 +58,19 @@ class EventTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stdout)
             self.assertFalse(output.exists(), "invalid input must not write any outputs")
             return result.stderr
+
+    def test_missing_jq_reports_dependency_without_writing_metadata(self):
+        output = self.scratch / "output"
+        result = run(
+            shutil.which("bash"), str(ROOT / "scripts/ci/release-event.sh"),
+            env={**os.environ, "PATH": str(self.scratch),
+                 "GITHUB_EVENT_NAME": "repository_dispatch",
+                 "GITHUB_EVENT_PATH": str(FIXTURES / "valid.json"),
+                 "GITHUB_OUTPUT": str(output)},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required dependency 'jq'", result.stderr)
+        self.assertFalse(output.exists())
 
     def valid(self):
         return json.loads((FIXTURES / "valid.json").read_text())
@@ -64,19 +86,17 @@ class EventTests(unittest.TestCase):
             self.assertEqual(meta[key], event["client_payload"][key])
 
     def test_bad_json_fixtures_do_not_execute_or_emit_metadata(self):
-        sentinel = Path("/tmp/dig-injection-executed")
-        self.assertFalse(sentinel.exists(), "test sentinel already exists")
+        self.assertFalse(self.sentinel.exists(), "test sentinel already exists")
         for fixture in ("partial", "malformed", "injection"):
             with self.subTest(fixture=fixture):
                 self.parse(json.loads((FIXTURES / (fixture + ".json")).read_text()), succeeds=False)
-        self.assertFalse(sentinel.exists(), "payload was evaluated as shell")
 
     def test_dispatch_checks_repositories_tags_and_source(self):
         cases = (
             ("source_repo", "attacker/permesi"),
             ("source_sha", "not-a-commit"),
             ("source_tag", "v0.4.2"),
-            ("version", "$(touch /tmp/dig-injection-executed)"),
+            ("version", f"$(touch {self.sentinel})"),
         )
         for key, value in cases:
             with self.subTest(key=key):
@@ -124,29 +144,47 @@ class EventTests(unittest.TestCase):
 class BumpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        scratch = tempfile.TemporaryDirectory(prefix="dig-bump-", dir="/var/tmp")
+        cls.addClassCleanup(scratch.cleanup)
+        cls.worktree = Path(scratch.name) / "worktree"
+        cls.sentinel = Path(scratch.name) / "injection-executed"
+        result = run("git", "worktree", "add", "--detach", str(cls.worktree), "HEAD")
+        if result.returncode:
+            raise RuntimeError(result.stderr)
+        cls.addClassCleanup(cls.remove_worktree)
+
         # Fixed release fixtures remain valid after the real charts advance.
         for svc in (*SERVICES, "permesi-stack"):
-            path = WORKTREE / "charts" / svc / "Chart.yaml"
+            path = cls.worktree / "charts" / svc / "Chart.yaml"
             text = path.read_text()
             text = re.sub(r"^version:.*$", "version: 0.4.4", text, flags=re.M)
             text = re.sub(r"^appVersion:.*$", "appVersion: 0.4.3", text, flags=re.M)
             text = re.sub(r"(^  - name: (?:permesi|genesis|web)\n)    version:.*$",
                           r"\g<1>    version: 0.4.4", text, flags=re.M)
             path.write_text(text)
-        files = run("git", "ls-files", cwd=WORKTREE)
+        files = run("git", "ls-files", cwd=cls.worktree)
         if files.returncode:
             raise RuntimeError(files.stderr)
-        cls.baseline = {f: (WORKTREE / f).read_bytes() for f in files.stdout.splitlines()}
+        cls.baseline = {f: (cls.worktree / f).read_bytes() for f in files.stdout.splitlines()}
+
+    @classmethod
+    def remove_worktree(cls):
+        result = run("git", "worktree", "remove", "--force", str(cls.worktree))
+        if result.returncode:
+            raise RuntimeError(result.stderr)
 
     def setUp(self):
         for f, data in self.baseline.items():
-            (WORKTREE / f).write_bytes(data)
+            (self.worktree / f).write_bytes(data)
+
+    def tearDown(self):
+        self.assertFalse(self.sentinel.exists(), "version was evaluated as shell")
 
     def snapshot(self):
-        return {f: (WORKTREE / f).read_bytes() for f in self.baseline}
+        return {f: (self.worktree / f).read_bytes() for f in self.baseline}
 
     def bump(self, *args, succeeds=True):
-        result = run("bash", str(ROOT / "scripts/bump-release.sh"), *args, cwd=WORKTREE)
+        result = run("bash", str(ROOT / "scripts/bump-release.sh"), *args, cwd=self.worktree)
         if succeeds:
             self.assertEqual(result.returncode, 0, result.stderr)
         else:
@@ -158,13 +196,13 @@ class BumpTests(unittest.TestCase):
         self.bump(*args, version)
 
     def identities(self):
-        stack = load(WORKTREE / "charts/permesi-stack/values.yaml")
-        standalone = {svc: load(WORKTREE / "charts" / svc / "values.yaml") for svc in SERVICES}
+        stack = load(self.worktree / "charts/permesi-stack/values.yaml")
+        standalone = {svc: load(self.worktree / "charts" / svc / "values.yaml") for svc in SERVICES}
         return stack, standalone
 
     def assert_versions(self, chart_version, app_version):
         for svc in (*SERVICES, "permesi-stack"):
-            chart = load(WORKTREE / "charts" / svc / "Chart.yaml")
+            chart = load(self.worktree / "charts" / svc / "Chart.yaml")
             self.assertEqual(chart["version"], chart_version)
             self.assertEqual(chart["appVersion"], app_version)
             if svc == "permesi-stack":
@@ -197,12 +235,12 @@ class BumpTests(unittest.TestCase):
 
     def test_chart_only_retains_all_values_and_app_versions(self):
         self.full_digests()
-        before = {svc: (WORKTREE / "charts" / svc / "values.yaml").read_bytes()
+        before = {svc: (self.worktree / "charts" / svc / "values.yaml").read_bytes()
                   for svc in (*SERVICES, "permesi-stack")}
         self.bump("--chart-only", "0.4.9")
         self.assert_versions("0.4.9", "0.4.3")
         for svc, data in before.items():
-            self.assertEqual((WORKTREE / "charts" / svc / "values.yaml").read_bytes(), data)
+            self.assertEqual((self.worktree / "charts" / svc / "values.yaml").read_bytes(), data)
 
     def test_independent_chart_version_and_explicit_tag_only(self):
         self.bump("--chart-version", "0.5.0", "--tag-only", "0.4.3")
@@ -216,7 +254,7 @@ class BumpTests(unittest.TestCase):
             ["0.4.5", "--digest", "unknown=" + d],
             ["0.4.5", "--digest", "permesi=" + d, "--digest", "permesi=" + d],
             ["0.4.5", "--tag-only", "--digest", "permesi=" + d],
-            ["$(touch /tmp/dig-injection-executed)"],
+            [f"$(touch {self.sentinel})"],
             ["--chart-version", "0.4.3", "0.4.5"],
             ["--chart-version", "bad", "--chart-version", "0.4.8", "0.4.5"],
             ["--chart-version", "", "0.4.5"],
@@ -232,7 +270,7 @@ class BumpTests(unittest.TestCase):
                 self.assertEqual(self.snapshot(), baseline)
 
     def test_bad_managed_values_fail_before_any_rewrite(self):
-        path = WORKTREE / "charts/permesi-stack/values.yaml"
+        path = self.worktree / "charts/permesi-stack/values.yaml"
         path.write_text(path.read_text().replace("    digest:", "    not-a-digest:"))
         baseline = self.snapshot()
         self.bump("0.4.5", succeeds=False)
@@ -240,14 +278,4 @@ class BumpTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    if WORKTREE.exists():
-        raise SystemExit(f"Refusing to reuse existing {WORKTREE}")
-    result = run("git", "worktree", "add", "--detach", str(WORKTREE), "HEAD")
-    if result.returncode:
-        raise SystemExit(result.stderr)
-    try:
-        unittest.main(verbosity=2)
-    finally:
-        result = run("git", "worktree", "remove", "--force", str(WORKTREE))
-        if result.returncode:
-            raise RuntimeError(result.stderr)
+    unittest.main(verbosity=2)

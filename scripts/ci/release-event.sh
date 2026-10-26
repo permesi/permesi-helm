@@ -36,6 +36,8 @@ die() {
     exit 1
 }
 
+command -v jq >/dev/null 2>&1 || die "required dependency 'jq' is not installed or not on PATH"
+
 event_path="${GITHUB_EVENT_PATH:?GITHUB_EVENT_PATH is required}"
 [[ -f "${event_path}" ]] || die "event file not found"
 jq -e 'type == "object"' "${event_path}" >/dev/null 2>&1 || die "event is not a JSON object"

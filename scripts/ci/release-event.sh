@@ -71,8 +71,10 @@ case "${GITHUB_EVENT_NAME:-}" in
         [[ "${source_repo}" == "${expected_source_repo}" ]] || die "client_payload.source_repo must be ${expected_source_repo}"
         [[ "${source_sha}" =~ ${sha_re} ]] || die "client_payload.source_sha must be a 40-hex commit SHA"
         [[ "${source_tag#v}" == "${version}" ]] || die "client_payload.source_tag must match the version"
-        tag_only="$(jq -r '.client_payload.tag_only // false | tostring' "${event_path}")"
-        [[ "${tag_only}" == "true" || "${tag_only}" == "false" ]] || die "client_payload.tag_only must be a boolean"
+        tag_only="$(jq -r '
+          (if (.client_payload | has("tag_only")) then .client_payload.tag_only else false end)
+          | if type == "boolean" then tostring else error("not a boolean") end
+        ' "${event_path}" 2>/dev/null)" || die "client_payload.tag_only must be a boolean"
 
         jq -e '.client_payload.images | type == "object"' "${event_path}" >/dev/null 2>&1 \
             || die "client_payload.images is required (repository/tag/digest per service)"

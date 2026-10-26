@@ -123,6 +123,15 @@ class EventTests(unittest.TestCase):
         del event["client_payload"]["images"]["web"]["digest"]
         self.parse(event, succeeds=False)
 
+    def test_dispatch_acknowledgement_requires_json_boolean(self):
+        for value in ("true", "false", None, 0, 1, {}, []):
+            with self.subTest(value=value):
+                event = self.valid()
+                for svc in SERVICES:
+                    event["client_payload"]["images"][svc]["digest"] = ""
+                event["client_payload"]["tag_only"] = value
+                self.parse(event, succeeds=False)
+
     def test_manual_digest_or_explicit_tag_only(self):
         event = {"inputs": {"version": "v0.4.3", "chart_version": "0.4.5",
                             "tag_only": False,

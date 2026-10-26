@@ -449,7 +449,8 @@ permesi:
       address: https://vault.example.com:8200   # Vault origin, not the socket
       image:
         repository: hashicorp/vault
-        tag: 1.20.4   # UNVERIFIED: pinned by M-VA
+        tag: 1.20.4   # pinned
+        pullPolicy: IfNotPresent
       auth:
         mount: kubernetes
         role: permesi
@@ -472,9 +473,6 @@ permesi:
 
 Genesis is identical except it has no `paserkCa` block. See the chart READMEs for
 the full table.
-
-<!-- UNVERIFIED: exact value keys/defaults and the pinned Agent image tag are
-confirmed by M-VA; align with /tmp/permesi-briefs/m-va-report.md before finalizing. -->
 
 ### 4.2 What the chart renders (and what it refuses)
 

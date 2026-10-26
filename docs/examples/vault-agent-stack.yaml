@@ -1,14 +1,9 @@
 # Production umbrella values for release "permesi" in namespace "permesi",
 # using the chart-managed Vault Agent (Kubernetes auth + PKI certificate
 # rendering). No TLS Secrets and no AppRole Secrets reach the backend pods.
+# The Agent image is pinned to hashicorp/vault:1.20.4.
 #
-# UNVERIFIED: this profile is drafted against docs/engineering/k8s-adoption-plan.md
-# §3 and must render once M-VA lands. The exact vault.agent.* keys/defaults and the
-# pinned Agent image tag are confirmed by /tmp/permesi-briefs/m-va-report.md;
-# re-align before finalizing. The chart currently rejects this profile until M-VA
-# implements the vault.agent.* values.
-#
-# Install (after M-VA):
+# Install:
 #   helm dependency build charts/permesi-stack
 #   helm upgrade --install permesi charts/permesi-stack -n permesi \
 #     -f docs/examples/vault-agent-stack.yaml
@@ -61,7 +56,7 @@ permesi:
       address: https://vault.example.com:8200   # Vault origin, never the socket
       image:
         repository: hashicorp/vault
-        tag: 1.20.4                             # UNVERIFIED: pin confirmed by M-VA
+        tag: 1.20.4
         pullPolicy: IfNotPresent
       auth:
         mount: kubernetes
@@ -242,7 +237,7 @@ genesis:
       address: https://vault.example.com:8200
       image:
         repository: hashicorp/vault
-        tag: 1.20.4                             # UNVERIFIED: pin confirmed by M-VA
+        tag: 1.20.4
         pullPolicy: IfNotPresent
       auth:
         mount: kubernetes

@@ -92,22 +92,23 @@ as destinations.
 | Key | Default | Contract |
 |---|---|---|
 | `vault.agent.enabled` | `false` | opt-in native sidecar |
-| `vault.agent.address` | `""` | required HTTPS Vault origin when enabled |
-| `vault.agent.image.{repository,tag,digest,pullPolicy}` | `hashicorp/vault`, pinned patch | explicit tested patch, optional digest, `IfNotPresent` |
+| `vault.agent.address` | `""` | required HTTP(S) Vault origin when enabled |
+| `vault.agent.image.{repository,tag,pullPolicy}` | `hashicorp/vault`, `1.20.4`, `IfNotPresent` | pinned tested patch |
 | `vault.agent.auth.{mount,role,audience,tokenExpirationSeconds}` | `kubernetes`, required role, `vault`, `3600` | projected token audience must match the Vault role |
 | `vault.agent.ca.{existingConfigMap,key}` | `""` / `ca.crt` | public Vault CA; optional for public-root Vault |
 | `vault.agent.pki.{mount,role,commonName,dnsNames,ttl}` | `pki-int`, required role, required CN/SAN, `[]`, `24h` | service-specific PKI role |
 | `vault.agent.pki.renewalThreshold` | `0.8` | strict `0 < x < 1` |
-| `vault.agent.resources` | small requests/limits | account for them in pod sizing |
+| `vault.agent.resources` | requests `{cpu: 20m, memory: 64Mi}`, limits `{cpu: 100m, memory: 128Mi}` | account for them in pod sizing |
 | `vault.agent.startupProbe.{periodSeconds,timeoutSeconds,failureThreshold}` | `5` / `5` / `120` | bounded startup budget |
 
-When enabled, the chart requires a Unix `vault.url`, an Agent address/role, and a
-PKI role/SANs; requires `serviceAccount.automount=false`, nonroot UID/GID, and
-compatible fsGroup; and rejects AppRole/wrapped/ESO Vault credentials and TLS
-Secret/ESO (for the artifact the Agent now manages). `config.socketPath` omits the
+When enabled, the chart requires a Unix-socket `vault.url`, an Agent
+`address`/`auth.role`, nonroot `runAsUser`/`runAsGroup` + `fsGroup`, and
+`serviceAccount.automount=false`; in TCP-serving mode it also requires
+`pki.role`/`pki.commonName` and at least one `pki.dnsNames`. It rejects
+AppRole/wrapped-token/ESO Vault credentials and TLS Secret/ESO (when the Agent
+renders the bundle), `vault.hashicorp.com/agent-*` annotations, duplicate
+chart-owned env entries, and reserved volume names. `config.socketPath` omits the
 inbound PKI template but keeps the Vault socket.
-
-<!-- UNVERIFIED: exact keys/defaults and pinned Agent image tag confirmed by M-VA. -->
 
 ## Image digest precedence
 

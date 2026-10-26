@@ -1,158 +1,86 @@
 # permesi-helm
 
-Helm charts for the Permesi platform.
+Helm charts for Permesi IAM, Genesis admission, and the web UI. Install components
+separately or together with `charts/permesi-stack`.
 
-## Charts
+## Choose your path
 
-- `charts/permesi`: production-oriented IAM service chart (Deployment/Service/Ingress/HPA/PDB/NetworkPolicy, schema validation, secret wiring)
-- `charts/genesis`: production-oriented edge admission chart with the same operational patterns
-- `charts/web`: production-oriented web UI chart with runtime `config.js` injection from values or an external ConfigMap
-- `charts/permesi-stack`: umbrella chart to install `permesi`, `genesis`, and `web` together
+### Disposable development: one command
 
-See:
-
-- `charts/permesi/README.md`
-- `charts/genesis/README.md`
-- `charts/web/README.md`
-- `charts/permesi-stack/README.md`
-- `docs/examples/production-stack.yaml`: a tested, internally consistent production profile
-- `docs/operations.md`: operational runbook (Vault, TLS, HA, NetworkPolicy, upgrades)
-
-## Install
-
-Prerequisites:
-
-- Kubernetes cluster
-- Helm 3.13+
-
-### Install from OCI (recommended)
-
-Install the full stack:
+From this checkout, with Bash, Helm, kubectl and Python 3 on PATH:
 
 ```bash
-helm upgrade --install permesi \
-  oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.4.4 \
-  --namespace permesi \
-  --create-namespace \
-  -f values.yaml
+bash scripts/quickstart/install.sh --context kind-permesi-helm-test \
+  --namespace permesi-quickstart --release permesi --acknowledge-development
 ```
 
-Install single components:
+Use your explicit kube context; the installer does not change current-context.
+It installs PostgreSQL, dev Vault, canonical SQL/Vault bootstrap, and two replicas
+of each backend with Vault Agent. Images and SQL are pinned in
+[`scripts/quickstart/lock.json`](scripts/quickstart/lock.json).
+
+**Development only:** in-memory Vault and ephemeral PostgreSQL, no HA/backups or
+pg_cron maintenance guarantee. Bootstrap-only administrator/root credentials live
+in a retained Kubernetes Secret; application TLS private keys stay in pod memory.
+See [install, verify, connect and teardown](docs/install-guide.md#disposable-quickstart).
+
+Use an isolated development context. Current dev Vault startup logs can contain
+root/unseal material; restrict `pods/log` access and downstream log retention.
+
+### Helm-only umbrella quickstart
+
+Use the fixed release/namespace profile documented in the
+[umbrella quickstart section](charts/permesi-stack/README.md#quickstart-mode).
+It requires both development acknowledgements and `--wait --wait-for-jobs`;
+it is the same disposable dependency model, not a production installation.
+
+### Production: external PostgreSQL + Vault
+
+Use the [manual installation guide](docs/install-guide.md) and
+[Vault Agent profile](docs/examples/vault-agent-stack.yaml). Agent supplies
+Kubernetes authentication, the Unix proxy and PKI rendering without application
+TLS/AppRole Secrets. PostgreSQL, Vault and the public HTTPS edge remain
+operator-managed.
+
+[Secret/AppRole/ESO alternatives](docs/examples/production-stack.yaml) remain
+supported, but are not the recommended all-in-Vault path. Optional native
+Kubernetes login needs an **unreleased rebuilt application image**; default
+`0.4.3` images do not support its flags and it does not render PKI files.
+
+## Requirements and chart references
+
+- Helm 3.13+; tested application/dependency platform: **Linux/amd64**.
+- Managed Agent uses native sidecars: **Kubernetes ≥1.29**, SidecarContainers
+  enabled (stable in ≥1.33). The default Agent-disabled manifests do not impose
+  that native-sidecar requirement.
+- [Permesi](charts/permesi/README.md), [Genesis](charts/genesis/README.md),
+  [web](charts/web/README.md), [umbrella](charts/permesi-stack/README.md).
+- [Operations](docs/operations.md): auth, TLS/CA rotation, DB lease recovery,
+  network policy, schema upgrades and release procedures.
+
+For a released chart (check that its version contains the features you need):
 
 ```bash
-helm upgrade --install permesi-api oci://ghcr.io/permesi/charts/permesi --version 0.4.4 -n permesi --create-namespace -f permesi-values.yaml
-helm upgrade --install permesi-genesis oci://ghcr.io/permesi/charts/genesis --version 0.4.4 -n permesi --create-namespace -f genesis-values.yaml
-helm upgrade --install permesi-web oci://ghcr.io/permesi/charts/web --version 0.4.4 -n permesi --create-namespace -f web-values.yaml
+helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
+  --version 0.4.4 --namespace permesi --create-namespace -f values.yaml
 ```
 
-### Install from source checkout (local/dev)
+For integrated source features, rebuild local dependencies and use the manual
+guide's source-install command; no new chart publication is implied.
 
-```bash
-git clone https://github.com/permesi/permesi-helm.git
-cd permesi-helm/charts/permesi-stack
-helm dependency build
-helm upgrade --install permesi . -n permesi --create-namespace -f values.yaml
-```
+## Validation and release automation
 
-### Minimal `values.yaml` example
+`Charts CI` keeps render/unit/Restricted-admission checks separate from the
+`real-dependencies` job, which uses the actual quickstart install/verify driver.
+The dev gate covers real HTTPS, admission/OPAQUE signup, leaf reload and restart;
+it does not qualify production infrastructure or browser/WASM signup.
+The independent `release-contracts` job runs the 13 parser/bump regression tests
+with `python3 scripts/ci/test-release.py`.
 
-```yaml
-permesi:
-  database:
-    dsn:
-      existingSecret: permesi-db
-      secretKey: dsn
-  tls:
-    existingSecret: permesi-tls
-    secretKey: bundle.pem
-  vault:
-    # Permesi POSTs to this URL verbatim for AppRole login, so it must be the
-    # full login endpoint (not just the origin).
-    url: https://vault.example.com:8200/v1/auth/approle/login
-    roleId:
-      existingSecret: permesi-vault
-      secretKey: role_id
-    secretId:
-      existingSecret: permesi-vault
-      secretKey: secret_id
-
-genesis:
-  database:
-    dsn:
-      existingSecret: genesis-db
-      secretKey: dsn
-  tls:
-    existingSecret: genesis-tls
-    secretKey: bundle.pem
-  vault:
-    # Genesis accepts a base URL (or the full login endpoint) and normalizes it.
-    url: https://vault.example.com:8200
-    roleId:
-      existingSecret: genesis-vault
-      secretKey: role_id
-    secretId:
-      existingSecret: genesis-vault
-      secretKey: secret_id
-
-web:
-  runtimeConfig:
-    apiBaseUrl: https://api.permesi.example.com
-    tokenBaseUrl: https://genesis.permesi.example.com
-    clientId: 00000000-0000-0000-0000-000000000000
-    opaqueServerId: api.permesi.example.com
-```
-
-## Release Sync Automation
-
-This repository includes a workflow that opens a PR whenever `permesi` publishes a release.
-
-- Trigger: `repository_dispatch` with event type `permesi-release`
-- Payload field used: `client_payload.version`
-- Manual fallback: `workflow_dispatch` with a `version` input
-
-Workflow file: `.github/workflows/release-bump-pr.yml`
-Script used for updates: `scripts/bump-release.sh`
-
-### Files bumped by automation
-
-- `charts/permesi/Chart.yaml`
-- `charts/genesis/Chart.yaml`
-- `charts/web/Chart.yaml`
-- `charts/permesi-stack/Chart.yaml`
-- `charts/permesi/values.yaml` (`image.tag`)
-- `charts/genesis/values.yaml` (`image.tag`)
-- `charts/web/values.yaml` (`image.tag`)
-- `charts/permesi-stack/values.yaml` (image tags marked with `# managed-by-release-bot`)
-
-## CI Validation
-
-Chart changes are validated with Chart Testing:
-
-- Workflow: `.github/workflows/charts-ci.yml`
-- `ct lint` validates chart structure and Helm lint rules.
-- `ct install` runs install checks against a temporary Kind cluster.
-
-Configuration is in `.ct.yaml`.
-
-## OCI Publish
-
-Charts are published to GHCR OCI:
-
-- Workflow: `.github/workflows/publish-charts.yml`
-- Target registry path: `oci://ghcr.io/permesi/charts`
-- Trigger: GitHub Release publish in this repo, or manual dispatch with `version`.
-
-The publish workflow validates each chart version matches the release version before pushing.
-
-## Auto Release
-
-Releases can be automated after CI success on `main`:
-
-- Workflow: `.github/workflows/auto-release.yml`
-- Trigger: `workflow_run` after `Charts CI` completes successfully for `push` events on `main`
-- Behavior:
-  - Reads chart version from `charts/permesi-stack/Chart.yaml`
-  - Validates all chart versions match
-  - Creates release tag `v<version>` if it does not already exist
-  - Triggers `.github/workflows/publish-charts.yml` via the `release.published` event
+`release-bump-pr.yml` validates nested per-service image digests and source
+metadata through `scripts/ci/release-event.sh`. Tags never override a nonempty
+`image.digest`. App and chart versions are independent; use
+`scripts/bump-release.sh --chart-only X.Y.Z` for chart-only changes.
+See [release contracts and local checks](docs/operations.md#10-release-and-image-identity).
+Publishing/auto-release workflows remain repository automation; no push,
+publication or GitHub-hosted execution is claimed by local validation.

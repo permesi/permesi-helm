@@ -10,27 +10,29 @@ source paths below are relative to the application repository (`permesi/`).
 
 ## 1. Prerequisites
 
-1. **External PostgreSQL with backups.** Both services require externally
-   provisioned databases. There is no bundled database and no PVC. Back up your
-   database independently; Helm rollback does **not** roll back schema or data.
-2. **Schema applied by the owner before rollout.** Schema ownership belongs to a
-   dedicated owner role, not the runtime role. Apply `00_init.sql`,
-   `01_genesis.sql`, and `02_permesi.sql` (and reapply the additive OAuth/refresh
-   scripts on upgrades) as the schema owner *before* the new pods start. See
-   `permesi/db/sql/README.md` for ordering, ownership, and verification
-   (`check.sql`). The application runs **no migrations**.
-3. **Vault** with the `genesis-signing` transit key, AppRole auth, the
-   `secret/permesi` KV path, and the `database/creds/{permesi,genesis}` dynamic
-   roles. See §2.
-4. **TLS material** as Secrets: combined PEM bundles for the backends, a separate
-   PASERK CA, and a PostgreSQL CA. See §4.
+1. **Production external PostgreSQL with backups.** Production charts do not
+   provision database storage. The opt-in quickstart is disposable, not a
+   production database. Helm rollback does **not** roll back schema or data.
+2. **Apply canonical SQL before rollout.** Precreate non-superuser Vault managers
+   with strong passwords, then run `00_init.sql` against `postgres` with
+   `ON_ERROR_STOP=1` and authenticated owner credentials. It includes both service
+   schemas and verification; do not separately apply all files as administrator.
+   Reapply additive schema changes as the existing owner before upgrading the
+   binary. See `permesi/db/sql/README.md`; no application migrations run.
+3. **Vault** with the service-specific transit/KV/database/PKI mounts and exact
+   SA/namespace/audience Kubernetes bindings for Agent or optional native login.
+   AppRole is a supported legacy alternative, not a prerequisite for Agent.
+4. **Trust and TLS.** Agent renders backend bundles and Permesi PASERK CA into
+   memory volumes, not Kubernetes Secrets. Vault/DB public trust anchors and
+   operator-managed edge TLS are separate. Legacy Secret/ESO inputs remain
+   supported. See §3 and the [manual guide](install-guide.md).
 
 ## 2. Vault setup
 
 ### 2.1 AppRole URL semantics (F-01)
 
-Permesi does **not** normalize `vault.url`: it POSTs the role/secret ID to that
-value verbatim (`crates/vault_client/src/lib.rs:121-165`). Use the full login
+Permesi 0.4.3 does **not** normalize `vault.url`: it POSTs the role/secret ID to
+that value verbatim (`crates/vault_client/src/lib.rs:121-165`). Use the full login
 endpoint for Permesi:
 
 ```yaml
@@ -38,6 +40,12 @@ permesi:
   vault:
     url: https://vault.example.com:8200/v1/auth/approle/login
 ```
+
+The **unreleased build** on app branch `feat/k8s-hardening` accepts a Vault base
+URL (`https://vault.example.com:8200`, empty or `/` path) and
+normalizes it to `/v1/auth/approle/login`; an explicit non-root login URL is still
+preserved verbatim. This does not change Agent (socket) mode. Until that release
+ships, keep the full endpoint for Permesi.
 
 Genesis normalizes a base URL (or accepts the full endpoint) via
 `services/genesis/src/vault/mod.rs:21-26`, so either form works:
@@ -61,13 +69,12 @@ Credentials must therefore remain valid for **every future pod start**, not just
 the current rollout: restarts, rescheduling, scale-out, and the re-login that
 follows a token `max_ttl` expiry or renewal failure. Pick **one** of:
 
-- **Vault Agent (recommended).** Run a Vault Agent sidecar with auto-auth
-  (e.g. Kubernetes auth) and inject its Unix socket via annotations/volumes. Set
-  `vault.url` to the socket path (the default
-  `/var/run/secrets/vaultproject.io/agent.sock`). The agent re-authenticates and
-  renews independently of the application, so replicas and restarts always have
-  a live token. The agent socket must already exist when the transport is
-  constructed.
+- **Vault Agent (recommended).** Use the chart-managed Agent sidecar
+  (`vault.agent.enabled: true`). It authenticates via Kubernetes auth and renders
+  the TLS bundle and (for Permesi) the PASERK CA; set `vault.url` to the Unix
+  socket it listens on. The agent re-authenticates and renews independently of the
+  application, so replicas and restarts always have a live token. The agent socket
+  must already exist when the transport is constructed. See §2.4.
 - **Long-lived SecretID plus a rotation procedure.** Provision the AppRole with a
   `secret_id_num_uses`/`secret_id_ttl` policy that covers the Secret's whole
   service life, and rotate it *before* expiry: update the Secret, then
@@ -94,11 +101,85 @@ deliberate restart so the pod re-acquires fresh credentials. The DSN Secret can
 therefore carry a placeholder username/password; only host/port/database and TLS
 options matter.
 
+### 2.4 Managed Vault Agent operations
+
+The recommended path is the chart-managed Agent sidecar (`vault.agent.enabled:
+true`): a native sidecar (`initContainers[].restartPolicy: Always`) running the
+official `hashicorp/vault` image with Kubernetes auto-auth, a local Unix-socket
+proxy (`api_proxy { use_auto_auth_token = true }`, **no cache block**), and PKI
+templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
+≥ 1.29 with `SidecarContainers` is required in this mode. See
+`docs/install-guide.md` §4 and `docs/examples/vault-agent-stack.yaml`.
+
+- **Leaf reissue/reload vs CA rollout.** The Agent reissues the TLS bundle before
+  TTL expiry (renewal threshold default `0.8`, leave margin for retries plus the
+  backend's ~10 s reload). The application watches the bundle mtime and reloads
+  in place; do **not** switch the bundle to a `subPath` mount. A certificate is
+  reissued, not renewed in place. CA/intermediate rotation is different: the
+  PASERK roots are startup-loaded, so roll with overlapping trusted roots before
+  an issuer change, then `kubectl rollout restart` the backends.
+- **Agent restart.** The startup probe checks authenticated proxy access and
+  nonempty required files before initial backend startup; existence alone is not
+  sufficient. `pkiCert` may reuse a valid cached bundle after restart, so a probe
+  success does not prove fresh certificate issuance. An independent sidecar
+  restart does not re-run the initial startup gate for the already-running
+  backend. Verify socket access and application requests after restart. The M-QS
+  local driver reports Agent-only restart recovery; natural projected-JWT
+  expiry/rotation is not qualified by that scenario. The native sidecar
+  outlives the app container during graceful shutdown.
+- **JWT rotation.** The Agent re-reads the projected service-account JWT, so
+  service-account token rotation (audience `vault`) is absorbed without pod
+  changes. The Kubernetes auth role's `bound_service_account_names`/`namespaces`
+  must match the rendered SA name and exact namespace; a mismatched audience/role
+  denies login.
+- **DB lease fail-closed recovery.** DB lease renewal is owned by the application,
+  not the Agent (the Agent has no cache block, so it does not hold a competing
+  lease owner). Renewal failure shuts the pod down fail-closed; a replacement pod
+  re-acquires fresh credentials via the Agent's socket. If a lease expires or its
+  parent token is revoked, restart the pod — do not assume the Agent repairs an
+  existing pool automatically.
+- **No exposed TCP proxy / no cache / no quit endpoint.** The socket proxy is the
+  only listener; it preserves an explicitly supplied operator `X-Vault-Token`
+  (never `use_auto_auth_token = "force"`), and Unix requests do not set
+  `X-Vault-Request`, so `require_request_header` must stay off.
+- **Issuer chains.** The TLS template writes one private key, the leaf, then
+  the ordered, deduplicated `.Data.CAChain` returned by Vault, including a root if
+  returned. Import the complete chain into the issuing mount; a partial import
+  yields a partial served chain. The PASERK CA is a separate JSON-endpoint
+  template, not a substitute for the listener's issuer chain.
+
+### 2.5 Optional native Kubernetes login
+
+Requires an **unreleased rebuilt application image**; default `0.4.3` does not
+support native-auth flags. `vault.authMethod=auto` preserves socket→Agent and
+TCP→AppRole; `approle` explicitly selects TCP AppRole; `kubernetes` selects direct
+application login using `vault.kubernetes.*` and requires Agent disabled plus
+`serviceAccount.automount=false`. See the component READMEs for exact defaults.
+Native mode projects its audience-scoped JWT only into the app, grants no RBAC,
+and does not render TLS/PKI/PASERK files. Vault's reviewer, never the app SA,
+needs TokenReview.
+
+Remove known AppRole/wrapped-token/ESO credential inputs before cutover. Generic
+`extraEnvFrom` imports remain supported and opaque to Helm; operators must remove
+legacy AppRole credential variables from their contents. The application rejects
+native-mode credential conflicts rather than falling back.
+
+Reauthentication is restart-based, not a shared hot-swapped token session.
+After token/DB renewal failure the process drains/stops. Once Vault/reviewer/DB
+dependencies are healthy, let the Deployment restart the process or explicitly
+roll the affected Deployment; it reads the latest projected JWT and reacquires
+credentials. Do not assume replacing a JWT repairs an already-issued token or DB
+pool. Standalone native login/renewal was exercised in the application milestone;
+full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
+
+
+
 ## 3. TLS
 
 - **Inbound backend TLS** is one combined PEM bundle — private key followed by
-  certificate chain — mounted at `tls.pemBundlePath` from a Secret. No client
-  certificate authentication is performed
+  certificate chain — mounted at `tls.pemBundlePath`. In the legacy path it comes
+  from a Secret; in Agent mode the Agent renders it from the PKI role into the
+  same path. No client certificate authentication is performed
   (`crates/service_utils/src/tls.rs:239-265`).
 - **Certificate reload** watches the bundle's modification time every 10 seconds.
   Mount the Secret as a directory (the chart default) so projected updates are
@@ -110,7 +191,9 @@ options matter.
 - **Vault trust** uses the image's root bundle (`SSL_CERT_FILE`, default
   `/etc/ssl/certs/ca-certificates.crt`). There is no dedicated Vault CA flag; add
   your private CA to the image trust bundle or use a CA that chains to public
-  roots.
+  roots. In Agent mode the application talks to Vault over the Unix socket and the
+  **Agent** holds the Vault CA (`vault.agent.ca.existingConfigMap`); the backend
+  image needs no Vault CA.
 - **PostgreSQL TLS** is controlled by the DSN. Use `sslmode=verify-full` plus
   `sslrootcert=<path>` where `<path>` points at a CA mounted via
   `extraVolumes`/`extraVolumeMounts` (see the example). The development default
@@ -207,21 +290,123 @@ environment.
 7. If the upgrade only changed chart-managed web runtime config, pods roll
    automatically (checksum); otherwise use `kubectl rollout restart`.
 
-## 10. Chart-only release procedure
+## 10. Release and image identity
 
-A chart-only release (no application release) bumps chart versions while keeping
-`appVersion` and image tags unchanged:
+`image.digest` and backend `vault.agent.image.digest` default to `""`.
+Nonempty `sha256:<64 lowercase hex>` wins over `tag` and renders
+`repository@digest`; otherwise `repository:tag` is used. Changing a tag while
+keeping a digest does not change the deployed image. Update or clear the digest
+deliberately. Agent image identity is independent of app-release automation.
 
-1. Bump `version` in `charts/permesi/Chart.yaml`, `charts/genesis/Chart.yaml`,
-   `charts/web/Chart.yaml`, and `charts/permesi-stack/Chart.yaml`.
-2. Bump the matching dependency `version` entries in
-   `charts/permesi-stack/Chart.yaml`.
-3. Leave `appVersion` and every `image.tag` (including the
-   `# managed-by-release-bot` tags in `charts/permesi-stack/values.yaml`) at the
-   current application version.
-4. Update the chart install `--version X.Y.Z` references in `README.md` (and any
-   chart README using the same pattern) to the new chart version.
+### Independent application and chart versions
 
-Do **not** use `scripts/bump-release.sh` for chart-only releases: it couples
-chart, appVersion, and image tag bumps for application releases, and also
-rewrites the README install `--version` references alongside them.
+Run these mutation commands only when preparing an authorized local release
+change; they do not push, tag, publish or dispatch:
+
+```bash
+# App release, exact digests for all services (set these from trusted metadata).
+bash scripts/bump-release.sh --chart-version "$CHART_VERSION" \
+  --digest "permesi=$PERMESI_DIGEST" --digest "genesis=$GENESIS_DIGEST" \
+  --digest "web=$WEB_DIGEST" "$APP_VERSION"
+
+# Intentional tag-only app release: clears every managed app digest.
+bash scripts/bump-release.sh --chart-version "$CHART_VERSION" --tag-only "$APP_VERSION"
+
+# Chart-only release: preserves appVersion and all image values byte-for-byte.
+bash scripts/bump-release.sh --chart-only "$CHART_VERSION"
+```
+
+The legacy single `<version>` form remains tag-only and also clears old app
+digests. Without `--chart-version`, app version becomes chart version only if it
+advances every current chart; otherwise the maximum chart version advances one
+patch. Explicit chart versions must strictly advance. No version regression is
+permitted (current charts may be ahead of appVersion).
+
+App releases update standalone and umbrella tags/digests together. Chart-only
+updates change chart/dependency versions, not appVersion or image identities.
+Rebuild dependency packages after component/version changes:
+
+```bash
+helm dependency update charts/permesi-stack
+helm dependency build charts/permesi-stack
+```
+
+`update` refreshes a stale ignored Chart.lock after version changes; `build` alone
+does not repair a lock that references old dependency versions.
+
+### Release event boundary
+
+`.github/workflows/release-bump-pr.yml` invokes
+`scripts/ci/release-event.sh`, which parses `GITHUB_EVENT_PATH` with jq, never
+interpolating payload fields as executable shell. Repository dispatch requires:
+
+- `client_payload.version` (`X.Y.Z` or `vX.Y.Z`);
+- `source_repo: permesi/permesi`, a 40-lowercase-hex `source_sha`, matching
+  `source_tag`;
+- `images.{permesi,genesis,web}.{repository,tag,digest}`, expected
+  `ghcr.io/permesi/<service>` repositories and normalized version tags;
+- either three valid digests, or all three explicit empty digest strings plus
+  **JSON boolean** `client_payload.tag_only: true`. Missing fields, partial sets,
+  string `"true"`, null and other nonboolean acknowledgement values fail closed.
+  Omitted acknowledgement defaults false. `tag_only=true` with digests is rejected.
+
+Manual workflow dispatch exposes `version`, optional `chart_version`, the three
+`<service>_digest` inputs and an explicit `tag_only` acknowledgement. Workflow
+input normalization is separate from the repository-dispatch JSON boolean rule.
+The application sender explicitly acknowledges tag-only mode; all-empty inputs
+never infer consent. PR metadata records app/chart versions, source identity and
+digest/tag-only mode.
+
+Local regression command (Git, Bash, jq, Python 3 and PyYAML required):
+
+```bash
+python3 scripts/ci/test-release.py
+```
+
+It invokes the actual parser and bump script in unique disposable worktrees;
+synthetic digest fixtures prove validation/render contracts, not registry
+existence or signatures. `hc` may not have jq: run the release suite where its
+dependencies exist. No GitHub dispatch/publish/signing execution is implied.
+`Charts CI` also runs this command in its independent `release-contracts` job
+(13 tests; Python 3.12 and PyYAML 6.0.3). This local suite is distinct from
+the real-dependencies cluster driver and from remote release execution.
+
+## 11. Quickstart qualification and known boundaries
+
+The local M-QS and independent R-QS drivers reported successful default-path
+Agent HTTPS/admission/signup, leaf reload, restart/scaling and reinstall
+identity/data preservation. The M-UQ report separately exercised direct Helm
+install/upgrades and the runtime verifier. Those runs are not evidence of
+GitHub-hosted execution or production qualification.
+
+The independent R-QS review also reproduced boundaries not disproved by a passing
+normal driver. Until their implementation fixes are integrated:
+
+- **Treat dev Vault logs as credentials.** The dev startup banner can print its
+  root token/unseal key. Restrict `pods/log`, log collection and retention; never
+  attach raw Vault logs to an issue. The narrow Secret mount is not the only
+  exposure boundary.
+- **Manager password rotation needs coordinated schema credentials.** Explicit
+  Vault `database/rotate-root` leaves the helper's owner-authenticated SQL
+  bootstrap input stale; subsequent bootstrap/install can fail. Do not reset the
+  database owner password back to its original Secret to hide that failure.
+  Production requires an independently managed owner-credential lifecycle.
+- **Existing credentials have a serialization limit.** The current helper does
+  not escape `:`/`\` when producing `.pgpass`; externally provided passwords
+  containing those characters can fail bootstrap. This is a helper defect, not
+  advice to weaken production credentials. The manual production PGPASSFILE must
+  follow libpq escaping rules.
+- **Verifier success has limits.** Shell-issued DB membership/revocation checks
+  can report success for the wrong issued identity; fixed verifier ports can
+  attach to pre-existing forwards. Do not interpret the default pass as proof of
+  exact lease revocation or independent concurrent-run isolation.
+- **RBAC names can collide for long namespaces.** Truncation can remove
+  namespace uniqueness; the cluster-scoped reviewer resource ownership error
+  does not authorize deleting another installation's grant.
+
+Natural projected-JWT expiry/rotation, revoked live application DB-pool/token
+recovery, outbound PASERK wrong-CA/hostname negatives, CA-root rotation, production
+Vault/DB TLS, persistence/restores, NetworkPolicy enforcement, SMTP, browser/WASM
+signup and verified-email/login/OIDC E2E remain separate qualifications.
+Existing-binding/non-admin install support and example-only CI-trigger coverage
+are not established by the current default-path driver.

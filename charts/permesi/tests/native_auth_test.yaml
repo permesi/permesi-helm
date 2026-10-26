@@ -1,0 +1,508 @@
+suite: permesi native Vault authentication
+release:
+  name: permesi
+  namespace: permesi
+templates:
+- deployment.yaml
+values:
+- native_values.yaml
+tests:
+- it: projects an audience-scoped JWT only into the application without AppRole credentials
+  set: {}
+  asserts:
+  - equal:
+      path: spec.template.spec.automountServiceAccountToken
+      value: false
+  - notExists:
+      path: spec.template.spec.initContainers
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_AUTH_METHOD
+        value: kubernetes
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_KUBERNETES_ROLE
+        value: permesi-runtime
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_KUBERNETES_AUTH_MOUNT
+        value: kubernetes
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_KUBERNETES_TOKEN_PATH
+        value: /var/run/secrets/vault-native/token
+  - equal:
+      path: spec.template.spec.volumes
+      value:
+      - name: vault-native-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: token
+              audience: vault
+              expirationSeconds: 3600
+          defaultMode: 256
+  - equal:
+      path: spec.template.spec.containers[0].volumeMounts
+      value:
+      - name: vault-native-token
+        mountPath: /var/run/secrets/vault-native
+        readOnly: true
+  - notExists:
+      path: spec.template.spec.containers[0].env[?(@.name == "PERMESI_VAULT_ROLE_ID")]
+  - notExists:
+      path: spec.template.spec.containers[0].env[?(@.name == "PERMESI_VAULT_SECRET_ID")]
+  - notExists:
+      path: spec.template.spec.containers[0].env[?(@.name == "PERMESI_VAULT_WRAPPED_TOKEN")]
+- it: uses the requested token filename directory audience and lifetime
+  set:
+    vault.kubernetes.tokenPath: /run/native-jwt/projected.jwt
+    vault.kubernetes.authMount: teams/cluster-1
+    vault.kubernetes.audience: vault-native
+    vault.kubernetes.tokenExpirationSeconds: 600
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_KUBERNETES_AUTH_MOUNT
+        value: teams/cluster-1
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_KUBERNETES_TOKEN_PATH
+        value: /run/native-jwt/projected.jwt
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: vault-native-token
+        mountPath: /run/native-jwt
+        readOnly: true
+  - equal:
+      path: spec.template.spec.volumes[0].projected.sources[0].serviceAccountToken
+      value:
+        path: projected.jwt
+        audience: vault-native
+        expirationSeconds: 600
+- it: allows native authentication alongside an existing TLS Secret
+  set:
+    tls.existingSecret: native-tls
+  asserts:
+  - contains:
+      path: spec.template.spec.volumes
+      content:
+        name: tls-bundle
+        secret:
+          secretName: native-tls
+          items:
+          - key: bundle.pem
+            path: bundle.pem
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: vault-native-token
+        mountPath: /var/run/secrets/vault-native
+        readOnly: true
+  - notExists:
+      path: spec.template.spec.initContainers
+- it: preserves the external CSI TLS escape hatch without native PKI automation
+  set:
+    tls.pemBundlePath: /run/external-tls/bundle.pem
+    extraVolumes:
+    - &id001
+      name: external-tls
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: native-tls
+    extraVolumeMounts:
+    - name: external-tls
+      mountPath: /run/external-tls
+      readOnly: true
+  asserts:
+  - contains:
+      path: spec.template.spec.volumes
+      content: *id001
+  - contains:
+      path: spec.template.spec.containers[0].volumeMounts
+      content:
+        name: external-tls
+        mountPath: /run/external-tls
+        readOnly: true
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_TLS_PEM_BUNDLE
+        value: /run/external-tls/bundle.pem
+  - notExists:
+      path: spec.template.spec.initContainers
+- it: renders explicit AppRole authentication without a native JWT volume
+  set:
+    vault.authMethod: approle
+    vault.roleId.value: fixture-role
+    vault.secretId.existingSecret: fixture-credentials
+  asserts:
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_AUTH_METHOD
+        value: approle
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_ROLE_ID
+        value: fixture-role
+  - contains:
+      path: spec.template.spec.containers[0].env
+      content:
+        name: PERMESI_VAULT_SECRET_ID
+        valueFrom:
+          secretKeyRef:
+            name: fixture-credentials
+            key: secret_id
+  - notExists:
+      path: spec.template.spec.volumes
+  - notExists:
+      path: spec.template.spec.containers[0].volumeMounts
+- it: preserves legacy auto socket mode without new auth flags or a projected JWT
+  set:
+    vault.authMethod: auto
+    vault.url: /var/run/secrets/vaultproject.io/agent.sock
+  asserts:
+  - notExists:
+      path: spec.template.spec.containers[0].env[?(@.name == "PERMESI_VAULT_AUTH_METHOD")]
+  - notExists:
+      path: spec.template.spec.volumes
+  - notExists:
+      path: spec.template.spec.containers[0].volumeMounts
+- it: requires a native Vault role
+  set:
+    vault.kubernetes.role: ''
+  asserts:
+  - failedTemplate:
+      errorPattern: vault.kubernetes.role must be set
+- it: rejects a whitespace-only native Vault role
+  set:
+    vault.kubernetes.role: '   '
+  asserts:
+  - failedTemplate:
+      errorPattern: vault.kubernetes.role must be set
+- it: rejects socket in native mode
+  set:
+    vault.url: /run/vault/agent.sock
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin
+- it: rejects Unix URL in native mode
+  set:
+    vault.url: unix:///run/vault/agent.sock
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin
+- it: rejects non-origin path in native mode
+  set:
+    vault.url: https://vault.example.com/v1
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin
+- it: rejects query in native mode
+  set:
+    vault.url: https://vault.example.com?x=1
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin
+- it: rejects credentials in native mode
+  set:
+    vault.url: https://user:pass@vault.example.com
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin
+- it: rejects empty hostname in native mode
+  set:
+    vault.url: https://:8200
+  asserts:
+  - failedTemplate:
+      errorPattern: TCP Vault URL origin
+- it: rejects an Agent alongside native auth
+  set:
+    vault.agent.enabled: true
+  asserts:
+  - failedTemplate:
+      errorPattern: vault.agent.enabled requires vault.authMethod=auto
+- it: rejects an Agent alongside explicit AppRole auth
+  set:
+    vault.authMethod: approle
+    vault.agent.enabled: true
+  asserts:
+  - failedTemplate:
+      errorPattern: vault.agent.enabled requires vault.authMethod=auto
+- it: rejects explicit AppRole auth over a socket
+  set:
+    vault.authMethod: approle
+    vault.url: /run/vault/agent.sock
+  asserts:
+  - failedTemplate:
+      errorPattern: approle requires a TCP Vault URL
+- it: requires automatic service-account token mounting to be disabled
+  set:
+    serviceAccount.automount: true
+  asserts:
+  - failedTemplate:
+      errorPattern: serviceAccount.automount must be false
+- it: rejects native mode with roleId.value
+  set:
+    vault.roleId.value: fixture-credential
+  asserts:
+  - failedTemplate:
+      errorPattern: roleId/secretId/wrappedToken must not be set
+- it: rejects native mode with roleId.existingSecret
+  set:
+    vault.roleId.existingSecret: fixture-credential
+  asserts:
+  - failedTemplate:
+      errorPattern: roleId/secretId/wrappedToken must not be set
+- it: rejects native mode with secretId.value
+  set:
+    vault.secretId.value: fixture-credential
+  asserts:
+  - failedTemplate:
+      errorPattern: roleId/secretId/wrappedToken must not be set
+- it: rejects native mode with secretId.existingSecret
+  set:
+    vault.secretId.existingSecret: fixture-credential
+  asserts:
+  - failedTemplate:
+      errorPattern: roleId/secretId/wrappedToken must not be set
+- it: rejects native mode with wrappedToken.value
+  set:
+    vault.wrappedToken.value: fixture-credential
+  asserts:
+  - failedTemplate:
+      errorPattern: roleId/secretId/wrappedToken must not be set
+- it: rejects native mode with wrappedToken.existingSecret
+  set:
+    vault.wrappedToken.existingSecret: fixture-credential
+  asserts:
+  - failedTemplate:
+      errorPattern: roleId/secretId/wrappedToken must not be set
+- it: rejects Vault ESO credentials
+  set:
+    externalSecret.enabled: true
+    externalSecret.store: vault
+    vault.externalSecret.remoteKey: approle
+  asserts:
+  - failedTemplate:
+      errorPattern: vault.externalSecret.remoteKey must not be set
+- it: rejects dormant Vault ESO credential configuration
+  set:
+    vault.externalSecret.remoteKey: approle
+  asserts:
+  - failedTemplate:
+      errorPattern: vault.externalSecret.remoteKey must not be set
+- it: rejects token path relative/token
+  set:
+    vault.kubernetes.tokenPath: relative/token
+  asserts:
+  - failedTemplate:
+      errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
+- it: rejects token path /token
+  set:
+    vault.kubernetes.tokenPath: /token
+  asserts:
+  - failedTemplate:
+      errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
+- it: rejects token path /run/native/../token
+  set:
+    vault.kubernetes.tokenPath: /run/native/../token
+  asserts:
+  - failedTemplate:
+      errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
+- it: rejects token path /run/native/token/
+  set:
+    vault.kubernetes.tokenPath: /run/native/token/
+  asserts:
+  - failedTemplate:
+      errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
+- it: rejects auth mount /v1/auth/kubernetes
+  set:
+    vault.kubernetes.authMount: /v1/auth/kubernetes
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects auth mount ../kubernetes
+  set:
+    vault.kubernetes.authMount: ../kubernetes
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects auth mount team/../kubernetes
+  set:
+    vault.kubernetes.authMount: team/../kubernetes
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects auth mount team//kubernetes
+  set:
+    vault.kubernetes.authMount: team//kubernetes
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects auth mount kubernetes?x=1
+  set:
+    vault.kubernetes.authMount: kubernetes?x=1
+  asserts:
+  - failedTemplate:
+      errorPattern: authMount must be a relative Vault auth mount
+- it: rejects an empty audience
+  set:
+    vault.kubernetes.audience: ' '
+  asserts:
+  - failedTemplate:
+      errorPattern: audience must not be empty
+- it: rejects token lifetimes below the Kubernetes minimum
+  set:
+    vault.kubernetes.tokenExpirationSeconds: 599
+  asserts:
+  - failedTemplate:
+      errorPattern: 'tokenExpirationSeconds: Must be greater than or equal to 600'
+- it: rejects token lifetimes above the chart bound
+  set:
+    vault.kubernetes.tokenExpirationSeconds: 86401
+  asserts:
+  - failedTemplate:
+      errorPattern: 'tokenExpirationSeconds: Must be less than or equal to 86400'
+- it: rejects unknown auth methods
+  set:
+    vault.authMethod: unknown
+  asserts:
+  - failedTemplate:
+      errorPattern: 'authMethod: .*must be one of'
+- it: rejects reuse of the projected token volume name
+  set:
+    extraVolumes:
+    - name: vault-native-token
+      emptyDir: {}
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumes must not use reserved volume names
+- it: rejects remounting the reserved projected token volume
+  set:
+    extraVolumeMounts:
+    - name: vault-native-token
+      mountPath: /run/other-token
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumeMounts must not use reserved volume names
+- it: rejects overlapping extra mount /var/run/secrets/vault-native
+  set:
+    extraVolumes:
+    - name: collision
+      emptyDir: {}
+    extraVolumeMounts:
+    - name: collision
+      mountPath: /var/run/secrets/vault-native
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumeMounts must not overlap native Vault token
+- it: rejects overlapping extra mount /var/run/secrets
+  set:
+    extraVolumes:
+    - name: collision
+      emptyDir: {}
+    extraVolumeMounts:
+    - name: collision
+      mountPath: /var/run/secrets
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumeMounts must not overlap native Vault token
+- it: rejects overlapping extra mount /var/run/secrets/vault-native/child
+  set:
+    extraVolumes:
+    - name: collision
+      emptyDir: {}
+    extraVolumeMounts:
+    - name: collision
+      mountPath: /var/run/secrets/vault-native/child
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumeMounts must not overlap native Vault token
+- it: rejects overlapping extra mount /var/run/secrets/vault-native/../vault-native
+  set:
+    extraVolumes:
+    - name: collision
+      emptyDir: {}
+    extraVolumeMounts:
+    - name: collision
+      mountPath: /var/run/secrets/vault-native/../vault-native
+  asserts:
+  - failedTemplate:
+      errorPattern: extraVolumeMounts must not overlap native Vault token
+- it: rejects token mounts hiding the TLS bundle
+  set:
+    vault.kubernetes.tokenPath: /var/run/permesi/tls/token
+  asserts:
+  - failedTemplate:
+      errorPattern: native Vault token and application mount directories must not overlap
+- it: rejects token mounts above a legacy TLS directory
+  set:
+    vault.kubernetes.tokenPath: /var/run/permesi/token
+    tls.existingSecret: legacy-tls
+  asserts:
+  - failedTemplate:
+      errorPattern: native Vault token and application mount directories must not overlap
+- it: rejects token mounts hiding the application listener socket
+  set:
+    config.socketPath: /var/run/secrets/vault-native/app.sock
+    service.enabled: false
+  asserts:
+  - failedTemplate:
+      errorPattern: native Vault token and application mount directories must not overlap
+- it: rejects extraEnv override of VAULT_URL
+  set:
+    extraEnv:
+    - name: PERMESI_VAULT_URL
+      value: override
+  asserts:
+  - failedTemplate:
+      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+- it: rejects extraEnv override of VAULT_AUTH_METHOD
+  set:
+    extraEnv:
+    - name: PERMESI_VAULT_AUTH_METHOD
+      value: override
+  asserts:
+  - failedTemplate:
+      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+- it: rejects extraEnv override of VAULT_KUBERNETES_TOKEN_PATH
+  set:
+    extraEnv:
+    - name: PERMESI_VAULT_KUBERNETES_TOKEN_PATH
+      value: override
+  asserts:
+  - failedTemplate:
+      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+- it: rejects extraEnv override of VAULT_ROLE_ID
+  set:
+    extraEnv:
+    - name: PERMESI_VAULT_ROLE_ID
+      value: override
+  asserts:
+  - failedTemplate:
+      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+- it: rejects token mounts hiding the legacy admission CA
+  set:
+    admission.paserkCa.existingSecret: legacy-ca
+    admission.paserkCa.mountPath: /var/run/secrets/vault-native
+  asserts:
+  - failedTemplate:
+      errorPattern: native Vault token and application mount directories must not overlap
+- it: rejects token mounts hiding an external admission CA file
+  set:
+    admission.paserkCaPath: /var/run/secrets/vault-native/ca.pem
+  asserts:
+  - failedTemplate:
+      errorPattern: native Vault token and application mount directories must not overlap

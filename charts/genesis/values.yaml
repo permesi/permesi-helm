@@ -7,6 +7,9 @@ replicaCount: 2
 image:
   repository: ghcr.io/permesi/genesis
   tag: 0.4.3
+  # Optional sha256:<64 hex> digest. When set it replaces the tag in the
+  # image reference (repository@digest); clear it when changing the tag.
+  digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -59,6 +62,15 @@ tls:
 
 vault:
   url: /var/run/secrets/vaultproject.io/agent.sock
+  # Explicit native auth needs a newly built supporting app image (unreleased).
+  # auto preserves socket -> Agent and TCP -> AppRole behavior.
+  authMethod: auto
+  kubernetes:
+    authMount: kubernetes
+    role: ""
+    tokenPath: /var/run/secrets/vault-native/token
+    audience: vault
+    tokenExpirationSeconds: 3600
   externalSecret:
     remoteKey: ""
     roleIdProperty: ""
@@ -76,6 +88,46 @@ vault:
     existingSecret: ""
     secretKey: wrapped_token
   transitMount: transit/genesis
+  # Managed Vault Agent sidecar (native sidecar, Kubernetes >= 1.29).
+  # Off by default: existing renders are byte-identical with agent disabled.
+  agent:
+    enabled: false
+    # HTTP(S) origin of Vault the agent authenticates against. Independent of
+    # vault.url (the Unix socket the application connects to).
+    address: ""
+    image:
+      repository: hashicorp/vault
+      tag: 1.20.4
+      # Optional sha256:<64 hex> digest. When set it replaces the tag in the
+      # image reference (repository@digest); clear it when changing the tag.
+      digest: ""
+      pullPolicy: IfNotPresent
+    auth:
+      mount: kubernetes
+      role: ""
+      audience: vault
+      tokenExpirationSeconds: 3600
+    ca:
+      existingConfigMap: ""
+      key: ca.crt
+    pki:
+      mount: pki-int
+      role: ""
+      commonName: ""
+      dnsNames: []
+      ttl: 24h
+      renewalThreshold: 0.8
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    startupProbe:
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 120
 
 service:
   enabled: true

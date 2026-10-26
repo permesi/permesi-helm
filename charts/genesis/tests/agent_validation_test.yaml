@@ -1,0 +1,399 @@
+suite: genesis vault agent validation
+release:
+  name: my-release
+  namespace: genesis
+templates:
+  - deployment.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 29
+tests:
+  - it: fails below Kubernetes 1.29
+    capabilities:
+      majorVersion: 1
+      minorVersion: 28
+    set:
+      vault.agent.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires Kubernetes >= 1.29"
+
+  - it: rejects an http(s) Vault target
+    set:
+      vault.agent.enabled: true
+      vault.url: https://vault.example.com:8200
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.url must be a Unix socket path"
+
+  - it: rejects a relative Vault socket path
+    set:
+      vault.agent.enabled: true
+      vault.url: var/run/agent.sock
+    asserts:
+      - failedTemplate:
+          errorPattern: "absolute socket path"
+
+  - it: requires an agent address
+    set:
+      vault.agent.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.agent.address must be an http(s) URL"
+
+  - it: requires a Kubernetes auth role
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.agent.auth.role must be set"
+
+  - it: rejects AppRole credentials
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.roleId.value: some-role-id
+    asserts:
+      - failedTemplate:
+          errorPattern: "roleId/secretId/wrappedToken must not be set"
+
+  - it: rejects Vault ESO credentials
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      vault.externalSecret.remoteKey: vault/approle
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.externalSecret.remoteKey must not be set"
+
+  - it: rejects a TLS Secret when the agent manages TLS
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      tls.existingSecret: my-tls
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls Secret/ESO must not be set"
+
+  - it: rejects a TLS ExternalSecret when the agent manages TLS
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      externalSecret.enabled: true
+      externalSecret.store: vault-store
+      tls.externalSecret.remoteKey: tls/cert
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls Secret/ESO must not be set"
+
+  - it: requires a PKI role in TCP mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.agent.pki.role must be set"
+
+  - it: requires a PKI common name in TCP mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.agent.pki.commonName must be set"
+
+  - it: requires at least one PKI SAN in TCP mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+    asserts:
+      - failedTemplate:
+          errorPattern: "dnsNames must contain at least one SAN"
+
+  - it: rejects injector annotations
+    values:
+      - agent_injector_values.yaml
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "injector annotations must not be used"
+
+  - it: rejects duplicate chart-owned env entries
+    values:
+      - agent_extraenv_values.yaml
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraEnv must not redefine"
+
+  - it: rejects reserved volume names
+    values:
+      - agent_extravolumes_values.yaml
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "reserved volume names"
+
+  - it: requires a nonroot UID/GID and fsGroup
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      securityContext.runAsUser: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be positive integers"
+
+  - it: requires automountServiceAccountToken to be false
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "serviceAccount.automount must be false"
+
+  - it: rejects a renewal threshold of exactly 1
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be less than 1"
+
+  - it: rejects a zero renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be greater than 0"
+
+  - it: rejects a negative renewal threshold
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      vault.agent.pki.renewalThreshold: -0.5
+    asserts:
+      - failedTemplate:
+          errorPattern: "renewalThreshold: Must be greater than 0"
+
+  - it: rejects distinct destinations sharing a directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects nested destination directories
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/tls/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects a TLS destination colliding with the agent scratch mount
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /tmp/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects extra volume mounts colliding with a chart destination
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: extra
+          mountPath: /var/run/genesis/tls
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not overlap"
+
+  - it: rejects an extra volume mount at the root directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: extra
+          mountPath: /
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not overlap"
+
+  - it: rejects a TLS destination directly in the root directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls.pemBundlePath must be inside a dedicated directory, not directly in /"
+
+  - it: rejects a Vault socket directly in the root directory
+    set:
+      vault.agent.enabled: true
+      vault.url: unix:///agent.sock
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.url socket must be inside a dedicated directory, not directly in /"
+
+  - it: rejects a relative TLS destination
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls.pemBundlePath must be an absolute path"
+
+  - it: accepts an inactive TLS destination in socket mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      serviceAccount.automount: false
+      config.socketPath: /run/app/app.sock
+      service.enabled: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
+    asserts:
+      - notFailedTemplate: {}
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-bundle
+          any: true
+
+  - it: rejects an agent-managed TLS destination in the socket directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects a legacy TLS Secret mount in the socket directory in socket mode
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      serviceAccount.automount: false
+      config.socketPath: /run/app/app.sock
+      service.enabled: false
+      tls.existingSecret: genesis-tls
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"

@@ -1,0 +1,16 @@
+[package]
+name = "quickstart-admission"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone client using the same OPAQUE suite as permesi 0.4.3.
+[workspace]
+
+[dependencies]
+opaque-ke = { version = "=4.0.1", features = ["argon2", "std"] }
+argon2 = "=0.5.3"
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+sha2 = "=0.10.9"
+base64 = "=0.23.0"
+serde_json = "1"

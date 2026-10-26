@@ -2,10 +2,20 @@
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- $vaultEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
 {{- $admissionCaSecret := include "permesi.admissionCaSecretName" . -}}
+{{- $tlsSecret := include "permesi.tlsSecretName" . -}}
+{{- $agentEnabled := .Values.vault.agent.enabled -}}
+{{- $nativeEnabled := eq .Values.vault.authMethod "kubernetes" -}}
+{{- $agentManagesTls := and $agentEnabled (not $socketMode) -}}
+{{- $agentManagesCa := and $agentEnabled .Values.vault.agent.paserkCa.enabled -}}
 {{- $admissionCaPath := default "" .Values.admission.paserkCaPath -}}
-{{- if and (eq $admissionCaPath "") (ne $admissionCaSecret "") -}}
+{{- if and (eq $admissionCaPath "") (or (ne $admissionCaSecret "") $agentManagesCa) -}}
 {{- $admissionCaPath = printf "%s/%s" .Values.admission.paserkCa.mountPath .Values.admission.paserkCa.fileName -}}
 {{- end -}}
+{{- $agentSocketDir := include "permesi.agentSocketDir" . -}}
+{{- $agentTlsDir := include "permesi.agentTlsDir" . -}}
+{{- $agentCaDir := include "permesi.agentAdmissionCaDir" . -}}
+{{- $mountTls := or $tlsSecret $agentManagesTls -}}
+{{- $mountCa := or $admissionCaSecret $agentManagesCa -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -28,9 +38,14 @@ spec:
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.podAnnotations }}
+      {{- if or .Values.podAnnotations $agentEnabled }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $agentEnabled }}
+        checksum/vault-agent-config: {{ include "permesi.agentConfigChecksum" . }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "permesi.serviceAccountName" . }}
@@ -41,9 +56,67 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if $agentEnabled }}
+      initContainers:
+        - name: vault-agent
+          image: {{ include "permesi.image" .Values.vault.agent.image | quote }}
+          imagePullPolicy: {{ .Values.vault.agent.image.pullPolicy }}
+          command: ["/bin/vault"]
+          args:
+            - agent
+            - -config=/vault/config/agent.hcl
+          restartPolicy: Always
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: vault-agent-config
+              mountPath: /vault/config
+              readOnly: true
+            {{- if .Values.vault.agent.ca.existingConfigMap }}
+            - name: vault-agent-ca
+              mountPath: /vault/ca
+              readOnly: true
+            {{- end }}
+            - name: vault-agent-token
+              mountPath: /var/run/secrets/vault-token
+              readOnly: true
+            - name: vault-agent-socket
+              mountPath: {{ $agentSocketDir | quote }}
+            - name: vault-agent-scratch
+              mountPath: /tmp
+            {{- if $agentManagesTls }}
+            - name: tls-bundle
+              mountPath: {{ $agentTlsDir | quote }}
+            {{- end }}
+            {{- if $agentManagesCa }}
+            - name: admission-paserk-ca
+              mountPath: {{ $agentCaDir | quote }}
+            {{- end }}
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - '{{ include "permesi.agentProbeCommand" . | trim }}'
+            periodSeconds: {{ .Values.vault.agent.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.vault.agent.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.vault.agent.startupProbe.failureThreshold }}
+          resources:
+            {{- toYaml .Values.vault.agent.resources | nindent 12 }}
+      {{- end }}
       containers:
         - name: permesi
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "permesi.image" .Values.image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
@@ -93,6 +166,18 @@ spec:
 
             - name: PERMESI_VAULT_URL
               value: {{ .Values.vault.url | quote }}
+            {{- if ne .Values.vault.authMethod "auto" }}
+            - name: PERMESI_VAULT_AUTH_METHOD
+              value: {{ .Values.vault.authMethod | quote }}
+            {{- if $nativeEnabled }}
+            - name: PERMESI_VAULT_KUBERNETES_AUTH_MOUNT
+              value: {{ .Values.vault.kubernetes.authMount | quote }}
+            - name: PERMESI_VAULT_KUBERNETES_ROLE
+              value: {{ .Values.vault.kubernetes.role | quote }}
+            - name: PERMESI_VAULT_KUBERNETES_TOKEN_PATH
+              value: {{ .Values.vault.kubernetes.tokenPath | quote }}
+            {{- end }}
+            {{- end }}
             {{- if $vaultEso }}
             - name: PERMESI_VAULT_ROLE_ID
               valueFrom:
@@ -180,16 +265,26 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or (include "permesi.tlsSecretName" .) (include "permesi.admissionCaSecretName" .) .Values.extraVolumeMounts }}
+          {{- if or $mountTls $mountCa $agentEnabled $nativeEnabled .Values.extraVolumeMounts }}
           volumeMounts:
-            {{- if include "permesi.tlsSecretName" . }}
+            {{- if $mountTls }}
             - name: tls-bundle
-              mountPath: {{ include "permesi.pathDir" .Values.tls.pemBundlePath | quote }}
+              mountPath: {{ $agentTlsDir | quote }}
               readOnly: true
             {{- end }}
-            {{- if include "permesi.admissionCaSecretName" . }}
+            {{- if $mountCa }}
             - name: admission-paserk-ca
-              mountPath: {{ .Values.admission.paserkCa.mountPath | quote }}
+              mountPath: {{ if $agentManagesCa }}{{ $agentCaDir | quote }}{{ else }}{{ .Values.admission.paserkCa.mountPath | quote }}{{ end }}
+              readOnly: true
+            {{- end }}
+            {{- if $agentEnabled }}
+            - name: vault-agent-socket
+              mountPath: {{ $agentSocketDir | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if $nativeEnabled }}
+            - name: vault-native-token
+              mountPath: {{ include "permesi.pathDir" .Values.vault.kubernetes.tokenPath | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -229,23 +324,67 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or (include "permesi.tlsSecretName" .) (include "permesi.admissionCaSecretName" .) .Values.extraVolumes }}
+      {{- if or $mountTls $mountCa $agentEnabled $nativeEnabled .Values.extraVolumes }}
       volumes:
-        {{- if include "permesi.tlsSecretName" . }}
+        {{- if $mountTls }}
         - name: tls-bundle
+          {{- if $agentManagesTls }}
+          emptyDir:
+            medium: Memory
+          {{- else }}
           secret:
-            secretName: {{ include "permesi.tlsSecretName" . | quote }}
+            secretName: {{ $tlsSecret | quote }}
             items:
               - key: {{ .Values.tls.secretKey | quote }}
                 path: {{ include "permesi.pathBase" .Values.tls.pemBundlePath | quote }}
+          {{- end }}
         {{- end }}
-        {{- if include "permesi.admissionCaSecretName" . }}
+        {{- if $mountCa }}
         - name: admission-paserk-ca
+          {{- if $agentManagesCa }}
+          emptyDir:
+            medium: Memory
+          {{- else }}
           secret:
-            secretName: {{ include "permesi.admissionCaSecretName" . | quote }}
+            secretName: {{ $admissionCaSecret | quote }}
             items:
               - key: {{ .Values.admission.paserkCa.secretKey | quote }}
                 path: {{ .Values.admission.paserkCa.fileName | quote }}
+          {{- end }}
+        {{- end }}
+        {{- if $agentEnabled }}
+        - name: vault-agent-socket
+          emptyDir:
+            medium: Memory
+        - name: vault-agent-config
+          configMap:
+            name: {{ include "permesi.agentConfigName" . | quote }}
+        - name: vault-agent-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: {{ .Values.vault.agent.auth.audience | quote }}
+                  expirationSeconds: {{ .Values.vault.agent.auth.tokenExpirationSeconds }}
+            defaultMode: 0400
+        {{- if .Values.vault.agent.ca.existingConfigMap }}
+        - name: vault-agent-ca
+          configMap:
+            name: {{ .Values.vault.agent.ca.existingConfigMap | quote }}
+        {{- end }}
+        - name: vault-agent-scratch
+          emptyDir:
+            medium: Memory
+        {{- end }}
+        {{- if $nativeEnabled }}
+        - name: vault-native-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: {{ include "permesi.pathBase" .Values.vault.kubernetes.tokenPath | quote }}
+                  audience: {{ .Values.vault.kubernetes.audience | quote }}
+                  expirationSeconds: {{ .Values.vault.kubernetes.tokenExpirationSeconds }}
+            defaultMode: 0400
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

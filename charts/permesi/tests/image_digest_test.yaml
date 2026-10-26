@@ -1,0 +1,93 @@
+suite: permesi image digest
+release:
+  name: permesi
+  namespace: permesi
+templates:
+  - deployment.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 29
+tests:
+  - it: falls back to repository:tag when no digest is set
+    set:
+      image.tag: 9.9.9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/permesi/permesi:9.9.9
+
+  - it: pins repository@digest when a digest is set, ignoring the tag
+    set:
+      image.tag: 9.9.9
+      image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/permesi/permesi@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+  - it: rejects a malformed digest via the schema
+    set:
+      image.digest: sha256:ABC
+    asserts:
+      - failedTemplate:
+          errorPattern: "image\\.digest: Does not match pattern"
+
+  - it: rejects a digest without the sha256 prefix
+    set:
+      image.digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    asserts:
+      - failedTemplate:
+          errorPattern: "image\\.digest: Does not match pattern"
+
+  - it: pins the Vault Agent image by digest independently of the app image
+    set:
+      image.tag: 9.9.9
+      vault.agent.image.tag: 9.8.7
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.image.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: hashicorp/vault@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/permesi/permesi:9.9.9
+
+  - it: falls back to the Vault Agent repository:tag without a digest
+    set:
+      vault.agent.image.tag: 9.8.7
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: hashicorp/vault:9.8.7
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/permesi/permesi@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+  - it: rejects a malformed Vault Agent digest via the schema
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      vault.agent.image.digest: "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+    asserts:
+      - failedTemplate:
+          errorPattern: "image\\.digest: Does not match pattern"

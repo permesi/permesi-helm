@@ -55,6 +55,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- regexFind "[^/]+$" . -}}
 {{- end -}}
 
+{{/* Reports "true" if any two normalized directory paths in the list overlap
+     (equal, or one is an ancestor of the other). */}}
+{{- define "genesis.dirsOverlap" -}}
+{{- $dirs := . -}}
+{{- $bad := false -}}
+{{- range $i, $a := $dirs -}}
+{{- range $j, $b := $dirs -}}
+{{- if gt $j $i -}}
+{{- $aa := toString $a -}}
+{{- $bb := toString $b -}}
+{{- if or (eq $aa $bb) (eq $aa "/") (eq $bb "/") (hasPrefix (printf "%s/" $aa) $bb) (hasPrefix (printf "%s/" $bb) $aa) -}}
+{{- $bad = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $bad -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
 {{- define "genesis.vaultIsTcp" -}}
 {{- $url := default "" .Values.vault.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
@@ -131,6 +150,7 @@ false
 {{- end -}}
 
 {{- define "genesis.validateValues" -}}
+{{- include "genesis.validateVaultAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- if and $socketMode .Values.service.enabled -}}
 {{- fail "genesis: service.enabled must be false when config.socketPath is set" -}}
@@ -179,10 +199,182 @@ false
 
 {{- $vaultIsTcp := eq (include "genesis.vaultIsTcp" .) "true" -}}
 {{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEsoActive -}}
-{{- if and $vaultIsTcp (not $roleSet) -}}
+{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not $roleSet) -}}
 {{- fail "genesis: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
 {{- fail "genesis: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
+{{- end -}}
+
+{{- if .Values.vault.agent.enabled -}}
+{{- $agent := .Values.vault.agent -}}
+{{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
+
+{{- /* Kubernetes >= 1.29 (native sidecars). */ -}}
+{{- if or (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt (.Capabilities.KubeVersion.Minor | int) 29)) -}}
+{{- fail "genesis: vault.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
+{{- end -}}
+
+{{- /* Unix target. */ -}}
+{{- $url := default "" .Values.vault.url -}}
+{{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
+{{- fail "genesis: vault.url must be a Unix socket path when vault.agent.enabled" -}}
+{{- end -}}
+{{- $urlNoScheme := $url -}}
+{{- if hasPrefix "unix://" $url -}}
+{{- $urlNoScheme = trimPrefix "unix://" $url -}}
+{{- end -}}
+{{- if not (hasPrefix "/" $urlNoScheme) -}}
+{{- fail "genesis: vault.url must be an absolute socket path when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Vault origin address. */ -}}
+{{- if not (or (hasPrefix "http://" (default "" $agent.address)) (hasPrefix "https://" (default "" $agent.address))) -}}
+{{- fail "genesis: vault.agent.address must be an http(s) URL when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Kubernetes auth role. */ -}}
+{{- if eq (default "" $agent.auth.role) "" -}}
+{{- fail "genesis: vault.agent.auth.role must be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reject AppRole credentials / wrapped tokens. */ -}}
+{{- $approleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- if $approleSet -}}
+{{- fail "genesis: vault.roleId/secretId/wrappedToken must not be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reject Vault ESO credentials. */ -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- fail "genesis: vault.externalSecret.remoteKey must not be set when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* TLS managed by the agent in TCP mode. */ -}}
+{{- if not $socketMode -}}
+{{- if or (ne (default "" .Values.tls.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "")) -}}
+{{- fail "genesis: tls Secret/ESO must not be set when vault.agent.enabled manages TLS" -}}
+{{- end -}}
+{{- if eq (default "" $agent.pki.role) "" -}}
+{{- fail "genesis: vault.agent.pki.role must be set when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- if eq (default "" $agent.pki.commonName) "" -}}
+{{- fail "genesis: vault.agent.pki.commonName must be set when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- $dnsOk := false -}}
+{{- range $agent.pki.dnsNames -}}
+{{- if ne (toString .) "" -}}{{- $dnsOk = true -}}{{- end -}}
+{{- end -}}
+{{- if not $dnsOk -}}
+{{- fail "genesis: vault.agent.pki.dnsNames must contain at least one SAN when vault.agent.enabled serves TLS" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Injector annotations. */ -}}
+{{- $hasInjector := false -}}
+{{- range $k, $v := .Values.podAnnotations -}}
+{{- if hasPrefix "vault.hashicorp.com/agent" $k -}}{{- $hasInjector = true -}}{{- end -}}
+{{- end -}}
+{{- if $hasInjector -}}
+{{- fail "genesis: vault.hashicorp.com/agent-* injector annotations must not be used when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Duplicate chart-owned env entries. */ -}}
+{{- $dupEnv := false -}}
+{{- range $e := .Values.extraEnv -}}
+{{- if or (eq (toString $e.name) "GENESIS_VAULT_URL") (eq (toString $e.name) "GENESIS_TLS_PEM_BUNDLE") (eq (toString $e.name) "GENESIS_VAULT_ROLE_ID") (eq (toString $e.name) "GENESIS_VAULT_SECRET_ID") (eq (toString $e.name) "GENESIS_VAULT_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
+{{- end -}}
+{{- if $dupEnv -}}
+{{- fail "genesis: extraEnv must not redefine chart-managed Vault/TLS env entries when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Reserved mount collisions. */ -}}
+{{- $reservedVol := false -}}
+{{- range $v := .Values.extraVolumes -}}
+{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "vault-agent-socket") (eq (toString $v.name) "vault-agent-config") (eq (toString $v.name) "vault-agent-token") (eq (toString $v.name) "vault-agent-ca") (eq (toString $v.name) "vault-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
+{{- end -}}
+{{- if $reservedVol -}}
+{{- fail "genesis: extraVolumes must not use reserved volume names when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Nonroot UID/GID + fsGroup. */ -}}
+{{- $ru := int (default 0 .Values.securityContext.runAsUser) -}}
+{{- $rg := int (default 0 .Values.securityContext.runAsGroup) -}}
+{{- $fsg := int (default 0 .Values.podSecurityContext.fsGroup) -}}
+{{- if or (le $ru 0) (le $rg 0) (le $fsg 0) -}}
+{{- fail "genesis: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* automount must be false. */ -}}
+{{- if .Values.serviceAccount.automount -}}
+{{- fail "genesis: serviceAccount.automount must be false when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* renewalThreshold strictly between 0 and 1 (no truthiness default). */ -}}
+{{- $rt := float64 $agent.pki.renewalThreshold -}}
+{{- if or (le $rt 0.0) (ge $rt 1.0) -}}
+{{- fail "genesis: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
+{{- end -}}
+
+{{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
+     (TCP mode) or a legacy TLS Secret is requested. */ -}}
+{{- $mountTls := or (not $socketMode) (ne (include "genesis.tlsSecretName" .) "") -}}
+
+{{- /* Absolute writable artifact destinations. */ -}}
+{{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
+{{- fail "genesis: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
+{{- end -}}
+
+{{- /* Each managed artifact needs its own mount directory: a file directly in
+     / would yield an empty mountPath (or mount over the root filesystem). */ -}}
+{{- $socketDir := clean (include "genesis.agentSocketDir" .) -}}
+{{- if or (eq $socketDir ".") (eq $socketDir "/") -}}
+{{- fail "genesis: vault.url socket must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- if $mountTls -}}
+{{- $tlsDir := clean (include "genesis.agentTlsDir" .) -}}
+{{- if or (eq $tlsDir ".") (eq $tlsDir "/") -}}
+{{- fail "genesis: tls.pemBundlePath must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Normalized chart-owned mount directories: fixed agent locations, the
+     socket and each active artifact. */ -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir -}}
+{{- if $mountTls -}}
+{{- $chartDirs = append $chartDirs (clean (include "genesis.agentTlsDir" .)) -}}
+{{- end -}}
+{{- if .Values.vault.agent.ca.existingConfigMap -}}
+{{- $chartDirs = append $chartDirs "/vault/ca" -}}
+{{- end -}}
+{{- if eq (include "genesis.dirsOverlap" $chartDirs) "true" -}}
+{{- fail (printf "genesis: vault agent destination mount directories must not overlap (got: %s) when vault.agent.enabled" (join ", " $chartDirs)) -}}
+{{- end -}}
+
+{{- /* extraVolumeMounts must not collide with chart-owned mount directories. */ -}}
+{{- $extraCollision := false -}}
+{{- range $m := .Values.extraVolumeMounts -}}
+{{- $mp := clean (toString (default "" $m.mountPath)) -}}
+{{- range $d := $chartDirs -}}
+{{- if eq (include "genesis.dirsOverlap" (list $mp (toString $d))) "true" -}}
+{{- $extraCollision = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $extraCollision -}}
+{{- fail "genesis: extraVolumeMounts must not overlap chart-managed mount directories when vault.agent.enabled" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Image reference for an image values block ({repository, tag, digest}).
+A non-empty digest pins the image as repository@digest and takes precedence
+over the tag; otherwise renders repository:tag.
+*/}}
+{{- define "genesis.image" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%v" .repository .tag -}}
 {{- end -}}
 {{- end -}}

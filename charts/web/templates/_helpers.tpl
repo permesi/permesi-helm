@@ -83,3 +83,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- fail "web: autoscaling.minReplicas must not be greater than autoscaling.maxReplicas" -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Image reference for an image values block ({repository, tag, digest}).
+A non-empty digest pins the image as repository@digest and takes precedence
+over the tag; otherwise renders repository:tag.
+*/}}
+{{- define "web.image" -}}
+{{- if .digest -}}
+{{- printf "%s@%s" .repository .digest -}}
+{{- else -}}
+{{- printf "%s:%v" .repository .tag -}}
+{{- end -}}
+{{- end -}}

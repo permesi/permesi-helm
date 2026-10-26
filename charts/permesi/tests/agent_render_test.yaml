@@ -1,0 +1,137 @@
+suite: permesi vault agent render
+release:
+  name: permesi
+  namespace: permesi
+templates:
+  - deployment.yaml
+capabilities:
+  majorVersion: 1
+  minorVersion: 29
+tests:
+  - it: renders native sidecar, shared volumes, and agent-only token projection
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+    asserts:
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - exists:
+          path: spec.template.metadata.annotations["checksum/vault-agent-config"]
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: vault-agent
+      - equal:
+          path: spec.template.spec.initContainers[0].restartPolicy
+          value: Always
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 10001
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.template.spec.initContainers[0].securityContext.capabilities.drop
+          content: ALL
+      # Agent mounts the projected token; the app does not
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: vault-agent-token
+            mountPath: /var/run/secrets/vault-token
+            readOnly: true
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: vault-agent-token
+      # App mounts the shared artifacts read-only
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tls-bundle
+            mountPath: /var/run/permesi/tls
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: admission-paserk-ca
+            mountPath: /var/run/permesi/admission-ca
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: vault-agent-socket
+            mountPath: /var/run/secrets/vaultproject.io
+            readOnly: true
+      # Memory emptyDirs for socket, TLS, and CA
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: vault-agent-socket
+            emptyDir:
+              medium: Memory
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-bundle
+            emptyDir:
+              medium: Memory
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: admission-paserk-ca
+            emptyDir:
+              medium: Memory
+      # Projected token with audience and bounded expiry
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: vault-agent-token
+            projected:
+              sources:
+                - serviceAccountToken:
+                    path: token
+                    audience: vault
+                    expirationSeconds: 3600
+              defaultMode: 0400
+      # Startup probe performs an authenticated tokenless lookup plus file checks
+      - equal:
+          path: spec.template.spec.initContainers[0].startupProbe.failureThreshold
+          value: 120
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].startupProbe.exec.command[2]
+          pattern: 'vault token lookup -address="unix:///var/run/secrets/vaultproject.io/agent.sock"'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].startupProbe.exec.command[2]
+          pattern: 'test -s "/var/run/permesi/tls/bundle.pem"'
+
+  - it: omits the inbound PKI template in socket mode but keeps the PASERK CA
+    set:
+      config.socketPath: /var/run/permesi/permesi.sock
+      service.enabled: false
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      serviceAccount.automount: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls-bundle
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: admission-paserk-ca
+            emptyDir:
+              medium: Memory
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: vault-agent-socket
+            mountPath: /var/run/secrets/vaultproject.io
+            readOnly: true

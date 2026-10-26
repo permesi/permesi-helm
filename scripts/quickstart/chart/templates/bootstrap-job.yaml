@@ -1,0 +1,217 @@
+{{- $fullname := include "quickstart.fullname" . -}}
+{{- $creds := include "quickstart.credentialsSecretName" . -}}
+{{- $schema := .Values.bootstrap.schema -}}
+{{- $svc := .Values.bootstrap.services -}}
+{{- $roles := .Values.bootstrap.kubernetesRoles -}}
+# Ordered bootstrap: schema acquisition -> PostgreSQL bootstrap/verification
+# (postgres image) -> Vault provisioning (vault image). One Job per Helm
+# revision, so every install/upgrade re-runs the idempotent bootstrap.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-bootstrap-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap
+  annotations:
+    permesi.dev/schema-revision: {{ $schema.revision | default "unknown" | quote }}
+    permesi.dev/schema-source: {{ ternary "configmaps" "archive" (gt (len ($schema.existingConfigMaps | default list)) 0) | quote }}
+spec:
+  ttlSecondsAfterFinished: {{ .Values.bootstrapJob.ttlSecondsAfterFinished }}
+  backoffLimit: {{ .Values.bootstrapJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.bootstrapJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "quickstart.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bootstrap
+    spec:
+      serviceAccountName: {{ $fullname }}-bootstrap
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        # Group that may read the mounted credential files (0440).
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: schema-acquisition
+          image: {{ include "quickstart.image" .Values.vault.image }}
+          imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
+          command: ["sh", "/scripts/fetch-schema.sh"]
+          env:
+            - name: SCHEMA_URL
+              value: {{ $schema.sourceUrl | default "" | quote }}
+            - name: SCHEMA_SHA256
+              value: {{ $schema.sha256 | default "" | quote }}
+          securityContext:
+            runAsUser: 100
+            runAsGroup: 1000
+            {{- include "quickstart.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: sql
+              mountPath: /db/sql
+            - name: fetch-tmp
+              mountPath: /tmp
+            {{- range $i, $cm := $schema.existingConfigMaps }}
+            - name: sql-input-{{ $i }}
+              mountPath: /input/{{ $i }}
+              readOnly: true
+            {{- end }}
+        - name: sql-bootstrap
+          image: {{ include "quickstart.image" .Values.postgresql.image }}
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          command: ["bash", "/scripts/sql-bootstrap.sh"]
+          env:
+            - name: PG_HOST
+              value: {{ include "quickstart.postgresqlServiceName" . | quote }}
+            - name: PG_PORT
+              value: {{ .Values.postgresql.service.port | quote }}
+            - name: TMPDIR
+              value: /tmp
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            {{- include "quickstart.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: sql
+              mountPath: /db/sql
+              readOnly: true
+            - name: sql-tmp
+              mountPath: /tmp
+            - name: state
+              mountPath: /state
+            # Administrator + owner passwords: SQL container only.
+            - name: sql-credentials
+              mountPath: /credentials
+              readOnly: true
+      containers:
+        - name: vault-bootstrap
+          image: {{ include "quickstart.image" .Values.vault.image }}
+          imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
+          command: ["sh", "/scripts/vault-bootstrap.sh"]
+          env:
+            - name: VAULT_ADDR
+              value: {{ include "quickstart.vaultAddr" . | quote }}
+            - name: VAULT_PUBLIC_ADDR
+              value: {{ include "quickstart.vaultAddr" . | quote }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $creds }}
+                  key: vault-root-token
+            - name: HOME
+              value: /tmp
+            - name: PG_HOST
+              value: {{ printf "%s.%s.svc" (include "quickstart.postgresqlServiceName" .) .Release.Namespace | quote }}
+            - name: PG_PORT
+              value: {{ .Values.postgresql.service.port | quote }}
+            - name: NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: PERMESI_SA
+              value: {{ $roles.permesi.serviceAccount | quote }}
+            - name: GENESIS_SA
+              value: {{ $roles.genesis.serviceAccount | quote }}
+            - name: AUDIENCE
+              value: {{ $roles.audience | quote }}
+            - name: ROLE_TTL
+              value: {{ $roles.ttl | quote }}
+            - name: ROLE_MAX_TTL
+              value: {{ $roles.maxTtl | quote }}
+            - name: K8S_HOST
+              value: {{ .Values.bootstrap.kubernetes.host | quote }}
+            - name: ROOT_CN
+              value: {{ .Values.bootstrap.pki.rootCommonName | quote }}
+            - name: INT_CN
+              value: {{ .Values.bootstrap.pki.intermediateCommonName | quote }}
+            - name: PKI_TTL
+              value: {{ .Values.bootstrap.pki.ttl | quote }}
+            - name: PKI_MAX_TTL
+              value: {{ .Values.bootstrap.pki.maxTtl | quote }}
+            - name: OIDC_ENABLED
+              value: {{ .Values.bootstrap.oidcSigning.enabled | quote }}
+            - name: PERMESI_DNS_NAMES
+              value: {{ include "quickstart.serviceDnsNames" (dict "svc" $svc.permesi "ns" .Release.Namespace) | quote }}
+            - name: GENESIS_DNS_NAMES
+              value: {{ include "quickstart.serviceDnsNames" (dict "svc" $svc.genesis "ns" .Release.Namespace) | quote }}
+          securityContext:
+            runAsUser: 100
+            runAsGroup: 1000
+            {{- include "quickstart.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+            - name: vault-tmp
+              mountPath: /tmp
+            - name: state
+              mountPath: /state
+              readOnly: true
+            # Database manager (owner) passwords only; never the admin password.
+            - name: vault-credentials
+              mountPath: /credentials
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ $fullname }}-scripts
+        - name: policies
+          configMap:
+            name: {{ $fullname }}-policies
+        - name: sql
+          emptyDir:
+            sizeLimit: 32Mi
+        - name: state
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: fetch-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: sql-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+        - name: vault-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+        - name: sql-credentials
+          secret:
+            secretName: {{ $creds }}
+            defaultMode: 0440
+            items:
+              - {key: postgres-admin-password, path: postgres-admin-password}
+              - {key: vault-permesi-password, path: vault-permesi-password}
+              - {key: vault-genesis-password, path: vault-genesis-password}
+        - name: vault-credentials
+          secret:
+            secretName: {{ $creds }}
+            defaultMode: 0440
+            items:
+              - {key: vault-permesi-password, path: vault-permesi-password}
+              - {key: vault-genesis-password, path: vault-genesis-password}
+        {{- range $i, $cm := $schema.existingConfigMaps }}
+        - name: sql-input-{{ $i }}
+          configMap:
+            name: {{ $cm }}
+        {{- end }}

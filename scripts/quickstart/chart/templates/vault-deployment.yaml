@@ -1,0 +1,98 @@
+{{- $fullname := include "quickstart.fullname" . -}}
+# Dev-mode Vault: in-memory storage, auto-unsealed, HTTP on ClusterIP only.
+# Recreating this pod loses every key, PKI issuer and seed (see NOTES).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "quickstart.vaultServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vault
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "quickstart.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vault
+  template:
+    metadata:
+      labels:
+        {{- include "quickstart.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: vault
+    spec:
+      serviceAccountName: {{ $fullname }}-vault
+      # Vault's own API-audience token is its Kubernetes-auth reviewer JWT.
+      automountServiceAccountToken: true
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vault
+          image: {{ include "quickstart.image" .Values.vault.image }}
+          imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
+          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200", "-dev-no-store-token"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickstart.credentialsSecretName" . }}
+                  key: vault-root-token
+            # Same root credential (already present above) for operator `vault`
+            # CLI exec by verify.sh/connect.sh. Dev-only.
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickstart.credentialsSecretName" . }}
+                  key: vault-root-token
+            - name: VAULT_ADDR
+              value: "http://127.0.0.1:8200"
+            - name: VAULT_API_ADDR
+              value: {{ include "quickstart.vaultAddr" . | quote }}
+            # The image entrypoint would setcap/chown as root; this pod is non-root.
+            - name: SKIP_SETCAP
+              value: "true"
+            - name: SKIP_CHOWN
+              value: "true"
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: http
+              containerPort: 8200
+          securityContext:
+            {{- include "quickstart.containerSecurityContext" . | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi

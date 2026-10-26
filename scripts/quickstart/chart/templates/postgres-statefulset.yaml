@@ -1,0 +1,96 @@
+# Official PostgreSQL 18, non-root, ephemeral PGDATA (emptyDir): a pod
+# recreation loses all data. Password authentication on TCP (image default
+# scram-sha-256); no trust auth over the network.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "quickstart.postgresqlServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "quickstart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  serviceName: {{ include "quickstart.postgresqlServiceName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "quickstart.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgresql
+  template:
+    metadata:
+      labels:
+        {{- include "quickstart.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgresql
+          image: {{ include "quickstart.image" .Values.postgresql.image }}
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          env:
+            - name: POSTGRES_PASSWORD_FILE
+              value: /credentials/postgres-admin-password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # Every TCP connection (including in-pod loopback) uses
+            # scram-sha-256; only the in-pod Unix socket is trusted.
+            - name: POSTGRES_INITDB_ARGS
+              value: "--auth-host=scram-sha-256 --auth-local=trust"
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: scram-sha-256
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          securityContext:
+            {{- include "quickstart.containerSecurityContext" . | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+            - name: credentials
+              mountPath: /credentials
+              readOnly: true
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: credentials
+          secret:
+            secretName: {{ include "quickstart.credentialsSecretName" . }}
+            defaultMode: 0440
+            items:
+              - key: postgres-admin-password
+                path: postgres-admin-password

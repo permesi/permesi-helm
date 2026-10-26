@@ -124,6 +124,7 @@ false
 {{- end -}}
 
 {{- define "permesi.validateValues" -}}
+{{- include "permesi.validateVaultAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- $vaultEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
 {{- $dsnEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") -}}
@@ -169,10 +170,10 @@ false
 
 {{- $vaultIsTcp := eq (include "permesi.vaultIsTcp" .) "true" -}}
 {{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEso -}}
-{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not $roleSet) -}}
+{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not $roleSet) -}}
 {{- fail "permesi: vault.roleId must be set when vault.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and (not .Values.vault.agent.enabled) $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
 {{- fail "permesi: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
 {{- end -}}
 

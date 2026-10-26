@@ -323,9 +323,22 @@ false
 {{- fail "genesis: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
 {{- end -}}
 
+{{- /* Each managed artifact needs its own mount directory: a file directly in
+     / would yield an empty mountPath (or mount over the root filesystem). */ -}}
+{{- $socketDir := clean (include "genesis.agentSocketDir" .) -}}
+{{- if or (eq $socketDir ".") (eq $socketDir "/") -}}
+{{- fail "genesis: vault.url socket must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- if $mountTls -}}
+{{- $tlsDir := clean (include "genesis.agentTlsDir" .) -}}
+{{- if or (eq $tlsDir ".") (eq $tlsDir "/") -}}
+{{- fail "genesis: tls.pemBundlePath must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* Normalized chart-owned mount directories: fixed agent locations, the
      socket and each active artifact. */ -}}
-{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" (clean (include "genesis.agentSocketDir" .)) -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir -}}
 {{- if $mountTls -}}
 {{- $chartDirs = append $chartDirs (clean (include "genesis.agentTlsDir" .)) -}}
 {{- end -}}
@@ -341,8 +354,7 @@ false
 {{- range $m := .Values.extraVolumeMounts -}}
 {{- $mp := clean (toString (default "" $m.mountPath)) -}}
 {{- range $d := $chartDirs -}}
-{{- $dd := toString $d -}}
-{{- if or (eq $mp $dd) (hasPrefix (printf "%s/" $dd) $mp) (hasPrefix (printf "%s/" $mp) $dd) -}}
+{{- if eq (include "genesis.dirsOverlap" (list $mp (toString $d))) "true" -}}
 {{- $extraCollision = true -}}
 {{- end -}}
 {{- end -}}

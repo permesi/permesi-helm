@@ -308,9 +308,28 @@ false
 {{- fail "permesi: admission PASERK CA destination must be an absolute path when vault.agent.enabled" -}}
 {{- end -}}
 
+{{- /* Each managed artifact needs its own mount directory: a file directly in
+     / would yield an empty mountPath (or mount over the root filesystem). */ -}}
+{{- $socketDir := clean (include "permesi.agentSocketDir" .) -}}
+{{- if or (eq $socketDir ".") (eq $socketDir "/") -}}
+{{- fail "permesi: vault.url socket must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- if $mountTls -}}
+{{- $tlsDir := clean (include "permesi.agentTlsDir" .) -}}
+{{- if or (eq $tlsDir ".") (eq $tlsDir "/") -}}
+{{- fail "permesi: tls.pemBundlePath must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- end -}}
+{{- if $agentManagesCa -}}
+{{- $caDir := clean (include "permesi.agentAdmissionCaDir" .) -}}
+{{- if or (eq $caDir ".") (eq $caDir "/") -}}
+{{- fail "permesi: admission PASERK CA destination must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* Normalized chart-owned mount directories: fixed agent locations, the
      socket and each active artifact. */ -}}
-{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" (clean (include "permesi.agentSocketDir" .)) -}}
+{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir -}}
 {{- if $mountTls -}}
 {{- $chartDirs = append $chartDirs (clean (include "permesi.agentTlsDir" .)) -}}
 {{- end -}}
@@ -331,8 +350,7 @@ false
 {{- range $m := .Values.extraVolumeMounts -}}
 {{- $mp := clean (toString (default "" $m.mountPath)) -}}
 {{- range $d := $chartDirs -}}
-{{- $dd := toString $d -}}
-{{- if or (eq $mp $dd) (hasPrefix (printf "%s/" $dd) $mp) (hasPrefix (printf "%s/" $mp) $dd) -}}
+{{- if eq (include "permesi.dirsOverlap" (list $mp (toString $d))) "true" -}}
 {{- $extraCollision = true -}}
 {{- end -}}
 {{- end -}}

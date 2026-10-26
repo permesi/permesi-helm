@@ -309,6 +309,64 @@ tests:
       - failedTemplate:
           errorPattern: "extraVolumeMounts must not overlap"
 
+  - it: rejects an extra volume mount at the root directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: extra
+          mountPath: /
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not overlap"
+
+  - it: rejects a TLS destination directly in the root directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      tls.pemBundlePath: /bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls.pemBundlePath must be inside a dedicated directory, not directly in /"
+
+  - it: rejects an admission CA destination directly in the root directory
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      admission.paserkCaPath: /ca.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "admission PASERK CA destination must be inside a dedicated directory, not directly in /"
+
+  - it: rejects a Vault socket directly in the root directory
+    set:
+      vault.agent.enabled: true
+      vault.url: unix:///agent.sock
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: permesi
+      vault.agent.pki.role: permesi-runtime
+      vault.agent.pki.commonName: api.permesi.dev
+      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault.url socket must be inside a dedicated directory, not directly in /"
+
   - it: rejects a relative TLS destination
     set:
       vault.agent.enabled: true

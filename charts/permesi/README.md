@@ -65,6 +65,43 @@ survive replicas or restarts. For multi-replica, restart-safe deployments prefer
 the Vault Agent socket (auto-auth) or provision a SecretID with suitable
 `secret_id_num_uses`/TTL rather than sharing a one-use credential.
 
+## Vault Agent (managed sidecar, opt-in)
+
+Set `vault.agent.enabled: true` to render a chart-managed Vault Agent native
+sidecar (Kubernetes ≥ 1.29 with `SidecarContainers`). It authenticates via
+Kubernetes auth and renders the TLS bundle and the PASERK CA, so the backend needs
+no AppRole/TLS/PASERK Secrets. It reuses `vault.url` (Unix socket),
+`tls.pemBundlePath`, and `admission.paserkCaPath`/`paserkCa.mountPath` as
+destinations.
+
+| Key | Default | Contract |
+|---|---|---|
+| `vault.agent.enabled` | `false` | opt-in native sidecar |
+| `vault.agent.address` | `""` | required HTTPS Vault origin when enabled |
+| `vault.agent.image.{repository,tag,digest,pullPolicy}` | `hashicorp/vault`, pinned patch | explicit tested patch, optional digest, `IfNotPresent` |
+| `vault.agent.auth.{mount,role,audience,tokenExpirationSeconds}` | `kubernetes`, required role, `vault`, `3600` | projected token audience must match the Vault role |
+| `vault.agent.ca.{existingConfigMap,key}` | `""` / `ca.crt` | public Vault CA; optional for public-root Vault |
+| `vault.agent.pki.{mount,role,commonName,dnsNames,ttl}` | `pki-int`, required role, required CN/SAN, `[]`, `24h` | service-specific PKI role |
+| `vault.agent.pki.renewalThreshold` | `0.8` | strict `0 < x < 1` |
+| `vault.agent.resources` | small requests/limits | account for them in pod sizing |
+| `vault.agent.startupProbe.{periodSeconds,timeoutSeconds,failureThreshold}` | `5` / `5` / `120` | bounded startup budget |
+| `vault.agent.paserkCa.{enabled,path}` | `true`, `pki-int/cert/ca_chain` | Permesi-only PASERK CA template |
+
+When enabled, the chart requires a Unix `vault.url`, an Agent address/role, and a
+PKI role/SANs; requires `serviceAccount.automount=false`, nonroot UID/GID, and
+compatible fsGroup; and rejects AppRole/wrapped/ESO Vault credentials, TLS
+Secret/ESO, and PASERK Secret/ESO (for the artifacts the Agent now manages).
+`config.socketPath` omits the inbound PKI template but keeps the Vault socket and
+PASERK CA.
+
+<!-- UNVERIFIED: exact keys/defaults and pinned Agent image tag confirmed by M-VA. -->
+
+## Image digest precedence
+
+Set `image.digest` (`sha256:<64 hex>`) to pin by digest: the chart renders
+`repository@digest` and a tag change does not override it. Clear the digest to
+return to `repository:tag`. <!-- UNVERIFIED: digest helper is M-DIG work. -->
+
 ## Termination grace
 
 `terminationGracePeriodSeconds` defaults to 60 to cover the application's

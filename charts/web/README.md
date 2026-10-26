@@ -77,6 +77,12 @@ When using an external ConfigMap:
   kubectl rollout restart deployment/<release>-web
   ```
 
+## Image digest precedence
+
+Set `image.digest` (`sha256:<64 hex>`) to pin by digest: the chart renders
+`repository@digest` and a tag change does not override it. Clear the digest to
+return to `repository:tag`. <!-- UNVERIFIED: digest helper is M-DIG work. -->
+
 ## Example
 
 ```yaml

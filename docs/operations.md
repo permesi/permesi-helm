@@ -29,8 +29,8 @@ source paths below are relative to the application repository (`permesi/`).
 
 ### 2.1 AppRole URL semantics (F-01)
 
-Permesi does **not** normalize `vault.url`: it POSTs the role/secret ID to that
-value verbatim (`crates/vault_client/src/lib.rs:121-165`). Use the full login
+Permesi 0.4.3 does **not** normalize `vault.url`: it POSTs the role/secret ID to
+that value verbatim (`crates/vault_client/src/lib.rs:121-165`). Use the full login
 endpoint for Permesi:
 
 ```yaml
@@ -38,6 +38,12 @@ permesi:
   vault:
     url: https://vault.example.com:8200/v1/auth/approle/login
 ```
+
+Permesi **≥ the next release** (app branch `feat/k8s-hardening`, unreleased)
+accepts a Vault base URL (`https://vault.example.com:8200`, empty or `/` path) and
+normalizes it to `/v1/auth/approle/login`; an explicit non-root login URL is still
+preserved verbatim. This does not change Agent (socket) mode. Until that release
+ships, keep the full endpoint for Permesi.
 
 Genesis normalizes a base URL (or accepts the full endpoint) via
 `services/genesis/src/vault/mod.rs:21-26`, so either form works:
@@ -61,13 +67,12 @@ Credentials must therefore remain valid for **every future pod start**, not just
 the current rollout: restarts, rescheduling, scale-out, and the re-login that
 follows a token `max_ttl` expiry or renewal failure. Pick **one** of:
 
-- **Vault Agent (recommended).** Run a Vault Agent sidecar with auto-auth
-  (e.g. Kubernetes auth) and inject its Unix socket via annotations/volumes. Set
-  `vault.url` to the socket path (the default
-  `/var/run/secrets/vaultproject.io/agent.sock`). The agent re-authenticates and
-  renews independently of the application, so replicas and restarts always have
-  a live token. The agent socket must already exist when the transport is
-  constructed.
+- **Vault Agent (recommended).** Use the chart-managed Agent sidecar
+  (`vault.agent.enabled: true`). It authenticates via Kubernetes auth and renders
+  the TLS bundle and (for Permesi) the PASERK CA; set `vault.url` to the Unix
+  socket it listens on. The agent re-authenticates and renews independently of the
+  application, so replicas and restarts always have a live token. The agent socket
+  must already exist when the transport is constructed. See §2.4.
 - **Long-lived SecretID plus a rotation procedure.** Provision the AppRole with a
   `secret_id_num_uses`/`secret_id_ttl` policy that covers the Secret's whole
   service life, and rotate it *before* expiry: update the Secret, then
@@ -94,11 +99,53 @@ deliberate restart so the pod re-acquires fresh credentials. The DSN Secret can
 therefore carry a placeholder username/password; only host/port/database and TLS
 options matter.
 
+### 2.4 Managed Vault Agent operations
+
+The recommended path is the chart-managed Agent sidecar (`vault.agent.enabled:
+true`): a native sidecar (`initContainers[].restartPolicy: Always`) running the
+official `hashicorp/vault` image with Kubernetes auto-auth, a local Unix-socket
+proxy (`api_proxy { use_auto_auth_token = true }`, **no cache block**), and PKI
+templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
+≥ 1.29 with `SidecarContainers` is required in this mode. See
+`docs/install-guide.md` §4 and `docs/examples/vault-agent-stack.yaml`.
+
+- **Leaf reissue/reload vs CA rollout.** The Agent reissues the TLS bundle before
+  TTL expiry (renewal threshold default `0.8`, leave margin for retries plus the
+  backend's ~10 s reload). The application watches the bundle mtime and reloads
+  in place; do **not** switch the bundle to a `subPath` mount. A certificate is
+  reissued, not renewed in place. CA/intermediate rotation is different: the
+  PASERK roots are startup-loaded, so roll with overlapping trusted roots before
+  an issuer change, then `kubectl rollout restart` the backends.
+- **Agent restart.** The Agent's startup probe re-authenticates and re-renders
+  before releasing the pod: a stale socket/file from a prior Agent must not pass
+  the gate. Restarting only the Agent must not leave a dead socket; the native
+  sidecar outlives the app container during graceful shutdown. A stopped Agent
+  whose auth token and runtime certificates expire cannot re-issue until restarted
+  with valid bootstrap credentials (projected JWT + Kubernetes auth).
+- **JWT rotation.** The Agent re-reads the projected service-account JWT, so
+  service-account token rotation (audience `vault`) is absorbed without pod
+  changes. The Kubernetes auth role's `bound_service_account_names`/`namespaces`
+  must match the rendered SA name and exact namespace; a mismatched audience/role
+  denies login.
+- **DB lease fail-closed recovery.** DB lease renewal is owned by the application,
+  not the Agent (the Agent has no cache block, so it does not hold a competing
+  lease owner). Renewal failure shuts the pod down fail-closed; a replacement pod
+  re-acquires fresh credentials via the Agent's socket. If a lease expires or its
+  parent token is revoked, restart the pod — do not assume the Agent repairs an
+  existing pool automatically.
+- **No exposed TCP proxy / no cache / no quit endpoint.** The socket proxy is the
+  only listener; it preserves an explicitly supplied operator `X-Vault-Token`
+  (never `use_auto_auth_token = "force"`), and Unix requests do not set
+  `X-Vault-Request`, so `require_request_header` must stay off.
+
+
+
 ## 3. TLS
 
 - **Inbound backend TLS** is one combined PEM bundle — private key followed by
-  certificate chain — mounted at `tls.pemBundlePath` from a Secret. No client
-  certificate authentication is performed
+  certificate chain — mounted at `tls.pemBundlePath`. In the legacy path it comes
+  from a Secret; in Agent mode the Agent renders it from the PKI role into the
+  same path. No client certificate authentication is performed
   (`crates/service_utils/src/tls.rs:239-265`).
 - **Certificate reload** watches the bundle's modification time every 10 seconds.
   Mount the Secret as a directory (the chart default) so projected updates are
@@ -110,7 +157,9 @@ options matter.
 - **Vault trust** uses the image's root bundle (`SSL_CERT_FILE`, default
   `/etc/ssl/certs/ca-certificates.crt`). There is no dedicated Vault CA flag; add
   your private CA to the image trust bundle or use a CA that chains to public
-  roots.
+  roots. In Agent mode the application talks to Vault over the Unix socket and the
+  **Agent** holds the Vault CA (`vault.agent.ca.existingConfigMap`); the backend
+  image needs no Vault CA.
 - **PostgreSQL TLS** is controlled by the DSN. Use `sslmode=verify-full` plus
   `sslrootcert=<path>` where `<path>` points at a CA mounted via
   `extraVolumes`/`extraVolumeMounts` (see the example). The development default

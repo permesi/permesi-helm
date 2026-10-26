@@ -1,0 +1,430 @@
+# Production umbrella values for release "permesi" in namespace "permesi",
+# using the chart-managed Vault Agent (Kubernetes auth + PKI certificate
+# rendering). No TLS Secrets and no AppRole Secrets reach the backend pods.
+#
+# UNVERIFIED: this profile is drafted against docs/engineering/k8s-adoption-plan.md
+# §3 and must render once M-VA lands. The exact vault.agent.* keys/defaults and the
+# pinned Agent image tag are confirmed by /tmp/permesi-briefs/m-va-report.md;
+# re-align before finalizing. The chart currently rejects this profile until M-VA
+# implements the vault.agent.* values.
+#
+# Install (after M-VA):
+#   helm dependency build charts/permesi-stack
+#   helm upgrade --install permesi charts/permesi-stack -n permesi \
+#     -f docs/examples/vault-agent-stack.yaml
+#
+# Operators must still create, outside Helm:
+#   - DSN Secrets (placeholder host/port/database/TLS only; username/password are
+#     replaced at startup with Vault dynamic credentials)
+#   - PostgreSQL CA Secret (mounted via extraVolumes for sslmode=verify-full)
+#   - SMTP credential Secret (permesi extraEnv)
+#   - the public Vault CA ConfigMap (only if Vault uses a private CA)
+# No TLS bundle, AppRole role/secret ID, or PASERK CA Secret is required: the
+# Agent renders those from Vault PKI.
+#
+# DNS expectations (release "permesi", namespace "permesi"):
+#   - Genesis Service:   permesi-genesis.permesi.svc.cluster.local:8080
+#   - Permesi Service:   permesi.permesi.svc.cluster.local:8080
+#   - Web Service:       permesi-web.permesi.svc.cluster.local:8080
+
+permesi:
+  enabled: true
+
+  replicaCount: 2
+  terminationGracePeriodSeconds: 60
+
+  serviceAccount:
+    automount: false   # required in Agent mode; the projected token mounts only into the Agent
+
+  database:
+    dsn:
+      # Placeholder DSN read from a Secret; only host/port/database/TLS matter.
+      # Username/password are replaced with Vault dynamic credentials.
+      #   postgres://permesi@postgres.example.com:5432/permesi?sslmode=verify-full&sslrootcert=/var/run/permesi/db-ca/ca.crt
+      existingSecret: permesi-db
+      secretKey: dsn
+
+  # No tls.existingSecret: the Agent renders the bundle at tls.pemBundlePath.
+
+  admission:
+    paserkUrl: https://permesi-genesis.permesi.svc.cluster.local:8080/paserk.json
+    issuer: https://genesis.permesi.example.com
+    audience: permesi
+    # No paserkCa.existingSecret: the Agent renders the PASERK CA.
+
+  vault:
+    # The application connects to this Unix socket; the Agent listens on it.
+    url: unix:///var/run/permesi/vault-agent/agent.sock
+    # No roleId / secretId / wrappedToken: the Agent authenticates via Kubernetes.
+    agent:
+      enabled: true
+      address: https://vault.example.com:8200   # Vault origin, never the socket
+      image:
+        repository: hashicorp/vault
+        tag: 1.20.4                             # UNVERIFIED: pin confirmed by M-VA
+        pullPolicy: IfNotPresent
+      auth:
+        mount: kubernetes
+        role: permesi
+        audience: vault
+        tokenExpirationSeconds: 3600
+      ca:
+        # Public Vault CA; omit both for a public-root Vault.
+        existingConfigMap: vault-ca
+        key: ca.crt
+      pki:
+        mount: pki-int
+        role: permesi-runtime
+        commonName: permesi.permesi.svc.cluster.local
+        dnsNames:
+          - permesi.permesi.svc.cluster.local
+        ttl: 24h
+        renewalThreshold: 0.8
+      paserkCa:
+        enabled: true
+        path: pki-int/cert/ca_chain
+
+  auth:
+    frontendBaseUrl: https://console.permesi.example.com
+    corsAllowedOrigins: https://console.permesi.example.com
+    opaqueServerId: api.permesi.example.com
+
+  extraEnv:
+    - name: PERMESI_EMAIL_DELIVERY
+      value: "smtp"
+    - name: PERMESI_SMTP_HOST
+      value: "smtp.example.com"
+    - name: PERMESI_SMTP_FROM
+      value: "no-reply@permesi.example.com"
+    - name: PERMESI_SMTP_USERNAME
+      value: "permesi"
+    - name: PERMESI_SMTP_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: permesi-smtp
+          key: password
+    - name: PERMESI_SMTP_PORT
+      value: "465"
+    - name: PERMESI_SMTP_TLS
+      value: "implicit"
+    - name: PERMESI_OIDC_ISSUER
+      value: "https://api.permesi.example.com"
+    - name: PERMESI_OAUTH_AUDIENCE
+      value: "permesi-api"
+    - name: PERMESI_AUTH_TRUSTED_PROXIES
+      value: "10.244.0.0/16"
+
+  extraVolumes:
+    - name: db-ca
+      secret:
+        secretName: postgres-ca
+        items:
+          - key: ca.crt
+            path: ca.crt
+
+  extraVolumeMounts:
+    - name: db-ca
+      mountPath: /var/run/permesi/db-ca
+      readOnly: true
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: permesi
+          app.kubernetes.io/instance: permesi
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: permesi
+          app.kubernetes.io/instance: permesi
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      # Permesi serves TLS itself (Agent-rendered bundle). Prefer passthrough so
+      # no Kubernetes TLS Secret terminates the backend's certificate. Requires a
+      # controller with ssl-passthrough enabled.
+      nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    hosts:
+      - host: api.permesi.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    # No tls secretName block: the edge passes TLS through to the backend.
+
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
+    egress:
+      # DNS
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+        ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+      # External PostgreSQL
+      - to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - port: 5432
+            protocol: TCP
+      # External Vault (the Agent container reaches Vault over HTTPS)
+      - to:
+          - ipBlock:
+              cidr: 10.30.0.0/16
+        ports:
+          - port: 8200
+            protocol: TCP
+      # Genesis PASERK fetch (Permesi -> Genesis)
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: genesis
+                app.kubernetes.io/instance: permesi
+        ports:
+          - port: 8080
+            protocol: TCP
+      # External SMTP relay
+      - to:
+          - ipBlock:
+              cidr: 10.40.0.0/16
+        ports:
+          - port: 465
+            protocol: TCP
+
+genesis:
+  enabled: true
+
+  replicaCount: 2
+  terminationGracePeriodSeconds: 60
+
+  serviceAccount:
+    automount: false
+
+  database:
+    dsn:
+      existingSecret: genesis-db
+      secretKey: dsn
+
+  # No tls.existingSecret: the Agent renders the bundle at tls.pemBundlePath.
+
+  vault:
+    url: unix:///var/run/genesis/vault-agent/agent.sock
+    agent:
+      enabled: true
+      address: https://vault.example.com:8200
+      image:
+        repository: hashicorp/vault
+        tag: 1.20.4                             # UNVERIFIED: pin confirmed by M-VA
+        pullPolicy: IfNotPresent
+      auth:
+        mount: kubernetes
+        role: genesis
+        audience: vault
+        tokenExpirationSeconds: 3600
+      ca:
+        existingConfigMap: vault-ca
+        key: ca.crt
+      pki:
+        mount: pki-int
+        role: genesis-runtime
+        commonName: permesi-genesis.permesi.svc.cluster.local
+        dnsNames:
+          - permesi-genesis.permesi.svc.cluster.local
+        ttl: 24h
+        renewalThreshold: 0.8
+
+  extraEnv:
+    # Must match permesi.admission.issuer / audience exactly (split trust).
+    - name: GENESIS_ADMISSION_ISS
+      value: "https://genesis.permesi.example.com"
+    - name: GENESIS_ADMISSION_AUD
+      value: "permesi"
+
+  extraVolumes:
+    - name: db-ca
+      secret:
+        secretName: postgres-ca
+        items:
+          - key: ca.crt
+            path: ca.crt
+
+  extraVolumeMounts:
+    - name: db-ca
+      mountPath: /var/run/genesis/db-ca
+      readOnly: true
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: genesis
+          app.kubernetes.io/instance: permesi
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: genesis
+          app.kubernetes.io/instance: permesi
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    hosts:
+      - host: genesis.permesi.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: permesi
+                app.kubernetes.io/instance: permesi
+        ports:
+          - port: 8080
+            protocol: TCP
+    egress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+        ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP
+      - to:
+          - ipBlock:
+              cidr: 10.20.0.0/16
+        ports:
+          - port: 5432
+            protocol: TCP
+      - to:
+          - ipBlock:
+              cidr: 10.30.0.0/16
+        ports:
+          - port: 8200
+            protocol: TCP
+
+web:
+  enabled: true
+
+  replicaCount: 2
+
+  runtimeConfig:
+    # Public hostnames must match the ingress hosts below; opaqueServerId must
+    # match permesi.auth.opaqueServerId.
+    apiBaseUrl: https://api.permesi.example.com
+    tokenBaseUrl: https://genesis.permesi.example.com
+    clientId: 00000000-0000-0000-0000-000000000000
+    opaqueServerId: api.permesi.example.com
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: web
+          app.kubernetes.io/instance: permesi
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: web
+          app.kubernetes.io/instance: permesi
+
+  ingress:
+    enabled: true
+    className: nginx
+    # Web's nginx listener is HTTP-only. In this no-TLS-Secret profile an
+    # operator-provisioned Vault-backed TLS edge must terminate public HTTPS for
+    # the console (not shown); the Agent does not supply web/ingress certificates.
+    hosts:
+      - host: console.permesi.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
+    egress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+        ports:
+          - port: 53
+            protocol: UDP
+          - port: 53
+            protocol: TCP

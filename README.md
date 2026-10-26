@@ -2,6 +2,27 @@
 
 Helm charts for the Permesi platform.
 
+## Choose your path
+
+Three ways to run Permesi on Kubernetes:
+
+- **Quickstart (disposable dev, one command).** `scripts/quickstart/install.sh`
+  brings up a throwaway cluster-local PostgreSQL and dev-mode Vault, bootstraps
+  them, then installs the stack in Vault Agent mode. Explicitly disposable:
+  in-memory Vault, no backups, no scheduler, no production support.
+  See `docs/install-guide.md` and the script help.
+  <!-- UNVERIFIED: install.sh/verify.sh/connect.sh command contract pending M-QS -->
+- **Helm-only quickstart (umbrella).** The `permesi-stack` chart gains an
+  optional `quickstart.enabled` dependency (milestone M-UQ) that reuses the same
+  helper chart for a one-`helm`-command disposable install. Not yet available.
+  <!-- UNVERIFIED -->
+- **Production (external PostgreSQL + Vault).** Operate external PostgreSQL and
+  Vault. Use the chart-managed **Vault Agent** (Kubernetes auth + PKI certificate
+  rendering) — recommended. The legacy paths (AppRole Secrets, External Secrets
+  Operator) remain supported. See `docs/install-guide.md` (step-by-step manual
+  guide), `docs/examples/vault-agent-stack.yaml` (Agent profile), and
+  `docs/operations.md` (runbook).
+
 ## Charts
 
 - `charts/permesi`: production-oriented IAM service chart (Deployment/Service/Ingress/HPA/PDB/NetworkPolicy, schema validation, secret wiring)
@@ -16,6 +37,8 @@ See:
 - `charts/web/README.md`
 - `charts/permesi-stack/README.md`
 - `docs/examples/production-stack.yaml`: a tested, internally consistent production profile
+- `docs/examples/vault-agent-stack.yaml`: production profile using the managed Vault Agent (Kubernetes auth + PKI), no TLS/AppRole Secrets
+- `docs/install-guide.md`: step-by-step manual installation guide (production and disposable quickstart)
 - `docs/operations.md`: operational runbook (Vault, TLS, HA, NetworkPolicy, upgrades)
 
 ## Install

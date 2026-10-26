@@ -125,9 +125,9 @@ spec:
             - name: NAMESPACE
               value: {{ .Release.Namespace | quote }}
             - name: PERMESI_SA
-              value: {{ $roles.permesi.serviceAccount | quote }}
+              value: {{ $roles.permesi.serviceAccount | default (include "quickstart.applicationName" (dict "root" . "service" "permesi")) | quote }}
             - name: GENESIS_SA
-              value: {{ $roles.genesis.serviceAccount | quote }}
+              value: {{ $roles.genesis.serviceAccount | default (include "quickstart.applicationName" (dict "root" . "service" "genesis")) | quote }}
             - name: AUDIENCE
               value: {{ $roles.audience | quote }}
             - name: ROLE_TTL
@@ -147,9 +147,9 @@ spec:
             - name: OIDC_ENABLED
               value: {{ .Values.bootstrap.oidcSigning.enabled | quote }}
             - name: PERMESI_DNS_NAMES
-              value: {{ include "quickstart.serviceDnsNames" (dict "svc" $svc.permesi "ns" .Release.Namespace) | quote }}
+              value: {{ include "quickstart.serviceDnsNames" (dict "name" (include "quickstart.applicationName" (dict "root" . "service" "permesi")) "svc" $svc.permesi "ns" .Release.Namespace) | quote }}
             - name: GENESIS_DNS_NAMES
-              value: {{ include "quickstart.serviceDnsNames" (dict "svc" $svc.genesis "ns" .Release.Namespace) | quote }}
+              value: {{ include "quickstart.serviceDnsNames" (dict "name" (include "quickstart.applicationName" (dict "root" . "service" "genesis")) "svc" $svc.genesis "ns" .Release.Namespace) | quote }}
           securityContext:
             runAsUser: 100
             runAsGroup: 1000

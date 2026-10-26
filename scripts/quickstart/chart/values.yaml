@@ -33,16 +33,17 @@ bootstrap:
   kubernetes:
     host: "https://kubernetes.default.svc"
 
-  # Kubernetes auth roles bound to the actual application ServiceAccounts in
-  # this namespace. Audience must match the Agent projected-token audience.
+  # Bound to the actual application ServiceAccounts in this namespace. Empty
+  # names follow each component's release/fullname convention (umbrella-safe).
+  # Override when components use serviceAccount.name or fullnameOverride.
   kubernetesRoles:
     audience: "vault"
     ttl: "1h"
     maxTtl: "4h"
     permesi:
-      serviceAccount: "permesi"
+      serviceAccount: ""
     genesis:
-      serviceAccount: "genesis"
+      serviceAccount: ""
 
   pki:
     rootCommonName: "Permesi Quickstart Root CA"
@@ -57,13 +58,14 @@ bootstrap:
 
   # Actual application Service names (per-service PKI roles allow exactly
   # <name>, <name>.<ns>, <name>.<ns>.svc, <name>.<ns>.svc.cluster.local) plus
-  # explicit browser-facing hostnames.
+  # explicit browser-facing hostnames. Empty names follow the corresponding
+  # component's release/fullname convention; override for fullnameOverride.
   services:
     permesi:
-      serviceName: "permesi"
+      serviceName: ""
       browserDnsNames: ["api.localhost"]
     genesis:
-      serviceName: "genesis"
+      serviceName: ""
       browserDnsNames: ["genesis.localhost"]
 
 postgresql:

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Permesi quickstart installer (DEVELOPMENT ONLY).
 #
-# Installs the disposable dependency chart scripts/quickstart/chart
-# (PostgreSQL 18 + dev Vault + ordered bootstrap Job) and waits for the
-# bootstrap to succeed.
+# Installs disposable PostgreSQL + dev Vault, waits for ordered bootstrap, then
+# installs Genesis, Permesi and web. Backend pods use native Vault Agents:
+# Kubernetes auth, Unix proxy sockets and in-memory TLS files; no app Secrets.
 #
 # Every kubectl/helm call is pinned to the explicit --context; the kubeconfig
 # current-context is never changed. Never deletes a cluster or namespace it did
@@ -25,6 +25,9 @@ ALLOW_DIRTY=false
 CLEANUP=false
 TIMEOUT=900
 QS_VALUES=()
+DEPS_ONLY=false
+PKI_TTL=24h
+VALUES_TMP=""
 
 usage() {
   cat <<'EOF'
@@ -44,6 +47,8 @@ Usage: bash scripts/quickstart/install.sh --acknowledge-development \
   --allow-dirty              Accept a dirty/non-git --app-source.
   --quickstart-values <file> Extra values for the dependency chart (repeatable).
   --timeout <seconds>        Per-stage wait (default: 900).
+  --deps-only                Bootstrap dependencies without application charts.
+  --pki-ttl <duration>        Backend leaf TTL (default: 24h; CI rotation: 2m).
   --cleanup                  On exit, remove only what this invocation created.
 EOF
 }
@@ -63,6 +68,8 @@ while [[ $# -gt 0 ]]; do
     --allow-dirty) ALLOW_DIRTY=true; shift ;;
     --quickstart-values) QS_VALUES+=("${2:?}"); shift 2 ;;
     --timeout) TIMEOUT="${2:?}"; shift 2 ;;
+    --deps-only) DEPS_ONLY=true; shift ;;
+    --pki-ttl) PKI_TTL="${2:?}"; shift 2 ;;
     --cleanup) CLEANUP=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
@@ -77,13 +84,18 @@ NAMESPACE="${NAMESPACE:-permesi-quickstart}"
 [[ "${TIMEOUT}" =~ ^[0-9]+$ ]] || die "--timeout must be an integer number of seconds"
 [[ -d "${CHARTS_DIR}" ]] || die "--charts-dir ${CHARTS_DIR} not found"
 for f in "${QS_VALUES[@]}"; do [[ -f "${f}" ]] || die "values file not found: ${f}"; done
-for t in helm kubectl; do command -v "${t}" >/dev/null || die "${t} not found on PATH"; done
+for t in helm kubectl python3; do command -v "${t}" >/dev/null || die "${t} not found on PATH"; done
+
+lock() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(v["images"][sys.argv[2]][sys.argv[3]])' "${SCRIPT_DIR}/lock.json" "$1" "$2"; }
+# repository:tag@digest is a standard OCI reference, compatible with the
+# component charts before and after addition of a dedicated image.digest key.
+locked_tag() { printf '%s@%s' "$(lock "$1" tag)" "$(lock "$1" digest)"; }
 
 # --- Derived names (one place; everything else uses these) -----------------
 # Helm fullname rule: release if it contains the chart name, else release-chart.
 fullname() { if [[ "$1" == *"$2"* ]]; then echo "$1"; else echo "$1-$2"; fi; }
 QS_RELEASE="${RELEASE}-quickstart"
-QS_FULLNAME="$(fullname "${QS_RELEASE}" permesi-quickstart)"
+QS_FULLNAME="${QS_RELEASE}"
 PERMESI_RELEASE="${RELEASE}"
 PERMESI_NAME="$(fullname "${PERMESI_RELEASE}" permesi)"
 GENESIS_RELEASE="${RELEASE}-genesis"
@@ -94,20 +106,19 @@ CREATED_NAMESPACE=false
 
 on_exit() {
   local rc=$?
+  [[ -z "${VALUES_TMP}" ]] || rm -rf -- "${VALUES_TMP}"
   if [[ "${CLEANUP}" == "true" ]]; then
     if [[ "${CREATED_CLUSTER}" == "true" ]]; then
       log "cleanup: deleting Kind cluster ${KIND_CLUSTER} (created by this invocation)"
       kind delete cluster --name "${KIND_CLUSTER}" || true
     elif [[ "${CREATED_NAMESPACE}" == "true" ]]; then
+      # Uninstall while release metadata still exists, removing the
+      # cluster-scoped TokenReview grant before namespace deletion.
+      helm --kube-context "${CONTEXT}" uninstall "${QS_RELEASE}" -n "${NAMESPACE}" >/dev/null 2>&1 || true
       log "cleanup: deleting namespace ${NAMESPACE} (created by this invocation)"
       kubectl --context "${CONTEXT}" delete namespace "${NAMESPACE}" --wait=false || true
-      # Cluster-scoped TokenReview grant is Helm-owned; uninstall removes it.
-      helm --kube-context "${CONTEXT}" uninstall "${QS_RELEASE}" -n "${NAMESPACE}" >/dev/null 2>&1 || true
     else
-      log "cleanup: namespace ${NAMESPACE} pre-existed; uninstalling only this invocation's releases"
-      helm --kube-context "${CONTEXT}" uninstall "${QS_RELEASE}" -n "${NAMESPACE}" --wait || true
-      kubectl --context "${CONTEXT}" -n "${NAMESPACE}" delete secret,configmap \
-        -l "app.kubernetes.io/instance=${QS_RELEASE},app.kubernetes.io/name=permesi-quickstart" || true
+      log "cleanup: no namespace/cluster was created; leaving existing resources untouched"
     fi
   elif [[ ${rc} -ne 0 ]]; then
     log "failed (exit ${rc}); resources left in namespace ${NAMESPACE} for diagnosis"
@@ -136,6 +147,7 @@ log "context=${CONTEXT} namespace=${NAMESPACE} release=${RELEASE}"
 log "names: dependencies=${QS_FULLNAME} permesi=${PERMESI_NAME} genesis=${GENESIS_NAME}"
 
 if "${K[@]}" get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+  [[ "$CLEANUP" != true ]] || die "--cleanup requires a new namespace; refusing to remove resources from existing ${NAMESPACE}"
   enforce="$("${K[@]}" get namespace "${NAMESPACE}" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
   [[ "${enforce}" == "restricted" ]] || log "WARNING: existing namespace ${NAMESPACE} does not enforce Restricted PSA"
 else
@@ -148,7 +160,8 @@ else
 fi
 
 # --- Schema source -----------------------------------------------------------
-QS_ARGS=()
+QS_ARGS=(--set-string "postgresql.image.digest=$(lock postgresql digest)"
+         --set-string "vault.image.digest=$(lock vault digest)")
 if [[ -n "${APP_SOURCE}" ]]; then
   sql_dir="${APP_SOURCE%/}/db/sql"
   [[ -f "${sql_dir}/00_init.sql" ]] || die "${sql_dir}/00_init.sql not found"
@@ -211,6 +224,7 @@ qs_values=()
 for f in "${QS_VALUES[@]}"; do qs_values+=(-f "${f}"); done
 if ! "${H[@]}" upgrade --install "${QS_RELEASE}" "${QS_CHART}" -n "${NAMESPACE}" \
     --set acknowledgeDevelopment=true \
+    --set-string "fullnameOverride=${QS_FULLNAME}" \
     --set "bootstrap.services.permesi.serviceName=${PERMESI_NAME}" \
     --set "bootstrap.services.genesis.serviceName=${GENESIS_NAME}" \
     --set "bootstrap.kubernetesRoles.permesi.serviceAccount=${PERMESI_NAME}" \
@@ -225,4 +239,67 @@ boot_job="${QS_FULLNAME}-bootstrap-${revision_no}"
 succeeded="$("${K[@]}" -n "${NAMESPACE}" get job "${boot_job}" -o jsonpath='{.status.succeeded}')"
 [[ "${succeeded}" == "1" ]] || { diagnose_bootstrap; die "bootstrap Job ${boot_job} did not succeed"; }
 log "bootstrap Job ${boot_job} succeeded"
+
+if [[ "${DEPS_ONLY}" != true ]]; then
+  VALUES_TMP="$(mktemp -d)"
+  pg_host="${QS_FULLNAME}-postgresql.${NAMESPACE}.svc"
+  vault_address="http://${QS_FULLNAME}-vault.${NAMESPACE}.svc:8200"
+  for svc in genesis permesi; do
+    if [[ "$svc" == genesis ]]; then app_release="$GENESIS_RELEASE"; app_name="$GENESIS_NAME"; else app_release="$PERMESI_RELEASE"; app_name="$PERMESI_NAME"; fi
+    cat > "${VALUES_TMP}/${svc}.yaml" <<EOF
+replicaCount: 2
+serviceAccount:
+  automount: false
+  name: "${app_name}"
+database:
+  dsn:
+    value: "postgres://placeholder@${pg_host}:5432/${svc}?sslmode=disable"
+vault:
+  agent:
+    enabled: true
+    image:
+      tag: "$(locked_tag vault)"
+    address: "${vault_address}"
+    auth:
+      role: "${svc}"
+    pki:
+      role: "${svc}-runtime"
+      commonName: "${app_name}.${NAMESPACE}.svc.cluster.local"
+      dnsNames: ["${app_name}", "${app_name}.${NAMESPACE}", "${app_name}.${NAMESPACE}.svc", "${app_name}.${NAMESPACE}.svc.cluster.local", "$(if [[ "$svc" == permesi ]]; then echo api.localhost; else echo genesis.localhost; fi)"]
+      ttl: "${PKI_TTL}"
+EOF
+    if [[ "$svc" == genesis ]]; then
+      cat >> "${VALUES_TMP}/${svc}.yaml" <<'EOF'
+extraEnv:
+  - {name: GENESIS_ADMISSION_ISS, value: "https://genesis.localhost:9443"}
+  - {name: GENESIS_ADMISSION_AUD, value: "permesi"}
+EOF
+    else
+      cat >> "${VALUES_TMP}/${svc}.yaml" <<EOF
+admission:
+  paserkUrl: "https://${GENESIS_NAME}.${NAMESPACE}.svc.cluster.local:8080/paserk.json"
+  issuer: "https://genesis.localhost:9443"
+  audience: "permesi"
+auth:
+  frontendBaseUrl: "http://localhost:8080"
+  corsAllowedOrigins: "http://localhost:8080"
+  opaqueServerId: "api.localhost"
+extraEnv:
+  - {name: PERMESI_EMAIL_DELIVERY, value: "outbox"}
+  - {name: PERMESI_SIGNUP_MODE, value: "restricted"}
+  - {name: PERMESI_SIGNUP_ALLOWED_DOMAINS, value: "example.test"}
+  - {name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS, value: "example.test"}
+EOF
+    fi
+    log "installing ${svc} (${app_release}, two replicas, native Agent)"
+    "${H[@]}" upgrade --install "$app_release" "${CHARTS_DIR}/${svc}" -n "$NAMESPACE" \
+      -f "${VALUES_TMP}/${svc}.yaml" --set-string "image.tag=$(locked_tag "$svc")" --wait --timeout "${TIMEOUT}s"
+  done
+  "${H[@]}" upgrade --install "${RELEASE}-web" "${CHARTS_DIR}/web" -n "$NAMESPACE" \
+    --set-string "image.tag=$(locked_tag web)" \
+    --set runtimeConfig.apiBaseUrl=https://api.localhost:8443 \
+    --set runtimeConfig.tokenBaseUrl=https://genesis.localhost:9443 \
+    --set-string runtimeConfig.clientId=00000000-0000-0000-0000-000000000000 \
+    --set runtimeConfig.opaqueServerId=api.localhost --wait --timeout "${TIMEOUT}s"
+fi
 log "done. Verify: bash scripts/quickstart/verify.sh --context ${CONTEXT} --namespace ${NAMESPACE} --release ${RELEASE}"

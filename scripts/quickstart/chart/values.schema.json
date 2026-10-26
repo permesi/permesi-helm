@@ -28,7 +28,7 @@
       "additionalProperties": false,
       "required": ["serviceName"],
       "properties": {
-        "serviceName": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63},
+        "serviceName": {"type": "string", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$", "maxLength": 63},
         "browserDnsNames": {"type": "array", "items": {"type": "string", "minLength": 1, "not": {"pattern": "[*]"}}}
       }
     },
@@ -37,12 +37,13 @@
       "additionalProperties": false,
       "required": ["serviceAccount"],
       "properties": {
-        "serviceAccount": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
+        "serviceAccount": {"type": "string", "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"}
       }
     }
   },
   "properties": {
     "acknowledgeDevelopment": {"type": "boolean"},
+    "enabled": {"type": "boolean"},
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
     "bootstrap": {

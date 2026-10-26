@@ -224,6 +224,15 @@ jobs:
         with:
           version: v3.16.4
 
+      - name: Setup Rust for the real OPAQUE smoke client
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate quickstart chart contracts
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2
+          helm lint scripts/quickstart/chart --set acknowledgeDevelopment=true
+          helm unittest scripts/quickstart/chart
+
       - name: Setup Kind
         uses: helm/kind-action@v1.12.0
         with:

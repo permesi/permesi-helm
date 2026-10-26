@@ -1,0 +1,39 @@
+suite: quickstart safety gates
+release:
+  name: dev
+  namespace: qs-regression
+templates:
+  - serviceaccounts.yaml
+tests:
+  - it: refuses disposable dependencies without development acknowledgement
+    asserts:
+      - failedTemplate:
+          errorPattern: acknowledgeDevelopment must be true
+  - it: refuses ambiguous archive and mounted SQL sources
+    set:
+      acknowledgeDevelopment: true
+      bootstrap.schema.existingConfigMaps: [offline-sql]
+    asserts:
+      - failedTemplate:
+          errorPattern: set exactly one of
+  - it: refuses missing SQL source instead of falling back silently
+    set:
+      acknowledgeDevelopment: true
+      bootstrap.schema.sourceUrl: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: set exactly one of
+  - it: refuses insecure archive transport
+    set:
+      acknowledgeDevelopment: true
+      bootstrap.schema.sourceUrl: http://untrusted.invalid/sql.tar.gz
+    asserts:
+      - failedTemplate:
+          errorPattern: sourceUrl must be https
+  - it: refuses archives without an exact checksum
+    set:
+      acknowledgeDevelopment: true
+      bootstrap.schema.sha256: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: sha256.*required

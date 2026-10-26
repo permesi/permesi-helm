@@ -11,6 +11,8 @@ set -euo pipefail
 CONTEXT=""
 NAMESPACE="permesi-quickstart"
 RELEASE="permesi"
+HELPER_RELEASE=""
+HELPER_FULLNAME=""
 DEPS_ONLY=false
 RUNTIME_ARGS=()
 
@@ -18,9 +20,13 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/quickstart/verify.sh --context <kube-context> \
          [--namespace <ns>] [--release <name>] [--deps-only]
+         [--helper-release <name>] [--helper-fullname <name>]
          [--exercise-lifecycle] [--rotation-timeout SECONDS]
-Full mode requires python3, curl and Cargo (or QS_ADMISSION_BIN).
-Lifecycle mode restarts/scales backend pods and verifies leaf rotation.
+Requires python3; full mode also needs curl and Cargo (or QS_ADMISSION_BIN).
+Helper release defaults to <release>-quickstart, fullname to helper release.
+Umbrella example: --release permesi --helper-release permesi --helper-fullname permesi-quickstart
+Lifecycle mode revokes application DB leases, requires fail-closed restart and
+admission recovery, restarts/scales backend pods, and verifies leaf rotation.
 EOF
 }
 while [[ $# -gt 0 ]]; do
@@ -28,6 +34,8 @@ while [[ $# -gt 0 ]]; do
     --context) CONTEXT="${2:?}"; shift 2 ;;
     --namespace) NAMESPACE="${2:?}"; shift 2 ;;
     --release) RELEASE="${2:?}"; shift 2 ;;
+    --helper-release) HELPER_RELEASE="${2:?}"; shift 2 ;;
+    --helper-fullname) HELPER_FULLNAME="${2:?}"; shift 2 ;;
     --deps-only) DEPS_ONLY=true; shift ;;
     --exercise-lifecycle) RUNTIME_ARGS+=(--exercise-lifecycle); shift ;;
     --rotation-timeout) RUNTIME_ARGS+=(--rotation-timeout "${2:?}"); shift 2 ;;
@@ -39,8 +47,8 @@ done
 
 K=(kubectl --context "${CONTEXT}" -n "${NAMESPACE}")
 fullname() { if [[ "$1" == *"$2"* ]]; then echo "$1"; else echo "$1-$2"; fi; }
-QS_RELEASE="${RELEASE}-quickstart"
-QS_FULLNAME="${QS_RELEASE}"
+QS_RELEASE="${HELPER_RELEASE:-${RELEASE}-quickstart}"
+QS_FULLNAME="${HELPER_FULLNAME:-${QS_RELEASE}}"
 PERMESI_NAME="$(fullname "${RELEASE}" permesi)"
 GENESIS_NAME="$(fullname "${RELEASE}-genesis" genesis)"
 VAULT_DEPLOY="${QS_FULLNAME}-vault"
@@ -60,6 +68,30 @@ vas() { local token="$1"; shift; printf '%s' "${token}" | "${K[@]}" exec -i "dep
 # psql as the PostgreSQL superuser over the in-pod Unix socket.
 psql_q() { "${K[@]}" exec "${PG_POD}" -c postgresql -- psql -X -v ON_ERROR_STOP=1 -U postgres -tA "$@"; }
 sql_is() { local want="$1" db="$2" q="$3"; [[ "$(psql_q -d "${db}" -c "${q}" 2>/dev/null)" == "${want}" ]]; }
+
+# Always clean this invocation's leases/tokens, including on an early failure.
+# Cleanup errors must change the result; never turn a failed revoke into success.
+PT="" GT=""
+LEASES=()
+cleanup() {
+  local status=$? lease tok
+  trap - EXIT
+  for lease in "${LEASES[@]}"; do
+    if ! vroot lease revoke -sync "${lease}" >/dev/null 2>&1; then
+      echo "FAIL: temporary database lease cleanup" >&2
+      status=1
+    fi
+  done
+  for tok in "${PT}" "${GT}"; do
+    [[ -n "${tok}" ]] || continue
+    if ! vas "${tok}" token revoke -self >/dev/null 2>&1; then
+      echo "FAIL: temporary service token cleanup" >&2
+      status=1
+    fi
+  done
+  exit "${status}"
+}
+trap cleanup EXIT
 
 echo "verify.sh: context=${CONTEXT} namespace=${NAMESPACE} release=${RELEASE}"
 
@@ -194,20 +226,51 @@ deny "genesis -> transit/permesi/sign/oidc-signing" "${GT}" write transit/permes
 deny "genesis -> pki-int/issue/permesi-runtime" "${GT}" write pki-int/issue/permesi-runtime common_name="${svc_fqdn}"
 deny "genesis -> sys/mounts" "${GT}" read sys/mounts
 
-# Dynamic DB credentials: issue as each service, check the role, revoke.
+# Retain the exact issued identity privately. Other application roles cannot
+# satisfy this proof. Do not print Vault JSON, usernames, passwords or lease IDs.
 for pair in permesi:"${PT}" genesis:"${GT}"; do
   svc="${pair%%:*}" tok="${pair#*:}"
-  if lease="$(vas "${tok}" read -format=json "database/creds/${svc}" 2>/dev/null | sed -n 's/.*"lease_id": *"\([^"]*\)".*/\1/p')" && [[ -n "${lease}" ]]; then
-    user_count="$(psql_q -d postgres -c "SELECT count(*) FROM pg_auth_members WHERE roleid='${svc}_runtime'::regrole AND pg_get_userbyid(member) LIKE 'v-%'")"
-    vroot lease revoke "${lease}" >/dev/null 2>&1 || true
-    [[ "${user_count}" -ge 1 ]] && pass "database/creds/${svc} issues a ${svc}_runtime member (lease revoked)" \
-      || fail "database/creds/${svc} user not granted ${svc}_runtime"
+  if credentials="$(vas "${tok}" read -format=json "database/creds/${svc}" 2>/dev/null)" &&
+     identity="$(printf '%s' "${credentials}" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["lease_id"]); print(d["data"]["username"])')" ; then
+    lease="${identity%%$'\n'*}"
+    username="${identity#*$'\n'}"
+    unset credentials identity
+    if [[ -z "${lease}" || -z "${username}" || "${username}" == *$'\n'* ]]; then
+      fail "database/creds/${svc} returned an invalid identity"
+      continue
+    fi
+    LEASES+=("${lease}")
+    # SQL literal quoting, even though the normal Vault username is generated.
+    quoted_user="${username//\'/\'\'}"
+    check "database/creds/${svc}: exact issued identity has only its runtime role and required privileges" \
+      sql_is "t" "${svc}" \
+      "SELECT pg_has_role(oid,'${svc}_runtime','MEMBER') AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb AND rolcanlogin
+       AND (SELECT count(*) FROM pg_auth_members WHERE member=pg_roles.oid)=1
+       AND has_database_privilege(oid,'${svc}','CONNECT')
+       AND NOT has_database_privilege(oid,'$([[ "${svc}" == permesi ]] && echo genesis || echo permesi)','CONNECT')
+       AND has_schema_privilege(oid,'public','USAGE') AND NOT has_schema_privilege(oid,'public','CREATE')
+       AND has_table_privilege(oid,'$([[ "${svc}" == permesi ]] && echo users || echo clients)','SELECT')
+       FROM pg_roles WHERE rolname='${quoted_user}'"
+    if vroot lease revoke -sync "${lease}" >/dev/null 2>&1; then
+      LEASES=("${LEASES[@]:0:${#LEASES[@]}-1}")
+      check "database/creds/${svc}: exact issued role is absent after successful lease revocation" \
+        sql_is "0" postgres "SELECT count(*) FROM pg_roles WHERE rolname='${quoted_user}'"
+    else
+      fail "database/creds/${svc}: lease revocation failed"
+    fi
+    unset username quoted_user lease
   else
     fail "database/creds/${svc} not issued for ${svc}"
   fi
 done
-vas "${PT}" token revoke -self >/dev/null 2>&1 || true
-vas "${GT}" token revoke -self >/dev/null 2>&1 || true
+for token_var in PT GT; do
+  if vas "${!token_var}" token revoke -self >/dev/null 2>&1; then
+    printf -v "${token_var}" ''
+    pass "temporary ${token_var} service token revoked"
+  else
+    fail "temporary ${token_var} service token revocation failed"
+  fi
+done
 
 section "Identity fingerprints (compare across reruns; no secret material)"
 echo "INFO: opaque_server_seed sha256[:12]=${seed_fp}"
@@ -215,10 +278,10 @@ echo "INFO: pki-int ca_chain sha256[:12]=${ca_fp}"
 echo "INFO: transit genesis-signing latest_version=$(vroot read -field=latest_version transit/genesis/keys/genesis-signing)"
 echo "INFO: transit genesis-signing public keys sha256[:12]=$(vroot read -field=keys transit/genesis/keys/genesis-signing | sha256sum | cut -c1-12)"
 
-if [[ "$DEPS_ONLY" != true ]]; then
-  section "Real application runtime"
+if [[ "$DEPS_ONLY" != true && "${FAILURES}" -eq 0 ]]; then
+  section "Real application runtime (temporary verifier credentials already revoked)"
   python3 "$(dirname "${BASH_SOURCE[0]}")/verify-runtime.py" \
-    --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" "${RUNTIME_ARGS[@]}" \
+    --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" --helper-fullname "$QS_FULLNAME" "${RUNTIME_ARGS[@]}" \
     || fail "application runtime verification"
 fi
 

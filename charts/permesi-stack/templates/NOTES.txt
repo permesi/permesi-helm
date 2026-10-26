@@ -33,3 +33,41 @@ ignored in that case.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{ if .Values.quickstart.enabled }}
+!!!!!!!!!!!!!!!!!!! DEVELOPMENT ONLY — NOT FOR PRODUCTION !!!!!!!!!!!!!!!!!!!
+Vault runs in-memory in dev mode. PostgreSQL is ephemeral. No persistence,
+backups, HA, or scheduler/data-loss guarantees. Losing Vault with retained
+PostgreSQL is NOT recoverable by generating a new OPAQUE seed; reset the entire
+disposable namespace instead. Do not change the dev Vault image in place.
+
+Bootstrap-only credential EXCEPTION: the helper creates a random administrator/
+owner/root-token Secret (or consumes your bootstrap.credentialsSecret). It is
+not an application Secret. Generated credentials survive Helm uninstall.
+Never expose Vault/PostgreSQL, reuse these credentials, or use this profile for
+production. Use externally managed Vault/PostgreSQL with the component charts.
+Requires Kubernetes >=1.29 and permission to create cluster-scoped TokenReview
+RBAC. Prefer a namespace enforcing Restricted Pod Security.
+
+Always install/upgrade with --wait --wait-for-jobs --timeout 12m. Ordinary
+bootstrap Jobs run concurrently with Agents, which wait for bootstrap auth/PKI.
+
+Browser endpoints (loopback port-forwards only):
+  https://api.localhost:8443       -> Service/{{ include "permesi.fullname" (dict "Values" .Values.permesi "Chart" (dict "Name" "permesi") "Release" .Release) }}:{{ .Values.permesi.service.port }}
+  https://genesis.localhost:9443   -> Service/{{ include "genesis.fullname" (dict "Values" .Values.genesis "Chart" (dict "Name" "genesis") "Release" .Release) }}:{{ .Values.genesis.service.port }}
+  http://localhost:8080           -> Service/{{ include "web.fullname" (dict "Values" .Values.web "Chart" (dict "Name" "web") "Release" .Release) }}:{{ .Values.web.service.port }}
+Run kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1
+for each Service with the corresponding local:Service port above.
+Export the PUBLIC root CA from the dev Vault pki-root/cert/ca endpoint; explicitly
+trust it only for this disposable environment (curl --cacert <root-ca.pem>).
+Never bypass HTTPS verification. Browser trust is a separate operator action;
+remove the imported development root when finished. Outbox-only signup does NOT
+deliver email or qualify verified-email/login/OIDC/SMTP end-to-end behavior.
+
+Complete teardown (ONLY your disposable quickstart namespace):
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+  kubectl delete namespace {{ .Release.Namespace }}
+The uninstall removes cluster-scoped reviewer RBAC; namespace deletion also
+removes retained bootstrap credentials and all ephemeral application state.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+{{ end }}

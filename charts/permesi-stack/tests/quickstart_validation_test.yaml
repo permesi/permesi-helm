@@ -1,0 +1,168 @@
+suite: umbrella quickstart coherence gates
+release:
+  name: permesi
+  namespace: permesi-quickstart
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
+values:
+  - ../examples/quickstart.yaml
+templates:
+  - quickstart-validation.yaml
+tests:
+  - it: rejects missing development acknowledgement
+    set:
+      quickstart.acknowledgeDevelopment: false
+    asserts:
+      - failedTemplate:
+          errorPattern: acknowledgeDevelopment must be true
+  - it: rejects a partial application stack
+    set:
+      web.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: partial stacks are unsupported
+  - it: rejects mismatched bootstrap service identity
+    set:
+      quickstart.bootstrap.services.genesis.serviceName: other-genesis
+    asserts:
+      - failedTemplate:
+          errorPattern: serviceName/serviceAccount must match actual component names
+  - it: rejects mismatched bootstrap service account
+    set:
+      quickstart.bootstrap.kubernetesRoles.permesi.serviceAccount: other-identity
+    asserts:
+      - failedTemplate:
+          errorPattern: serviceName/serviceAccount must match actual component names
+  - it: rejects a different Vault origin
+    set:
+      genesis.vault.agent.address: http://external-vault:8200
+    asserts:
+      - failedTemplate:
+          errorPattern: Agent address/auth must match bootstrap
+  - it: rejects a different Kubernetes auth audience
+    set:
+      genesis.vault.agent.auth.audience: wrong-audience
+    asserts:
+      - failedTemplate:
+          errorPattern: Agent address/auth must match bootstrap
+  - it: rejects a cross-service Kubernetes auth role
+    set:
+      genesis.vault.agent.auth.role: permesi
+    asserts:
+      - failedTemplate:
+          errorPattern: Agent address/auth must match bootstrap
+  - it: rejects a cross-service PKI role
+    set:
+      genesis.vault.agent.pki.role: permesi-runtime
+    asserts:
+      - failedTemplate:
+          errorPattern: Agent PKI mount/role must match bootstrap
+  - it: rejects an unauthorized certificate name
+    set:
+      genesis.vault.agent.pki.commonName: evil.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: PKI commonName is outside bootstrap exact DNS names
+  - it: rejects SANs missing the browser hostname
+    set:
+      genesis.vault.agent.pki.dnsNames: [permesi-genesis.permesi-quickstart.svc.cluster.local]
+    asserts:
+      - failedTemplate:
+          errorPattern: PKI SANs must include Service FQDN and browser hostname
+  - it: rejects an unauthorized SAN
+    set:
+      genesis.vault.agent.pki.dnsNames: [permesi-genesis.permesi-quickstart.svc.cluster.local, genesis.localhost, evil.example.com]
+    asserts:
+      - failedTemplate:
+          errorPattern: PKI SAN is outside bootstrap exact DNS names
+  - it: rejects a credential-bearing or wrong database endpoint
+    set:
+      permesi.database.dsn.value: postgres://user:password@external-db/permesi
+    asserts:
+      - failedTemplate:
+          errorPattern: DSN must use bootstrap PostgreSQL/database
+  - it: rejects an external database credential Secret
+    set:
+      permesi.database.dsn.existingSecret: external-db
+    asserts:
+      - failedTemplate:
+          errorPattern: DSN must use bootstrap PostgreSQL/database
+  - it: rejects a different issuer minted by Genesis
+    set:
+      genesis.extraEnv:
+        - {name: GENESIS_ADMISSION_ISS, value: "https://wrong.localhost:9443"}
+        - {name: GENESIS_ADMISSION_AUD, value: permesi}
+    asserts:
+      - failedTemplate:
+          errorPattern: Genesis issuer/audience must match Permesi admission
+  - it: rejects a different audience minted by Genesis
+    set:
+      genesis.extraEnv:
+        - {name: GENESIS_ADMISSION_ISS, value: "https://genesis.localhost:9443"}
+        - {name: GENESIS_ADMISSION_AUD, value: wrong-audience}
+    asserts:
+      - failedTemplate:
+          errorPattern: Genesis issuer/audience must match Permesi admission
+  - it: rejects a plaintext or external PASERK URL
+    set:
+      permesi.admission.paserkUrl: http://permesi-genesis:8080/paserk.json
+    asserts:
+      - failedTemplate:
+          errorPattern: Genesis Service HTTPS PASERK URL
+  - it: rejects using an untrusted CA source for PASERK
+    set:
+      permesi.vault.agent.paserkCa.path: pki-root/cert/ca
+    asserts:
+      - failedTemplate:
+          errorPattern: bootstrap CA chain
+  - it: rejects the unseeded browser client
+    set:
+      web.runtimeConfig.clientId: 11111111-1111-1111-1111-111111111111
+    asserts:
+      - failedTemplate:
+          errorPattern: seeded development client and localhost profile
+  - it: rejects mismatched frontend CORS settings
+    set:
+      permesi.auth.corsAllowedOrigins: https://external.example
+    asserts:
+      - failedTemplate:
+          errorPattern: seeded development client and localhost profile
+  - it: rejects SMTP or unrestricted signup for the development profile
+    set:
+      permesi.extraEnv:
+        - {name: PERMESI_EMAIL_DELIVERY, value: smtp}
+        - {name: PERMESI_SIGNUP_MODE, value: restricted}
+        - {name: PERMESI_SIGNUP_ALLOWED_DOMAINS, value: example.test}
+        - {name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS, value: example.test}
+    asserts:
+      - failedTemplate:
+          errorPattern: outbox-only delivery and restricted example.test
+  - it: rejects bypassing explicit DSN validation with extraEnv
+    set:
+      genesis.extraEnv:
+        - {name: GENESIS_DSN, value: "postgres://wrong/db"}
+    asserts:
+      - failedTemplate:
+          errorPattern: extraEnv must not override component wiring
+  - it: rejects public API exposure
+    set:
+      permesi.service.type: LoadBalancer
+    asserts:
+      - failedTemplate:
+          errorPattern: internal ClusterIP HTTPS Service
+  - it: rejects implicit helper names when the component fullname is overridden
+    set:
+      permesi.fullnameOverride: api-renamed
+      quickstart.bootstrap.services.permesi.serviceName: ""
+      quickstart.bootstrap.kubernetesRoles.permesi.serviceAccount: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: serviceName/serviceAccount must match actual component names
+  - it: rejects implicit bootstrap SA when the actual SA is overridden
+    set:
+      permesi.serviceAccount.name: custom-identity
+      quickstart.bootstrap.kubernetesRoles.permesi.serviceAccount: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: serviceName/serviceAccount must match actual component names

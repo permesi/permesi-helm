@@ -1,0 +1,67 @@
+suite: umbrella explicit identities in another release and namespace
+release:
+  name: atlas
+  namespace: uq-alt
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
+values:
+  - alternate-values.yaml
+templates:
+  - charts/quickstart/templates/bootstrap-job.yaml
+  - charts/permesi/templates/deployment.yaml
+  - charts/genesis/templates/deployment.yaml
+tests:
+  - it: binds bootstrap roles and PKI to overridden Service and SA names
+    template: charts/quickstart/templates/bootstrap-job.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: PERMESI_SA, value: api-backend-identity}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: GENESIS_SA, value: token-backend-identity}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DNS_NAMES
+            value: token-backend,token-backend.uq-alt,token-backend.uq-alt.svc,token-backend.uq-alt.svc.cluster.local,genesis.localhost
+  - it: directs the API backend to the overridden Genesis HTTPS Service
+    template: charts/permesi/templates/deployment.yaml
+    asserts:
+      - equal:
+          path: metadata.name
+          value: api-backend
+      - equal:
+          path: spec.replicas
+          value: 2
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: api-backend-identity
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: PERMESI_ADMISSION_PASERK_URL, value: "https://token-backend.uq-alt.svc.cluster.local:8080/paserk.json"}
+      - equal:
+          path: spec.template.spec.initContainers[0].restartPolicy
+          value: Always
+  - it: runs the token backend using its separate overridden identity
+    template: charts/genesis/templates/deployment.yaml
+    asserts:
+      - equal:
+          path: metadata.name
+          value: token-backend
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: token-backend-identity
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+      - equal:
+          path: spec.replicas
+          value: 2
+      - equal:
+          path: spec.template.spec.initContainers[0].restartPolicy
+          value: Always

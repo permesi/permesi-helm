@@ -1,0 +1,61 @@
+suite: umbrella quickstart bootstrap resources
+release:
+  name: permesi
+  namespace: permesi-quickstart
+capabilities:
+  majorVersion: 1
+  minorVersion: 32
+values:
+  - ../examples/quickstart.yaml
+templates:
+  - charts/quickstart/templates/bootstrap-job.yaml
+  - charts/quickstart/templates/postgres-statefulset.yaml
+  - charts/quickstart/templates/vault-deployment.yaml
+tests:
+  - it: runs ordered bootstrap as an ordinary bounded Job
+    template: charts/quickstart/templates/bootstrap-job.yaml
+    asserts:
+      - isKind:
+          of: Job
+      - notExists:
+          path: metadata.annotations["helm.sh/hook"]
+      - equal:
+          path: spec.backoffLimit
+          value: 0
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: schema-acquisition
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: sql-bootstrap
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: GENESIS_SA, value: permesi-genesis}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DNS_NAMES
+            value: permesi-genesis,permesi-genesis.permesi-quickstart,permesi-genesis.permesi-quickstart.svc,permesi-genesis.permesi-quickstart.svc.cluster.local,genesis.localhost
+  - it: runs PostgreSQL as one ephemeral replica without persistent volume claims
+    template: charts/quickstart/templates/postgres-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - notExists:
+          path: spec.volumeClaimTemplates
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: data
+            emptyDir: {}
+          any: true
+  - it: runs one in-memory dev Vault replica
+    template: charts/quickstart/templates/vault-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -dev

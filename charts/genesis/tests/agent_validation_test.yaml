@@ -209,7 +209,7 @@ tests:
       - failedTemplate:
           errorPattern: "renewalThreshold must be strictly between 0 and 1"
 
-  - it: rejects overlapping socket and TLS destinations
+  - it: rejects distinct destinations sharing a directory
     set:
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200
@@ -218,7 +218,64 @@ tests:
       vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
       vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
       serviceAccount.automount: false
-      tls.pemBundlePath: /var/run/secrets/vaultproject.io/agent.sock
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/bundle.pem
     asserts:
       - failedTemplate:
-          errorPattern: "destinations must be distinct"
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects nested destination directories
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /var/run/secrets/vaultproject.io/tls/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects a TLS destination colliding with the agent scratch mount
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: /tmp/bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects extra volume mounts colliding with a chart destination
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      extraVolumeMounts[0].name: extra
+      extraVolumeMounts[0].mountPath: /var/run/genesis/tls
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not overlap"
+
+  - it: rejects a relative TLS destination
+    set:
+      vault.agent.enabled: true
+      vault.agent.address: https://vault.example.com:8200
+      vault.agent.auth.role: genesis
+      vault.agent.pki.role: genesis-runtime
+      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      serviceAccount.automount: false
+      tls.pemBundlePath: bundle.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "tls.pemBundlePath must be an absolute path"

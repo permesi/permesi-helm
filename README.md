@@ -3,6 +3,9 @@
 Helm charts for Permesi IAM, Genesis admission, and the web UI. Install components
 separately or together with `charts/permesi-stack`.
 
+Current qualification results, the publication hold and remaining release work
+are tracked in [TODO](TODO.md).
+
 ## Choose your path
 
 ### Disposable development: one command

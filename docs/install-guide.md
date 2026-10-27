@@ -282,6 +282,13 @@ The application Rust security audit also remains blocked by
 require that version; normal `cargo upgrade`/`cargo update` did not resolve it.
 No new audit exception, fork or backport is introduced by this qualification.
 
+The [application build/test run](https://github.com/permesi/permesi/actions/runs/40477038756)
+passed at the sandbox commit above. The [Helm Charts CI run](https://github.com/permesi/permesi-helm/actions/runs/40477040602)
+passed at implementation commit `f031e2424553b6e5ea2dfde8dd152feb1613bb8b`,
+including the packaged embedded umbrella. These results are distinct from the
+still-failing [application Rust audit](https://github.com/permesi/permesi/actions/runs/40477038659).
+[TODO](../TODO.md) tracks the publication hold and remaining release conditions.
+
 ### Bootstrap secret exception and reset
 
 Random PostgreSQL administrator/owner passwords and the dev Vault root credential

@@ -26,6 +26,14 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v5
 
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install release validation dependency
+        run: python3 -m pip install PyYAML==6.0.3
+
       - name: Resolve release version
         id: meta
         shell: bash
@@ -51,17 +59,8 @@ jobs:
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          set -euo pipefail
-          for chart in charts/*; do
-            chart_file="${chart}/Chart.yaml"
-            [[ -f "${chart_file}" ]] || continue
-
-            chart_version="$(awk '/^version:/{print $2; exit}' "${chart_file}")"
-            if [[ "${chart_version}" != "${VERSION}" ]]; then
-              echo "${chart_file} has version ${chart_version}, expected ${VERSION}" >&2
-              exit 1
-            fi
-          done
+          python3 scripts/ci/check-chart-versions.py --expected "$VERSION"
+          python3 scripts/ci/check-release-fixture.py
 
       - name: Login to GHCR
         env:

@@ -96,6 +96,7 @@ def main():
     parser.add_argument('--rotation-timeout', type=int, default=240)
     a = parser.parse_args()
     k = ['kubectl', '--context', a.context, '-n', a.namespace]
+    locked = json.loads(Path(__file__).with_name('lock.json').read_text())
     def kj(*args):
         return json.loads(run(k + list(args) + ['-o', 'json']))
     def ready(name):
@@ -127,9 +128,19 @@ def main():
              'genesis': fullname(a.release + '-genesis', 'genesis')}
     web = fullname(a.release + '-web', 'web')
     selected = {}
+    def image_identity(pod, service):
+        identity = locked['images'][service]
+        app = next(c for c in pod['spec']['containers'] if c['name'] == service)
+        status = next(c for c in pod['status']['containerStatuses'] if c['name'] == service)
+        require(app['image'] == identity['repository'] + '@' + identity['digest'] and
+                identity['digest'] in status['imageID'],
+                f'{service}: actual running image matches the locked manifest')
     for svc, name in names.items():
         ready(name)
         for pod in pods(name):
+            image_identity(pod, svc)
+            version = run(k + ['exec', pod['metadata']['name'], '-c', svc, '--', f'/app/{svc}', '--version'])
+            require(locked['appRevision'] in version, f'{svc}: build identity matches the qualified SQL revision')
             spec = pod['spec']
             app = next(c for c in spec['containers'] if c['name'] == svc)
             sidecar = next(c for c in spec['initContainers'] if c['name'] == 'vault-agent')
@@ -175,6 +186,8 @@ def main():
     require(not any(s['type'] != 'helm.sh/release.v1' and s['metadata']['name'] != qs + '-bootstrap-credentials'
                     for s in kj('get', 'secrets')['items']), 'no application TLS/DB/AppRole Secrets')
     ready(web)
+    for pod in pods(web):
+        image_identity(pod, 'web')
     binary = os.environ.get('QS_ADMISSION_BIN')
     if not binary:
         manifest = Path(__file__).parent / 'admission' / 'Cargo.toml'

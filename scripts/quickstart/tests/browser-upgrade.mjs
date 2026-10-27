@@ -150,13 +150,13 @@ async function main() {
   await wait(`document.body.innerText.includes('Passkey created.')`, 'stored browser passkey');
   const baseline = await call('WebAuthn.getCredentials', { authenticatorId });
   if (baseline.credentials.length !== 1) throw new Error('baseline passkey was not registered');
-  if (!passwordOnly && !baseline.credentials[0].isResidentCredential)
-    throw new Error('published baseline registered a nonresident credential; discoverable passkey upgrade qualification is blocked');
-  const credentialId = baseline.credentials[0].credentialId;
+  const baselineResident = baseline.credentials[0].isResidentCredential;
+  let credentialId = baseline.credentials[0].credentialId;
+  let initialSignCount = baseline.credentials[0].signCount;
   const cookies = await call('Network.getCookies', { urls: [origin] });
   if (!cookies.cookies.some(cookie => cookie.httpOnly && cookie.secure && cookie.sameSite === 'Lax'))
     throw new Error('secure HttpOnly SameSite=Lax session missing');
-  event('baseline-ready', { email });
+  event('baseline-ready', { email, resident: baselineResident });
   await receive();
 
   await call('Network.clearBrowserCookies');
@@ -164,15 +164,33 @@ async function main() {
   await finishChallenge();
   event('password-upgrade-passed');
   if (passwordOnly) return;
+  // Old nonresident keys cannot become discoverable on the server. Preserve
+  // their stored rows and exercise normal authenticated enrollment after upgrade.
+  if (!baselineResident) {
+    await navigate('/console/me/security');
+    await wait(`document.body.innerText.includes('Create passkey')`, 'upgraded passkey settings');
+    await sleep(1200);
+    await click('Create passkey');
+    await wait(`document.body.innerText.includes('Passkey created.')`, 'upgraded resident-key enrollment');
+    const enrolled = await call('WebAuthn.getCredentials', { authenticatorId });
+    const resident = enrolled.credentials.find(credential => credential.isResidentCredential);
+    if (enrolled.credentials.length !== 2 || !resident)
+      throw new Error('upgraded enrollment did not create a discoverable credential while retaining the old key');
+    credentialId = resident.credentialId;
+    initialSignCount = resident.signCount;
+  }
+  event('resident-upgrade-ready', { enrolled: !baselineResident });
+  await receive();
   await call('Network.clearBrowserCookies');
   await navigate('/login');
   await wait(`Boolean(document.querySelector('#email'))`, 'upgraded passkey login form');
   await click('Use passkey');
   await finishChallenge();
   const upgraded = await call('WebAuthn.getCredentials', { authenticatorId });
-  if (upgraded.credentials.length !== 1 || upgraded.credentials[0].credentialId !== credentialId ||
-      upgraded.credentials[0].signCount <= baseline.credentials[0].signCount)
-    throw new Error('existing passkey did not authenticate after upgrade');
+  const authenticated = upgraded.credentials.find(credential => credential.credentialId === credentialId);
+  if (upgraded.credentials.length !== (baselineResident ? 1 : 2) || !authenticated ||
+      authenticated.signCount <= initialSignCount)
+    throw new Error('persisted discoverable passkey did not authenticate after replacement');
   event('passkey-upgrade-passed');
 }
 

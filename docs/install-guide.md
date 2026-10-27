@@ -13,9 +13,10 @@ Two paths are documented here:
 
 Production steps below are source-derived operator instructions, not a claim
 that this guide was run against production Vault/PostgreSQL or an HTTPS edge.
-Use the application SQL revision tested with your selected images; the disposable
-lock currently pairs app `0.4.3` with commit
-`04783bc009cdef4e8ba71910c12ecbd25aa74dfd`. Do not substitute branch HEAD.
+Use the application SQL revision tested with your selected images. The disposable
+pins are recorded in `scripts/quickstart/lock.json` and refreshed together by digest
+release events. CI reads that validated revision for its checkout. Do not substitute
+branch HEAD or pair a new image with an older unqualified SQL fixture.
 The production examples use release/namespace `permesi`/`permesi`; replace their
 hostnames, networks, client ID and trust anchors for your environment.
 
@@ -244,6 +245,14 @@ images; candidate upgrade must preserve persisted records and allow the existing
 password and passkey to authenticate. The fixed embedded-quickstart profile and
 its validation remain unchanged. These runners remove only their owned releases,
 namespaces and test containers.
+
+For the historical nonresident baseline, full browser qualification first checks
+password/MFA sign-in and unchanged old credential records across image upgrade.
+It then enrolls a new discoverable passkey through the authenticated UI, reinstalls
+the candidate package, replaces the pods, and requires that persisted passkey to
+authenticate. Existing discoverable baseline keys are used directly. A legacy
+nonresident key is preserved but cannot be converted into a resident credential by
+server-side changes. `--password-only` remains an explicitly limited diagnostic mode.
 
 Qualification on 2026-10-26 used application sandbox commit
 `6f32b5376806ff6ba259f1b2aeb1cffea706c3bc`, freshly built telemetry-enabled

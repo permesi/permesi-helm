@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ''
+      app_revision:
+        description: Application source commit (40 hex); required for digest release qualification
+        required: false
+        type: string
+        default: ''
       permesi_digest:
         description: Digest of ghcr.io/permesi/permesi (sha256:...)
         required: false
@@ -94,6 +99,46 @@ jobs:
           chart_version="$(awk '/^version:/{print $2; exit}' charts/permesi-stack/Chart.yaml)"
           echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
 
+      - name: Require exact application source for digest qualification
+        if: steps.meta.outputs.mode == 'digest'
+        env:
+          APP_REVISION: ${{ steps.meta.outputs.app_source_sha }}
+        run: |
+          [[ "$APP_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'Digest qualification requires the application source commit' >&2; exit 1; }
+
+      - name: Checkout release SQL
+        if: steps.meta.outputs.mode == 'digest'
+        uses: actions/checkout@v7
+        with:
+          repository: permesi/permesi
+          ref: ${{ steps.meta.outputs.app_source_sha }}
+          path: app
+          persist-credentials: false
+          sparse-checkout: db/sql
+
+      - name: Setup qualification Python
+        if: steps.meta.outputs.mode == 'digest'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Refresh matching qualification fixtures
+        if: steps.meta.outputs.mode == 'digest'
+        env:
+          APP_REVISION: ${{ steps.meta.outputs.app_source_sha }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          PERMESI_DIGEST: ${{ steps.meta.outputs.permesi_digest }}
+          GENESIS_DIGEST: ${{ steps.meta.outputs.genesis_digest }}
+          WEB_DIGEST: ${{ steps.meta.outputs.web_digest }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install PyYAML==6.0.3
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 \
+            "https://github.com/permesi/permesi/archive/${APP_REVISION}.tar.gz" -o "$RUNNER_TEMP/application-source.tar.gz"
+          python3 scripts/ci/refresh-release-fixture.py --app-source app \
+            --archive "$RUNNER_TEMP/application-source.tar.gz" --version "$VERSION" --revision "$APP_REVISION" \
+            --digest "permesi=$PERMESI_DIGEST" --digest "genesis=$GENESIS_DIGEST" --digest "web=$WEB_DIGEST"
+
       - name: Create pull request
         id: cpr
         uses: peter-evans/create-pull-request@v8
@@ -101,8 +146,13 @@ jobs:
           branch: chore/release-${{ steps.meta.outputs.version }}
           delete-branch: true
           sign-commits: true
-          commit-message: 'chore(release): bump charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
-          title: 'chore(release): bump charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
+          add-paths: |
+            charts
+            scripts/quickstart
+            README.md
+          draft: ${{ steps.meta.outputs.mode == 'tag-only' }}
+          commit-message: 'Update charts to ${{ steps.bump.outputs.chart_version }} for app ${{ steps.meta.outputs.version }}'
+          title: 'Update charts to ${{ steps.bump.outputs.chart_version }} for app ${{ steps.meta.outputs.version }}'
           body: |
             Automated release bump.
 
@@ -116,12 +166,14 @@ jobs:
             - Source repo: `${{ steps.meta.outputs.source_repo }}`
             - Source SHA: `${{ steps.meta.outputs.source_sha }}`
             - Source tag: `${{ steps.meta.outputs.source_tag }}`
+            - Qualification SQL revision: `${{ steps.meta.outputs.app_source_sha }}`
+            - Tag-only updates remain drafts until immutable qualification pins are supplied.
           labels: |-
             automation
             release
 
       - name: Enable pull request auto-merge
-        if: steps.cpr.outputs.pull-request-number != ''
+        if: steps.cpr.outputs.pull-request-number != '' && steps.meta.outputs.mode == 'digest'
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -129,7 +181,7 @@ jobs:
           merge-method: squash
 
       - name: Wait for pull request merge
-        if: steps.cpr.outputs.pull-request-number != ''
+        if: steps.cpr.outputs.pull-request-number != '' && steps.meta.outputs.mode == 'digest'
         id: merged
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

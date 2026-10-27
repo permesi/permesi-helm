@@ -335,6 +335,16 @@ helm dependency build charts/permesi-stack
 `update` refreshes a stale ignored Chart.lock after version changes; `build` alone
 does not repair a lock that references old dependency versions.
 
+`scripts/ci/check-chart-versions.py` is the shared gate for Charts CI, Auto Release
+and Publish Charts. All four product chart versions and the three umbrella
+component dependency versions must agree. Application image/appVersion values and
+the development helper chart version remain independent. Test the gate with
+`python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v`.
+
+Successful push/manual Charts CI on `main` starts Auto Release and can publish
+charts. Keep prelaunch preparation on a sandbox branch while publication is held;
+merging that branch is a separate publication decision.
+
 ### Release event boundary
 
 `.github/workflows/release-bump-pr.yml` invokes
@@ -351,14 +361,31 @@ interpolating payload fields as executable shell. Repository dispatch requires:
   string `"true"`, null and other nonboolean acknowledgement values fail closed.
   Omitted acknowledgement defaults false. `tag_only=true` with digests is rejected.
 
-Manual workflow dispatch exposes `version`, optional `chart_version`, the three
+Manual workflow dispatch exposes `version`, optional `chart_version`, `app_revision`, the three
 `<service>_digest` inputs and an explicit `tag_only` acknowledgement. Workflow
 input normalization is separate from the repository-dispatch JSON boolean rule.
 The application sender explicitly acknowledges tag-only mode; all-empty inputs
 never infer consent. PR metadata records app/chart versions, source identity and
 digest/tag-only mode.
 
-Local regression command (Git, Bash, jq, Python 3 and PyYAML required):
+Digest releases require the exact application commit (`source_sha` from the event,
+or `app_revision` for a manual run). The workflow checks out that SQL without saved
+credentials and downloads the SHA-addressed source archive. The fixture updater
+requires the application workspace version and identical SQL bytes in both sources before writing the new archive hash,
+helper SQL source and all three image pins. CI, Auto Release and Publish Charts
+reject disagreement between the fixture and chart image/appVersion values.
+CI uses the validated fixture revision instead of a hardcoded checkout ref.
+Tag-only updates create draft PRs and do not auto-merge or publish: immutable
+qualification pins must be supplied before they can satisfy the release gate.
+
+The real-dependency job also runs `scripts/quickstart/tests/real-packaged-stack.py`
+against the packaged embedded umbrella in its owned `permesi-quickstart` namespace.
+It uses SQL from the exact checkout, checks real manifests and backend build
+identities, exercises TLS/admission and policy checks, reinstalls the package, and
+requires existing account records to remain unchanged. It removes its release and
+namespace afterward; the existing standalone lifecycle gate remains required.
+
+Local regression command (Git, Bash, jq, Python 3.12 and PyYAML required):
 
 ```bash
 python3 scripts/ci/test-release.py

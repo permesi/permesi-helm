@@ -312,10 +312,14 @@ EOF
     fi
     log "installing ${svc} (${app_release}, two replicas, native Agent)"
     "${H[@]}" upgrade --install "$app_release" "${CHARTS_DIR}/${svc}" -n "$NAMESPACE" \
-      -f "${VALUES_TMP}/${svc}.yaml" --set-string "image.tag=$(locked_tag "$svc")" --wait --timeout "${TIMEOUT}s"
+      -f "${VALUES_TMP}/${svc}.yaml" \
+      --set-string "image.repository=$(lock "$svc" repository)" \
+      --set-string "image.tag=$(lock "$svc" tag)" --set-string "image.digest=$(lock "$svc" digest)" \
+      --wait --timeout "${TIMEOUT}s"
   done
   "${H[@]}" upgrade --install "${RELEASE}-web" "${CHARTS_DIR}/web" -n "$NAMESPACE" \
-    --set-string "image.tag=$(locked_tag web)" \
+    --set-string "image.repository=$(lock web repository)" \
+    --set-string "image.tag=$(lock web tag)" --set-string "image.digest=$(lock web digest)" \
     --set runtimeConfig.apiBaseUrl=https://api.localhost:8443 \
     --set runtimeConfig.tokenBaseUrl=https://genesis.localhost:9443 \
     --set-string runtimeConfig.clientId=00000000-0000-0000-0000-000000000000 \

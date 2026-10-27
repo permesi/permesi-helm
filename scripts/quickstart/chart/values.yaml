@@ -32,7 +32,7 @@ bootstrap:
   # Canonical permesi db/sql include tree. Set exactly one source.
   schema:
     # Pinned archive fetched (and sha256-verified) by the schema-acquisition
-    # init container. App tag 0.4.3.
+    # init container. Refreshed with the matching application release fixture.
     sourceUrl: "https://github.com/permesi/permesi/archive/04783bc009cdef4e8ba71910c12ecbd25aa74dfd.tar.gz"
     sha256: "038fdc9a4ffde74f24a7bfda73567be5d8719bf95471589dc2be477907586e95"
     # Nonsecret metadata recorded on the bootstrap Job.

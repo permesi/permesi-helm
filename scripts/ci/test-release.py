@@ -80,6 +80,7 @@ class EventTests(unittest.TestCase):
         meta = self.parse(event)
         self.assertEqual(meta["mode"], "digest")
         self.assertEqual(meta["version"], "0.4.3")
+        self.assertEqual(meta["app_source_sha"], event["client_payload"]["source_sha"])
         for svc in SERVICES:
             self.assertEqual(meta[svc + "_digest"], DIGESTS[svc])
         for key in ("source_repo", "source_sha", "source_tag"):
@@ -140,6 +141,11 @@ class EventTests(unittest.TestCase):
         self.assertEqual(meta["chart_version"], "0.4.5")
         self.assertEqual(meta["source_repo"], "manual")
         self.assertEqual(meta["source_sha"], "d" * 40)
+        event["inputs"]["app_revision"] = "e" * 40
+        self.assertEqual(self.parse(event, "workflow_dispatch")["app_source_sha"], "e" * 40)
+        event["inputs"]["app_revision"] = "invalid"
+        self.parse(event, "workflow_dispatch", succeeds=False)
+        del event["inputs"]["app_revision"]
         event["inputs"]["tag_only"] = True
         self.parse(event, "workflow_dispatch", succeeds=False)
         event["inputs"] = {"version": "0.4.3"}

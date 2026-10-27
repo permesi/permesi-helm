@@ -227,24 +227,41 @@ http {{
             install(candidate)
             deployed_images(candidate)
             require(sql(record_query) == before, "image upgrade preserves OPAQUE and passkey records byte-for-byte")
-            # kubectl forwards attach to a specific pod even when targeting a
-            # Service. Reconnect after rollout while keeping the browser origin.
-            old_ports = {service: forward.port for service, forward in forwards.items()}
-            for service, name in (("permesi", "permesi"), ("genesis", "permesi-genesis"), ("web", "permesi-web")):
-                forwards[service].close()
-                forwards[service] = runtime.PortForward(k, "svc/" + name)
-                nginx = nginx.replace(f"127.0.0.1:{old_ports[service]}", f"127.0.0.1:{forwards[service].port}")
-            (directory / "nginx.conf").write_text(nginx)
-            run(["podman", "restart", edge_name])
-            run(["curl", "--noproxy", "*", "--retry", "10", "--retry-all-errors", "--retry-delay", "1",
-                 "--cacert", str(public / "root.pem"), "-fsS", origin + "/login"])
+            def reconnect_edge():
+                # Service forwards attach to individual pods. Preserve the public
+                # origin while reconnecting every verified upstream after rollout.
+                nonlocal nginx
+                old_ports = {service: forward.port for service, forward in forwards.items()}
+                for service, name in (("permesi", "permesi"), ("genesis", "permesi-genesis"), ("web", "permesi-web")):
+                    forwards[service].close()
+                    forwards[service] = runtime.PortForward(k, "svc/" + name)
+                    nginx = nginx.replace(f"127.0.0.1:{old_ports[service]}", f"127.0.0.1:{forwards[service].port}")
+                (directory / "nginx.conf").write_text(nginx)
+                run(["podman", "restart", edge_name])
+                run(["curl", "--noproxy", "*", "--retry", "10", "--retry-all-errors", "--retry-delay", "1",
+                     "--cacert", str(public / "root.pem"), "-fsS", origin + "/login"])
+            reconnect_edge()
             browser.stdin.write('{"upgraded":true}\n')
             browser.stdin.flush()
             require(message().get("event") == "password-upgrade-passed", "existing OPAQUE account signs in with MFA after image upgrade")
             if args.password_only:
                 print("INFO: limited qualification: passkey authentication was not tested", flush=True)
             else:
-                require(message().get("event") == "passkey-upgrade-passed", "existing browser passkey authenticates after image upgrade")
+                resident = message()
+                require(resident.get("event") == "resident-upgrade-ready", "discoverable credential is available for persistence qualification")
+                if resident.get("enrolled"):
+                    require(sql(record_query).endswith("|2"), "upgraded enrollment preserves the old test credential and adds a discoverable key")
+                before_restart = sql(record_query)
+                install(candidate)
+                for name in ("permesi", "permesi-genesis", "permesi-web"):
+                    run(k + ["rollout", "restart", "deployment/" + name])
+                    run(k + ["rollout", "status", "deployment/" + name, "--timeout=180s"])
+                deployed_images(candidate)
+                require(sql(record_query) == before_restart, "reinstall and pod replacement preserve password and all passkey records")
+                reconnect_edge()
+                browser.stdin.write('{"replaced":true}\n')
+                browser.stdin.flush()
+                require(message().get("event") == "passkey-upgrade-passed", "persisted discoverable browser passkey authenticates after pod replacement")
             require(browser.wait(timeout=15) == 0, "browser upgrade qualification exits successfully")
     finally:
         port.close()

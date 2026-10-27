@@ -44,6 +44,8 @@ def main():
     parser.add_argument("--charts-dir", type=Path, required=True)
     parser.add_argument("--admission-bin", required=True)
     args = parser.parse_args()
+    fixture_quickstart = args.charts_dir.resolve().parent / 'scripts/quickstart'
+    require((fixture_quickstart / 'lock.json').is_file(), 'charts have matching prepared qualification tooling')
     require(args.namespace.startswith("qv-auth-"), "authentication namespace is explicitly disposable")
     k = ["kubectl", "--context", args.context, "-n", args.namespace]
     h = ["helm", "--kube-context", args.context, "-n", args.namespace]
@@ -107,7 +109,7 @@ def main():
     run(k + ["create", "namespace", args.namespace])
     try:
         run(k + ["label", "namespace", args.namespace, "pod-security.kubernetes.io/enforce=restricted"])
-        run(["bash", str(QUICKSTART / "install.sh"), "--context", args.context,
+        run(["bash", str(fixture_quickstart / "install.sh"), "--context", args.context,
              "--namespace", args.namespace, "--release", args.release,
              "--acknowledge-development", "--app-source", args.app_source,
              "--charts-dir", str(args.charts_dir)])
@@ -228,7 +230,7 @@ def main():
         for name in secrets:
             run(k + ["delete", "secret", name])
         secrets.clear()
-        run(["bash", str(QUICKSTART / "verify.sh"), "--context", args.context,
+        run(["bash", str(fixture_quickstart / "verify.sh"), "--context", args.context,
              "--namespace", args.namespace, "--release", args.release],
             env={**os.environ, "QS_ADMISSION_BIN": args.admission_bin})
         require(True, "restored Agent mode passes the common full-stack verifier")

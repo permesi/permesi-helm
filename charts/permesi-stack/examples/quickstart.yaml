@@ -12,7 +12,7 @@
 # resources; --wait-for-jobs is REQUIRED to avoid false-success on failed SQL.
 # Vault and PostgreSQL are ephemeral, single-replica and ClusterIP-only. Never
 # retain PostgreSQL after losing Vault: the OPAQUE seed cannot be regenerated.
-# SQL archive/checksum is locked in the helper to app 0.4.3 commit 04783bc0.
+# SQL archive/checksum is locked in the helper and scripts/quickstart/lock.json.
 quickstart:
   enabled: true
   acknowledgeDevelopment: true

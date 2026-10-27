@@ -70,6 +70,7 @@ case "${GITHUB_EVENT_NAME:-}" in
         [[ "${version}" =~ ${semver_re} ]] || die "client_payload.version must be X.Y.Z or vX.Y.Z"
         [[ "${source_repo}" == "${expected_source_repo}" ]] || die "client_payload.source_repo must be ${expected_source_repo}"
         [[ "${source_sha}" =~ ${sha_re} ]] || die "client_payload.source_sha must be a 40-hex commit SHA"
+        app_source_sha="${source_sha}"
         [[ "${source_tag#v}" == "${version}" ]] || die "client_payload.source_tag must match the version"
         tag_only="$(jq -r '
           (if (.client_payload | has("tag_only")) then .client_payload.tag_only else false end)
@@ -102,6 +103,8 @@ case "${GITHUB_EVENT_NAME:-}" in
         tag_only="$(jq -r '.inputs.tag_only // false | tostring' "${event_path}")"
         [[ "${tag_only}" == "true" || "${tag_only}" == "false" ]] || die "inputs.tag_only must be a boolean"
         source_repo="manual"
+        app_source_sha="$(field inputs.app_revision)"
+        [[ -z "${app_source_sha}" || "${app_source_sha}" =~ ${sha_re} ]] || die "inputs.app_revision must be a 40-hex commit SHA"
         source_sha="${GITHUB_SHA:-}"
         source_tag="${GITHUB_REF:-}"
         [[ -z "${source_sha}" || "${source_sha}" =~ ${sha_re} ]] || die "GITHUB_SHA must be a 40-hex commit SHA"
@@ -148,4 +151,5 @@ fi
     echo "source_sha=${source_sha}"
     echo "source_tag=${source_tag}"
     echo "source_actor=${source_actor}"
+    echo "app_source_sha=${app_source_sha}"
 } >> "${GITHUB_OUTPUT:-/dev/stdout}"

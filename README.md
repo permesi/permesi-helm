@@ -67,7 +67,7 @@ helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
 
 For integrated source features, rebuild local dependencies and use the manual
 guide's source-install command; no new chart publication is implied.
-The source backend and umbrella charts are 0.4.5; the web chart remains 0.4.4.
+The four source charts and umbrella component references are aligned at 0.4.6.
 Default application images remain the published 0.4.3 images.
 
 ## Validation and release automation
@@ -76,8 +76,8 @@ Default application images remain the published 0.4.3 images.
 `real-dependencies` job, which uses the actual quickstart install/verify driver.
 The dev gate covers real HTTPS, admission/OPAQUE signup, leaf reload and restart;
 it does not qualify production infrastructure or browser/WASM signup.
-The independent `release-contracts` job runs the 13 parser/bump regression tests
-with `python3 scripts/ci/test-release.py`.
+The independent `release-contracts` job validates chart/dependency alignment,
+release image/SQL fixture consistency, and parser/bump regressions.
 
 Consumer regressions additionally exercise real discovery-version values,
 passthrough/header trust, generated installer values, effective helper settings
@@ -86,6 +86,9 @@ that install it, including its Yamale virtual environment. The real-dependency
 job also tests custom dependency endpoints, collected/failed bootstrap Jobs,
 failed Helm releases and OIDC enable/disable transitions against actual Vault
 and PostgreSQL.
+It then installs and reinstalls the packaged embedded umbrella, verifies actual
+running image digests and backend build commits against the SQL fixture, and
+requires existing OPAQUE records to survive unchanged.
 
 External GitHub Actions use upstream major-version tags so compatible fixes can
 arrive without editing each workflow. Tool versions remain separate: Python stays

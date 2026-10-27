@@ -46,6 +46,9 @@ jobs:
       - name: Validate release and verifier contracts
         run: |
           python3 -m pip install PyYAML==6.0.3
+          python3 scripts/ci/check-chart-versions.py
+          python3 scripts/ci/check-release-fixture.py
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
           python3 scripts/ci/test-release.py
           python3 -m unittest discover -s scripts/quickstart/tests -p 'test_*.py' -v
 
@@ -84,6 +87,7 @@ jobs:
       - name: Test chart consumer contracts
         run: |
           uv pip install PyYAML==6.0.3
+          python3 scripts/ci/check-chart-versions.py
           python3 scripts/ci/test-chart-contracts.py -v
 
       - name: Resolve chart test mode
@@ -254,11 +258,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup fixture validation Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Validate release fixture
+        id: fixture
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          python3 scripts/ci/check-release-fixture.py --github-output "$GITHUB_OUTPUT"
+
       - name: Checkout app SQL at locked commit (read-only)
         uses: actions/checkout@v7
         with:
           repository: permesi/permesi
-          ref: 04783bc009cdef4e8ba71910c12ecbd25aa74dfd
+          ref: ${{ steps.fixture.outputs.app_revision }}
           path: app
           persist-credentials: false
           sparse-checkout: db/sql
@@ -298,3 +313,10 @@ jobs:
           python3 scripts/quickstart/tests/real-configuration-regressions.py \
             --context "$(kubectl config current-context)" --namespace qv-config-ci --release config \
             --app-source app
+
+      - name: Qualify the packaged embedded umbrella
+        env:
+          QS_ADMISSION_BIN: ${{ runner.temp }}/quickstart-admission/release/quickstart-admission
+        run: |
+          python3 scripts/quickstart/tests/real-packaged-stack.py \
+            --context "$(kubectl config current-context)" --app-source app

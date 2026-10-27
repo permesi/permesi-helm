@@ -87,6 +87,11 @@ job also tests custom dependency endpoints, collected/failed bootstrap Jobs,
 failed Helm releases and OIDC enable/disable transitions against actual Vault
 and PostgreSQL.
 
+External GitHub Actions use upstream major-version tags so compatible fixes can
+arrive without editing each workflow. Tool versions remain separate: Python stays
+at 3.12 for chart testing, and the real-dependency Kind/node/kubectl pins stay explicit.
+The Rust toolchain action uses `@v1` with `toolchain: stable`.
+
 For application changes newer than the published pins, use the
 [candidate qualification procedure](docs/install-guide.md#qualifying-candidate-application-images).
 It tests actual loaded image manifests and the exact application SQL revision

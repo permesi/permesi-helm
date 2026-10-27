@@ -91,6 +91,8 @@ External GitHub Actions use upstream major-version tags so compatible fixes can
 arrive without editing each workflow. Tool versions remain separate: Python stays
 at 3.12 for chart testing, and the real-dependency Kind/node/kubectl pins stay explicit.
 The Rust toolchain action uses `@v1` with `toolchain: stable`.
+Chart-testing manages a `uv` virtual environment without pip; consumer-test
+dependencies are installed with `uv pip` into that same environment.
 
 For application changes newer than the published pins, use the
 [candidate qualification procedure](docs/install-guide.md#qualifying-candidate-application-images).

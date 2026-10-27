@@ -83,7 +83,7 @@ jobs:
 
       - name: Test chart consumer contracts
         run: |
-          python3 -m pip install PyYAML==6.0.3
+          uv pip install PyYAML==6.0.3
           python3 scripts/ci/test-chart-contracts.py -v
 
       - name: Resolve chart test mode

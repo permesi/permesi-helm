@@ -259,12 +259,23 @@ Qualification on 2026-10-26 used application sandbox commit
 backends and web, and canonical SQL. The real Agent lifecycle, native Kubernetes
 auth, AppRole and packaged embedded umbrella passed. Browser upgrade preserved
 the OPAQUE and passkey records byte-for-byte and password/MFA sign-in passed.
-Full browser passkey qualification remains blocked: published baseline 0.4.3
+That run's full browser passkey qualification was blocked: published baseline 0.4.3
 registers a nonresident credential with the virtual authenticator, while login
 requests a discoverable credential. The default browser runner rejects this
-baseline explicitly. `--password-only` qualifies password/MFA and record
-preservation, and explicitly excludes passkey authentication. Requiring resident
-registration is an application authentication change outside these Helm fixes.
+baseline explicitly at that time. `--password-only` qualifies password/MFA and
+record preservation, and explicitly excludes passkey authentication.
+
+On 2026-10-27, the Permesi sandbox fix at
+`ef3f9e2e13a8aaf24be04462c4a5099d139d65ea` requested discoverable credentials
+while retaining required user verification and the existing proof/binding checks.
+Fresh telemetry-enabled backend images and a fresh web build passed the full
+browser runner: baseline password/MFA sign-in survived image upgrade, old records
+were preserved, authenticated enrollment created a resident key, and that key
+authenticated after package reinstall and replacement of every application pod.
+The historical nonresident test key was preserved and a new discoverable key was
+enrolled; this does not claim that nonresident authenticator storage was migrated.
+The packaged embedded umbrella and Agent/native-Kubernetes/AppRole transitions
+also passed against those exact imported image manifests and matching SQL.
 
 The application Rust security audit also remains blocked by
 `crypto-bigint 0.5.5` (`RUSTSEC-2026-0387`). The published dependency chains still

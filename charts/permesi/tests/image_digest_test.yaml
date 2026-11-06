@@ -10,6 +10,7 @@ capabilities:
 tests:
   - it: falls back to repository:tag when no digest is set
     set:
+      image.digest: ""
       image.tag: 9.9.9
     asserts:
       - equal:
@@ -41,6 +42,7 @@ tests:
 
   - it: pins the Vault Agent image by digest independently of the app image
     set:
+      image.digest: ""
       image.tag: 9.9.9
       vault.agent.image.tag: 9.8.7
       vault.agent.enabled: true
@@ -61,6 +63,7 @@ tests:
 
   - it: falls back to the Vault Agent repository:tag without a digest
     set:
+      vault.agent.image.digest: ""
       vault.agent.image.tag: 9.8.7
       vault.agent.enabled: true
       vault.agent.address: https://vault.example.com:8200

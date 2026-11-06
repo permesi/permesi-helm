@@ -62,7 +62,7 @@ For a released chart (check that its version contains the features you need):
 
 ```bash
 helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.4.6 --namespace permesi --create-namespace -f values.yaml
+  --version 0.4.7 --namespace permesi --create-namespace -f values.yaml
 ```
 
 For integrated source features, rebuild local dependencies and use the manual
@@ -78,6 +78,10 @@ The dev gate covers real HTTPS, admission/OPAQUE signup, leaf reload and restart
 it does not qualify production infrastructure or browser/WASM signup.
 The independent `release-contracts` job runs the 13 parser/bump regression tests
 with `python3 scripts/ci/test-release.py`.
+
+Image tag-fallback fixtures explicitly clear the corresponding digest so they
+remain independent of release-pinned defaults. Separate assertions verify that a
+nonempty digest takes precedence over a tag and malformed digests are rejected.
 
 Consumer regressions additionally exercise real discovery-version values,
 passthrough/header trust, generated installer values, effective helper settings

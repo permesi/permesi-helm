@@ -8,6 +8,7 @@ tests:
   - it: falls back to repository:tag when no digest is set
     set:
       runtimeConfig.allowBuildDefaults: true
+      image.digest: ""
       image.tag: 9.9.9
     asserts:
       - equal:

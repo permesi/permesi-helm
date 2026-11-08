@@ -62,7 +62,7 @@ For a released chart (check that its version contains the features you need):
 
 ```bash
 helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.4.8 --namespace permesi --create-namespace -f values.yaml
+  --version 0.4.9 --namespace permesi --create-namespace -f values.yaml
 ```
 
 For integrated source features, rebuild local dependencies and use the manual

@@ -16,24 +16,24 @@ permesi:
   enabled: true
   image:
     repository: ghcr.io/permesi/permesi
-    tag: 0.4.7  # managed-by-release-bot
-    digest: "sha256:34478847c74cd021834008bb166e45e0c908e049d3a693308b96df5a3823cae5"  # managed-by-release-bot
+    tag: 0.4.8  # managed-by-release-bot
+    digest: "sha256:6fee260b77512fbb3bca8e22ea95cab8730c19413a32a5523210085c1477774f"  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 genesis:
   enabled: true
   image:
     repository: ghcr.io/permesi/genesis
-    tag: 0.4.7  # managed-by-release-bot
-    digest: "sha256:118c2faf1c3dd300b3eae7ca6b79d2ea4986334185730d4a8d0b97ff418eb3c8"  # managed-by-release-bot
+    tag: 0.4.8  # managed-by-release-bot
+    digest: "sha256:fb85b0886fb3414906d1675efb86c11102cbe5f94ab06b594538fa1ca3a89016"  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 web:
   enabled: true
   image:
     repository: ghcr.io/permesi/web
-    tag: 0.4.7  # managed-by-release-bot
-    digest: "sha256:37859fbd64c360e1e8dfb47caecda7eff57e828f104ff3cae7401d3dba9fd8bc"  # managed-by-release-bot
+    tag: 0.4.8  # managed-by-release-bot
+    digest: "sha256:f3ba7162e4446b8dc8b9dae27b5680d15527b664a5fd8a4598e56c643ee6471a"  # managed-by-release-bot
     pullPolicy: IfNotPresent
 
 # Optional disposable development infrastructure. Use examples/quickstart.yaml:

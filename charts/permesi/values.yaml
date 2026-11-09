@@ -6,10 +6,10 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/permesi/permesi
-  tag: 0.4.10
+  tag: 0.5.0
   # Optional sha256:<64 hex> digest. When set it replaces the tag in the
   # image reference (repository@digest); clear it when changing the tag.
-  digest: "sha256:6ba9705319d296b213b62cbb6588012f98919ad97b82b5f3b00a5772e16005b7"
+  digest: "sha256:b462c39d0d8c0f8f6f6acbaf8a0e0cb71f0c9f0b21583a5e94d0c0408c88b729"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 

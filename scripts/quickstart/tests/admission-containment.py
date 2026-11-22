@@ -83,8 +83,22 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
         run(kube + ["scale", "deploy/permesi-genesis", "--replicas=0"])
         try:
             run(kube + ["wait", "--for=delete", "pod", "-l", "app.kubernetes.io/name=genesis", "--timeout=60s"])
-            for forward in forwards:
-                require(signup(forward.port, token)[0] == 200, "same token starts OPAQUE signup with Genesis offline")
+            def audit_count(prefix, path):
+                awk = '/"type":"request"/ && index($0, needle) { n++ } END { print n+0 }'
+                return int(run(kube + ["exec", "deploy/" + prefix + "-vault", "-c", "vault", "--", "awk",
+                    "-v", 'needle="path":"' + path + '"', awk, "/audit/entry-audit.json"]))
+            for attempt in range(3):
+                reads = audit_count(core, "secret/permesi/data/admission-authority")
+                signs = audit_count(edge, "transit/genesis/sign/genesis-signing")
+                for forward in forwards:
+                    require(signup(forward.port, token)[0] == 200, "same token starts OPAQUE signup with Genesis offline")
+                require(signs == audit_count(edge, "transit/genesis/sign/genesis-signing"),
+                        "no signing call occurred during offline admission-token reuse")
+                if audit_count(core, "secret/permesi/data/admission-authority") == reads:
+                    break
+            else:
+                raise RuntimeError("could not observe the requests without an authority fetch")
+            require(True, "both serving replicas accepted the token with zero authority reads during the sampled requests")
             time.sleep(max(0, expiry - time.time() + 1))
             for forward in forwards:
                 require(rejected(signup(forward.port, token)), "same expired token rejected while Genesis remains offline")

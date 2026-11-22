@@ -62,6 +62,23 @@ spec:
                     raise RuntimeError("qualified Pod was denied")
                 if image == args.legacy and (admitted.returncode == 0 or "operator-qualified image digest" not in admitted.stderr):
                     raise RuntimeError("legacy Pod was admitted")
+            for field in ("containers", "initContainers"):
+                spec = {"containers": [{"name": "permesi", "image": args.current}]}
+                spec.setdefault(field, []).append({"name": "companion", "image": args.legacy})
+                pod = {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "companion-check"}, "spec": spec}
+                verdict = subprocess.run(kube + ["create", "--dry-run=server", "-f", "-"],
+                                         input=json.dumps(pod), text=True, capture_output=True)
+                if verdict.returncode == 0 or "operator-qualified image digest" not in verdict.stderr:
+                    raise RuntimeError("unqualified companion was admitted in " + field)
+            pod = {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "debug-check"},
+                   "spec": {"containers": [{"name": "permesi", "image": args.current}]}}
+            subprocess.run(kube + ["create", "-f", "-"], input=json.dumps(pod), text=True, check=True)
+            patch = {"spec": {"ephemeralContainers": [{"name": "diagnostic", "image": args.current}]}}
+            verdict = subprocess.run(kube + ["patch", "pod/debug-check", "--subresource=ephemeralcontainers",
+                                     "--type=merge", "--dry-run=server", "-p", json.dumps(patch)],
+                                     text=True, capture_output=True)
+            if verdict.returncode == 0 or "operator-qualified image digest" not in verdict.stderr:
+                raise RuntimeError("ephemeral container did not receive the expected policy denial")
             def live_image():
                 return json.loads(subprocess.check_output(kube + ["get", "deployment", "permesi", "-o", "json"]))[
                     "spec"]["template"]["spec"]["containers"][0]["image"]

@@ -3,6 +3,7 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "secretsProvider": {"type": "string", "enum": ["openbao", "vault"]},
     "replicaCount": {
       "type": "integer",
       "minimum": 0

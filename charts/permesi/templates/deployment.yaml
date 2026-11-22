@@ -17,6 +17,8 @@
 {{- $mountTls := or $tlsSecret $agentManagesTls -}}
 {{- $mountCa := or $admissionCaSecret $agentManagesCa -}}
 ---
+{{- $openbao := eq .Values.secretsProvider "openbao" -}}
+{{- $prefix := ternary "OPENBAO" "VAULT" $openbao -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,7 +63,7 @@ spec:
         - name: vault-agent
           image: {{ include "permesi.image" .Values.vault.agent.image | quote }}
           imagePullPolicy: {{ .Values.vault.agent.image.pullPolicy }}
-          command: ["/bin/vault"]
+          command: [{{ ternary "/usr/bin/bao" "/bin/vault" $openbao | quote }}]
           args:
             - agent
             - -config=/vault/config/agent.hcl
@@ -149,8 +151,10 @@ spec:
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
 
+            {{- if not $openbao }}
             - name: PERMESI_ADMISSION_PASERK_URL
               value: {{ .Values.admission.paserkUrl | quote }}
+            {{- end }}
             {{- with .Values.admission.issuer }}
             - name: PERMESI_ADMISSION_ISS
               value: {{ . | quote }}
@@ -164,68 +168,68 @@ spec:
               value: {{ $admissionCaPath | quote }}
             {{- end }}
 
-            - name: PERMESI_VAULT_URL
+            - name: PERMESI_{{ $prefix }}_URL
               value: {{ .Values.vault.url | quote }}
             {{- if ne .Values.vault.authMethod "auto" }}
-            - name: PERMESI_VAULT_AUTH_METHOD
+            - name: PERMESI_{{ $prefix }}_AUTH_METHOD
               value: {{ .Values.vault.authMethod | quote }}
             {{- if $nativeEnabled }}
-            - name: PERMESI_VAULT_KUBERNETES_AUTH_MOUNT
+            - name: PERMESI_{{ $prefix }}_KUBERNETES_AUTH_MOUNT
               value: {{ .Values.vault.kubernetes.authMount | quote }}
-            - name: PERMESI_VAULT_KUBERNETES_ROLE
+            - name: PERMESI_{{ $prefix }}_KUBERNETES_ROLE
               value: {{ .Values.vault.kubernetes.role | quote }}
-            - name: PERMESI_VAULT_KUBERNETES_TOKEN_PATH
+            - name: PERMESI_{{ $prefix }}_KUBERNETES_TOKEN_PATH
               value: {{ .Values.vault.kubernetes.tokenPath | quote }}
             {{- end }}
             {{- end }}
             {{- if $vaultEso }}
-            - name: PERMESI_VAULT_ROLE_ID
+            - name: PERMESI_{{ $prefix }}_ROLE_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ include "permesi.vaultSecretName" . | quote }}
                   key: {{ .Values.vault.roleId.secretKey | quote }}
-            - name: PERMESI_VAULT_SECRET_ID
+            - name: PERMESI_{{ $prefix }}_SECRET_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ include "permesi.vaultSecretName" . | quote }}
                   key: {{ .Values.vault.secretId.secretKey | quote }}
             {{- else }}
             {{- if .Values.vault.roleId.existingSecret }}
-            - name: PERMESI_VAULT_ROLE_ID
+            - name: PERMESI_{{ $prefix }}_ROLE_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.vault.roleId.existingSecret | quote }}
                   key: {{ .Values.vault.roleId.secretKey | quote }}
             {{- else if .Values.vault.roleId.value }}
-            - name: PERMESI_VAULT_ROLE_ID
+            - name: PERMESI_{{ $prefix }}_ROLE_ID
               value: {{ .Values.vault.roleId.value | quote }}
             {{- end }}
             {{- if .Values.vault.secretId.existingSecret }}
-            - name: PERMESI_VAULT_SECRET_ID
+            - name: PERMESI_{{ $prefix }}_SECRET_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.vault.secretId.existingSecret | quote }}
                   key: {{ .Values.vault.secretId.secretKey | quote }}
             {{- else if .Values.vault.secretId.value }}
-            - name: PERMESI_VAULT_SECRET_ID
+            - name: PERMESI_{{ $prefix }}_SECRET_ID
               value: {{ .Values.vault.secretId.value | quote }}
             {{- end }}
             {{- end }}
             {{- if .Values.vault.wrappedToken.existingSecret }}
-            - name: PERMESI_VAULT_WRAPPED_TOKEN
+            - name: PERMESI_{{ $prefix }}_WRAPPED_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.vault.wrappedToken.existingSecret | quote }}
                   key: {{ .Values.vault.wrappedToken.secretKey | quote }}
             {{- else if .Values.vault.wrappedToken.value }}
-            - name: PERMESI_VAULT_WRAPPED_TOKEN
+            - name: PERMESI_{{ $prefix }}_WRAPPED_TOKEN
               value: {{ .Values.vault.wrappedToken.value | quote }}
             {{- end }}
-            - name: PERMESI_VAULT_KV_MOUNT
+            - name: PERMESI_{{ $prefix }}_KV_MOUNT
               value: {{ .Values.vault.kvMount | quote }}
-            - name: PERMESI_VAULT_KV_PATH
+            - name: PERMESI_{{ $prefix }}_KV_PATH
               value: {{ .Values.vault.kvPath | quote }}
-            - name: PERMESI_VAULT_TRANSIT_MOUNT
+            - name: PERMESI_{{ $prefix }}_TRANSIT_MOUNT
               value: {{ .Values.vault.transitMount | quote }}
 
             - name: PERMESI_FRONTEND_BASE_URL

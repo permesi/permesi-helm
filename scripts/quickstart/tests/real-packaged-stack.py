@@ -5,11 +5,13 @@ Uses the exact locked application checkout and immutable images. PostgreSQL, Vau
 bootstrap and all applications are installed by the packaged umbrella itself.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 
 import yaml
 
@@ -35,13 +37,31 @@ def main():
     parser.add_argument("--app-source", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, default=ROOT)
     parser.add_argument("--admission-bin", default=os.environ.get("QS_ADMISSION_BIN"), required=False)
+    parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
+    parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
     args = parser.parse_args()
+    if bool(args.openbao_image) != bool(args.postgres_image):
+        parser.error("supply both dependency images")
     require(bool(args.admission_bin) and Path(args.admission_bin).is_file(), "actual admission client is available")
     lock = json.loads((args.fixture / "scripts/quickstart/lock.json").read_text())
     require(run(["git", "-C", str(args.app_source), "rev-parse", "HEAD"]) == lock["appRevision"],
             "packaged stack SQL checkout matches the qualification revision")
     require(not run(["git", "-C", str(args.app_source), "status", "--porcelain", "--", "db/sql"]),
             "packaged stack SQL checkout is clean")
+    if args.openbao_image:
+        archive = args.fixture / "application-sql.tar.gz"
+        require(run(["git", "-C", str(ROOT), "rev-parse", "HEAD"]) == lock["chartRevision"],
+                "chart checkout matches the qualification record")
+        require(hashlib.sha256(archive.read_bytes()).hexdigest() == lock["appArchiveSha256"],
+                "SQL archive checksum matches the qualification record")
+        with tarfile.open(archive) as contents:
+            prefix = f"permesi-{lock['appRevision']}/db/sql/"
+            files = {m.name.removeprefix(prefix): contents.extractfile(m).read()
+                     for m in contents if m.isfile() and m.name.startswith(prefix) and m.name.endswith(".sql")}
+        checkout = args.app_source / "db/sql"
+        require(files == {str(p.relative_to(checkout)): p.read_bytes() for p in checkout.rglob("*.sql")}
+                and all("/" not in name for name in files),
+                "every SQL input matches the exact archive and can be mounted by the flat bootstrap")
     namespace = "permesi-quickstart"
     k = ["kubectl", "--context", args.context, "-n", namespace]
     h = ["helm", "--kube-context", args.context, "-n", namespace]
@@ -72,6 +92,18 @@ def main():
                 image = lock["images"][service]
                 values[service]["image"] = {**image,
                     "pullPolicy": "Never" if image["repository"].startswith("localhost/") else "IfNotPresent"}
+            if args.openbao_image:
+                def pinned(reference):
+                    repository, digest = reference.split("@")
+                    return {"repository": repository, "digest": digest, "pullPolicy": "IfNotPresent"}
+                quickstart = values["quickstart"]
+                quickstart.update(secretsProvider="openbao", vault={"image": pinned(args.openbao_image)},
+                                  postgresql={"image": pinned(args.postgres_image)})
+                for svc in ("permesi", "genesis"):
+                    values[svc]["secretsProvider"] = "openbao"
+                    values[svc]["vault"]["agent"]["image"] = pinned(args.openbao_image)
+                values["permesi"]["admission"]["paserkUrl"] = ""
+                values["permesi"]["vault"]["agent"]["paserkCa"]["enabled"] = False
             values_file = directory / "values.json"
             values_file.write_text(json.dumps(values))
             install = h + ["upgrade", "--install", "permesi", str(package), "-f", str(values_file),
@@ -83,8 +115,16 @@ def main():
             def records():
                 return run(k + ["exec", "permesi-quickstart-postgresql-0", "-c", "postgresql", "--",
                     "psql", "-X", "-U", "postgres", "-d", "permesi", "-tAc",
-                    "SELECT count(*)||':'||coalesce(md5(string_agg(id::text||email||encode(opaque_registration_record,'hex'),',' ORDER BY id)),'empty') FROM users"])
+                    "SELECT count(*)||':'||coalesce(md5(string_agg(id::text||email||coalesce(encode(opaque_registration_record,'hex'),'<null>'),',' ORDER BY id)),'empty') FROM users"])
             run(install)
+            if args.openbao_image:
+                # Operator action outside the release. CAS zero protects an existing withdrawal floor.
+                operator = k + ["exec", "-i", "deploy/permesi-quickstart-vault", "-c", "vault", "--", "bao"]
+                metadata = json.loads(run(operator + ["read", "-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
+                require(metadata["type"] == "ed25519", "bootstrap signer is Ed25519")
+                payload = {"minimum_version": 1, "keys": {"1": metadata["keys"]["1"]["public_key"]}}
+                run(operator + ["kv", "put", "-mount=secret/permesi", "-cas=0", "admission-authority", "-"],
+                    input=json.dumps(payload))
             require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
                     "packaged embedded stack passes real TLS/admission and dependency policy verification")
             before = records()

@@ -145,12 +145,25 @@ false
 {{- fail "permesi: service.enabled must be false when config.socketPath is set" -}}
 {{- end -}}
 
+{{- if eq .Values.secretsProvider "openbao" -}}
+{{- if or (empty .Values.image.digest) (and .Values.vault.agent.enabled (or (empty .Values.vault.agent.image.digest) (not (hasSuffix "/openbao" .Values.vault.agent.image.repository)))) -}}
+{{- fail "OpenBao workloads require pinned application and OpenBao Agent images" -}}
+{{- end -}}
+{{- range $e := .Values.extraEnv -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $e.name) (hasPrefix "GENESIS_OPENBAO_" $e.name) (hasPrefix "PERMESI_ADMISSION_PASERK_" $e.name) -}}
+{{- fail "Use managed values for OpenBao and admission trust" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dsnEso -}}
 {{- if not $dsnSet -}}
 {{- fail "permesi: set database.dsn.value or database.dsn.existingSecret" -}}
 {{- end -}}
 
-{{- if eq (default "" .Values.admission.paserkUrl) "" -}}
+{{- if and (eq .Values.secretsProvider "openbao") (or .Values.admission.paserkUrl .Values.vault.agent.paserkCa.enabled .Values.admission.paserkCaPath .Values.admission.paserkCa.existingSecret (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa)) -}}
+{{- fail "OpenBao admission trust requires core KV and forbids a PASERK URL or CA override" -}}
+{{- end -}}
+{{- if and (ne .Values.secretsProvider "openbao") (eq (default "" .Values.admission.paserkUrl) "") -}}
 {{- fail "permesi: admission.paserkUrl must be set" -}}
 {{- end -}}
 

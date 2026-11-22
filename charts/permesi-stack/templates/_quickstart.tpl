@@ -90,7 +90,10 @@
 {{- $gctx := dict "Values" .Values.genesis "Chart" (dict "Name" "genesis") "Release" .Release -}}
 {{- $paserk := printf "https://%s.%s.svc.cluster.local:%v/paserk.json" (include "genesis.fullname" $gctx) .Release.Namespace .Values.genesis.service.port -}}
 {{- $p := .Values.permesi -}}
-{{- if or (ne $p.admission.paserkUrl $paserk) (not $p.vault.agent.paserkCa.enabled) (ne $p.vault.agent.paserkCa.path "pki-int/cert/ca_chain") -}}
+{{- if or (ne $p.secretsProvider .Values.genesis.secretsProvider) (ne $p.secretsProvider $q.secretsProvider) -}}
+{{- fail "Both backends must use the same provider contract" -}}
+{{- end -}}
+{{- if and (ne $p.secretsProvider "openbao") (or (ne $p.admission.paserkUrl $paserk) (not $p.vault.agent.paserkCa.enabled) (ne $p.vault.agent.paserkCa.path "pki-int/cert/ca_chain")) -}}
 {{- fail "permesi-stack: quickstart requires Genesis Service HTTPS PASERK URL and bootstrap CA chain" -}}
 {{- end -}}
 {{- $w := .Values.web -}}

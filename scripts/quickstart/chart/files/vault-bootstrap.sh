@@ -57,9 +57,11 @@ ensure_mount() {
 # plaintext backup, 30-day rotation); verify type/exportability on reuse.
 ensure_transit_key() {
   mount="$1"; name="$2"; want="$3"
+  rotation=720h
+  if [ "${SECRETS_PROVIDER:-vault}/$name" = openbao/genesis-signing ]; then rotation=0; fi
   got="$(vault read -field=type "${mount}/keys/${name}" 2>/dev/null || true)"
   if [ -z "$got" ]; then
-    vault write "${mount}/keys/${name}" type="$want" auto_rotate_period=720h \
+    vault write "${mount}/keys/${name}" type="$want" auto_rotate_period="$rotation" \
       exportable=false allow_plaintext_backup=false >/dev/null
     log "created transit key ${mount}/keys/${name} (${want})"
   elif [ "$got" != "$want" ]; then
@@ -67,7 +69,7 @@ ensure_transit_key() {
   fi
   [ "$(vault read -field=exportable "${mount}/keys/${name}")" = "false" ] \
     || die "transit key ${mount}/keys/${name} is exportable"
-  vault write "${mount}/keys/${name}/config" auto_rotate_period=720h deletion_allowed=false >/dev/null
+  vault write "${mount}/keys/${name}/config" auto_rotate_period="$rotation" deletion_allowed=false >/dev/null
 }
 
 # --- 1. auth/kubernetes -----------------------------------------------------
@@ -131,6 +133,8 @@ ensure_mount database database
 # creation (or after rotation but before its marker write) is safe to retry.
 db_config() {
   name="$1"; user="$2"; pw_file="$3"
+  management_db="$name"
+  if [ "${SECRETS_PROVIDER:-vault}/$name" = openbao/genesis ]; then management_db=postgres; fi
   rotation_path="bootstrap/manager-rotation/${name}"
   if existing="$(vault read "database/config/${name}" 2>&1)"; then
     : # Validate below; never overwrite Vault's current private credentials.
@@ -142,7 +146,7 @@ db_config() {
     vault write "database/config/${name}" \
       plugin_name=postgresql-database-plugin \
       allowed_roles="${name}" \
-      connection_url="postgresql://{{username}}:{{password}}@${PG_HOST}:${PG_PORT}/${name}?sslmode=disable" \
+      connection_url="postgresql://{{username}}:{{password}}@${PG_HOST}:${PG_PORT}/${management_db}?sslmode=disable" \
       max_connection_lifetime=120s \
       username="${user}" password=@"${pw_file}" \
       root_rotation_statements="ALTER ROLE \"${user}\" WITH PASSWORD '{{password}}';" >/dev/null
@@ -179,9 +183,11 @@ db_config() {
 }
 db_role() {
   name="$1"; runtime="$2"
+  connection_cap=
+  if [ "${SECRETS_PROVIDER:-vault}/$name" = openbao/genesis ]; then connection_cap="CONNECTION LIMIT 10"; fi
   vault write "database/roles/${name}" \
     db_name="${name}" \
-    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';" \
+    creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN ${connection_cap} PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';" \
     creation_statements="GRANT ${runtime} TO \"{{name}}\";" \
     renew_statements="ALTER ROLE \"{{name}}\" WITH VALID UNTIL '{{expiration}}';" \
     revocation_statements="SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.usename = '{{name}}';" \
@@ -250,9 +256,15 @@ pki_role permesi-runtime "${PERMESI_DNS_NAMES}"
 pki_role genesis-runtime "${GENESIS_DNS_NAMES}"
 
 # --- 6. policies + SA-bound kubernetes roles (last) -------------------------
-vault policy write permesi /policies/permesi.hcl >/dev/null
+policy_suffix=
+no_default=false
+if [ "${SECRETS_PROVIDER:-vault}" = openbao ]; then
+  policy_suffix=-openbao
+  no_default=true
+fi
+vault policy write permesi "/policies/permesi${policy_suffix}.hcl" >/dev/null
 vault policy write permesi-pki /policies/permesi-pki.hcl >/dev/null
-vault policy write genesis /policies/genesis.hcl >/dev/null
+vault policy write genesis "/policies/genesis${policy_suffix}.hcl" >/dev/null
 vault policy write genesis-pki /policies/genesis-pki.hcl >/dev/null
 permesi_policies="permesi,permesi-pki"
 if [ "$OIDC_ENABLED" = "true" ]; then
@@ -268,10 +280,17 @@ k8s_role() {
     bound_service_account_names="${sa}" \
     bound_service_account_namespaces="${NAMESPACE}" \
     audience="${AUDIENCE}" \
-    token_policies="${policies}" \
+    token_no_default_policy="$no_default" token_policies="${policies}" \
     token_ttl="${ROLE_TTL}" token_max_ttl="${ROLE_MAX_TTL}" >/dev/null
 }
 k8s_role permesi "${PERMESI_SA}" "${permesi_policies}"
 k8s_role genesis "${GENESIS_SA}" "genesis,genesis-pki"
 
 log "complete (namespace=${NAMESPACE}, permesi sa=${PERMESI_SA}, genesis sa=${GENESIS_SA})"
+
+if [ "${SECRETS_PROVIDER:-vault}" = openbao ]; then
+  for path in transit/genesis/sign/genesis-signing database/creds/genesis pki-int/issue/genesis-runtime; do
+    vault write "sys/quotas/rate-limit/genesis-$(echo "$path" | tr / -)" path="$path" rate=30 interval=1s >/dev/null
+  done
+  vault write sys/quotas/rate-limit/genesis-login path=auth/kubernetes role=genesis rate=30 interval=1s >/dev/null
+fi

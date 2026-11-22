@@ -74,6 +74,8 @@ admission:
       remoteKey: ""
       remoteProperty: ""
 
+# Use openbao for 0.6 and later application images. Release 0.5 uses Vault.
+secretsProvider: vault
 vault:
   url: /var/run/secrets/vaultproject.io/agent.sock
   # Explicit native auth needs a newly built supporting app image (unreleased).

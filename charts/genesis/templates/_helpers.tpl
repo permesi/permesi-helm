@@ -159,6 +159,16 @@ false
 {{- $dbEsoActive := eq (include "genesis.dbEsoActive" .) "true" -}}
 {{- $vaultEsoActive := eq (include "genesis.vaultEsoActive" .) "true" -}}
 
+{{- if eq .Values.secretsProvider "openbao" -}}
+{{- if or (empty .Values.image.digest) (and .Values.vault.agent.enabled (or (empty .Values.vault.agent.image.digest) (not (hasSuffix "/openbao" .Values.vault.agent.image.repository)))) -}}
+{{- fail "OpenBao workloads require pinned application and OpenBao Agent images" -}}
+{{- end -}}
+{{- range $e := .Values.extraEnv -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $e.name) (hasPrefix "GENESIS_OPENBAO_" $e.name) (hasPrefix "PERMESI_ADMISSION_PASERK_" $e.name) -}}
+{{- fail "Use managed values for OpenBao and admission trust" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dbEsoActive -}}
 {{- if not $dsnSet -}}
 {{- fail "genesis: set database.dsn.value, database.dsn.existingSecret, or database.dsn.externalSecret.remoteKey" -}}

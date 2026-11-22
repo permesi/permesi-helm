@@ -76,6 +76,8 @@ spec:
           imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
           command: ["bash", "/scripts/sql-bootstrap.sh"]
           env:
+            - name: SECRETS_PROVIDER
+              value: {{ .Values.secretsProvider | quote }}
             - name: PG_HOST
               value: {{ include "quickstart.postgresqlServiceName" . | quote }}
             - name: PG_PORT
@@ -118,6 +120,8 @@ spec:
                   key: vault-root-token
             - name: HOME
               value: /tmp
+            - name: SECRETS_PROVIDER
+              value: {{ .Values.secretsProvider | quote }}
             - name: PG_HOST
               value: {{ printf "%s.%s.svc" (include "quickstart.postgresqlServiceName" .) .Release.Namespace | quote }}
             - name: PG_PORT

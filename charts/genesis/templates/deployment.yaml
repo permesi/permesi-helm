@@ -11,6 +11,8 @@
 {{- $agentTlsDir := include "genesis.agentTlsDir" . -}}
 {{- $mountTls := or $tlsSecret $agentManagesTls -}}
 ---
+{{- $openbao := eq .Values.secretsProvider "openbao" -}}
+{{- $prefix := ternary "OPENBAO" "VAULT" $openbao -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,7 +57,7 @@ spec:
         - name: vault-agent
           image: {{ include "genesis.image" .Values.vault.agent.image | quote }}
           imagePullPolicy: {{ .Values.vault.agent.image.pullPolicy }}
-          command: ["/bin/vault"]
+          command: [{{ ternary "/usr/bin/bao" "/bin/vault" $openbao | quote }}]
           args:
             - agent
             - -config=/vault/config/agent.hcl
@@ -139,48 +141,48 @@ spec:
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
 
-            - name: GENESIS_VAULT_URL
+            - name: GENESIS_{{ $prefix }}_URL
               value: {{ .Values.vault.url | quote }}
             {{- if ne .Values.vault.authMethod "auto" }}
-            - name: GENESIS_VAULT_AUTH_METHOD
+            - name: GENESIS_{{ $prefix }}_AUTH_METHOD
               value: {{ .Values.vault.authMethod | quote }}
             {{- if $nativeEnabled }}
-            - name: GENESIS_VAULT_KUBERNETES_AUTH_MOUNT
+            - name: GENESIS_{{ $prefix }}_KUBERNETES_AUTH_MOUNT
               value: {{ .Values.vault.kubernetes.authMount | quote }}
-            - name: GENESIS_VAULT_KUBERNETES_ROLE
+            - name: GENESIS_{{ $prefix }}_KUBERNETES_ROLE
               value: {{ .Values.vault.kubernetes.role | quote }}
-            - name: GENESIS_VAULT_KUBERNETES_TOKEN_PATH
+            - name: GENESIS_{{ $prefix }}_KUBERNETES_TOKEN_PATH
               value: {{ .Values.vault.kubernetes.tokenPath | quote }}
             {{- end }}
             {{- end }}
             {{- if $vaultRoleIdSecret }}
-            - name: GENESIS_VAULT_ROLE_ID
+            - name: GENESIS_{{ $prefix }}_ROLE_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ $vaultRoleIdSecret | quote }}
                   key: {{ .Values.vault.roleId.secretKey | quote }}
             {{- else if .Values.vault.roleId.value }}
-            - name: GENESIS_VAULT_ROLE_ID
+            - name: GENESIS_{{ $prefix }}_ROLE_ID
               value: {{ .Values.vault.roleId.value | quote }}
             {{- end }}
             {{- if $vaultSecretIdSecret }}
-            - name: GENESIS_VAULT_SECRET_ID
+            - name: GENESIS_{{ $prefix }}_SECRET_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ $vaultSecretIdSecret | quote }}
                   key: {{ .Values.vault.secretId.secretKey | quote }}
             {{- else if .Values.vault.secretId.value }}
-            - name: GENESIS_VAULT_SECRET_ID
+            - name: GENESIS_{{ $prefix }}_SECRET_ID
               value: {{ .Values.vault.secretId.value | quote }}
             {{- end }}
             {{- if .Values.vault.wrappedToken.existingSecret }}
-            - name: GENESIS_VAULT_WRAPPED_TOKEN
+            - name: GENESIS_{{ $prefix }}_WRAPPED_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.vault.wrappedToken.existingSecret | quote }}
                   key: {{ .Values.vault.wrappedToken.secretKey | quote }}
             {{- else if .Values.vault.wrappedToken.value }}
-            - name: GENESIS_VAULT_WRAPPED_TOKEN
+            - name: GENESIS_{{ $prefix }}_WRAPPED_TOKEN
               value: {{ .Values.vault.wrappedToken.value | quote }}
             {{- end }}
             - name: GENESIS_TRANSIT_MOUNT

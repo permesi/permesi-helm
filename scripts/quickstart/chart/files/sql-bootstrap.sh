@@ -22,6 +22,8 @@ read_password() {
   esac
   printf '%s' "$value"
 }
+provider="${SECRETS_PROVIDER:-vault}"
+case "$provider" in vault|openbao) ;; *) exit 1 ;; esac
 ADMIN_PW="$(read_password postgres-admin-password)"
 PERMESI_PW="$(read_password vault-permesi-password)"
 GENESIS_PW="$(read_password vault-genesis-password)"
@@ -45,8 +47,8 @@ pgpass_escape() {
 }
 {
   printf '%s:%s:*:postgres:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$ADMIN_PW")"
-  printf '%s:%s:genesis:vault_genesis:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$GENESIS_PW")"
-  printf '%s:%s:permesi:vault_permesi:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$PERMESI_PW")"
+  printf '%s:%s:genesis:%s:%s\n' "$PG_HOST" "$PG_PORT" "${provider}_genesis" "$(pgpass_escape "$GENESIS_PW")"
+  printf '%s:%s:permesi:%s:%s\n' "$PG_HOST" "$PG_PORT" "${provider}_permesi" "$(pgpass_escape "$PERMESI_PW")"
 } > "$PGPASSFILE"
 
 admin_psql() { psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U postgres -v ON_ERROR_STOP=1 "$@"; }
@@ -61,11 +63,11 @@ chmod 0644 "${STATE_DIR}/retained-database-count"
 # Pre-create canonical owners with strong passwords, never resetting them.
 # Vault uses separate managers below; root rotation must not change these
 # owner-authenticated schema bootstrap credentials.
-admin_psql -d postgres -q -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
-SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_permesi', :'perm_pw')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_permesi')\gexec
-SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_genesis', :'gen_pw')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_genesis')\gexec
+admin_psql -d postgres -q -v perm_owner="${provider}_permesi" -v gen_owner="${provider}_genesis" -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
+SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', :'perm_owner', :'perm_pw')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'perm_owner')\gexec
+SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', :'gen_owner', :'gen_pw')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'gen_owner')\gexec
 SQL
 
 cd /db/sql
@@ -87,8 +89,12 @@ GRANT CONNECT ON DATABASE genesis TO vault_genesis_manager;
 GRANT pg_signal_backend TO vault_permesi_manager, vault_genesis_manager;
 SQL
 
+if [[ "$provider" == openbao ]]; then
+  admin_psql -d postgres -c 'GRANT CONNECT ON DATABASE postgres TO vault_genesis_manager'
+fi
+
 # Explicit owner-authenticated verification (transactional, rolls back).
-psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U vault_permesi -d permesi -v ON_ERROR_STOP=1 -f verify_permesi.sql
+psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U "${provider}_permesi" -d permesi -v ON_ERROR_STOP=1 -f verify_permesi.sql
 echo "sql-bootstrap: verify_permesi.sql (as vault_permesi) complete"
 
 users="$(admin_psql -d permesi -tA -c 'SELECT count(*) FROM public.users')"

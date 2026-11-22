@@ -60,6 +60,7 @@ PG_STATEFULSET="${helper_fields[0]}"
 VAULT_DEPLOY="${helper_fields[3]}"
 PG_POD="${PG_STATEFULSET}-0"
 OIDC_ENABLED="${helper_fields[5]}"
+provider="${helper_fields[6]}"
 HELPER_STATUS="$("${H[@]}" status "$QS_RELEASE" -o json \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["status"])')" \
   || { echo 'verify.sh: cannot inspect helper release status' >&2; exit 1; }
@@ -83,6 +84,9 @@ sql_is() { local want="$1" db="$2" q="$3"; [[ "$(psql_q -d "${db}" -c "${q}" 2>/
 # Cleanup errors must change the result; never turn a failed revoke into success.
 PT="" GT=""
 LEASES=()
+revoke_test_token() {
+  printf '%s' "$1" | "${K[@]}" exec -i "deploy/${VAULT_DEPLOY}" -c vault -- vault write auth/token/revoke token=- >/dev/null 2>&1
+}
 cleanup() {
   local status=$? lease tok
   trap - EXIT
@@ -94,7 +98,7 @@ cleanup() {
   done
   for tok in "${PT}" "${GT}"; do
     [[ -n "${tok}" ]] || continue
-    if ! vas "${tok}" token revoke -self >/dev/null 2>&1; then
+    if ! revoke_test_token "${tok}"; then
       echo "FAIL: temporary service token cleanup" >&2
       status=1
     fi
@@ -127,35 +131,35 @@ fi
 check "only ClusterIP Services" test -z "$("${K[@]}" get svc -l "app.kubernetes.io/instance=${QS_RELEASE}" -o jsonpath='{range .items[?(@.spec.type!="ClusterIP")]}{.metadata.name}{end}')"
 
 section "PostgreSQL schema, ownership and grants"
-check "databases genesis/permesi owned by vault_genesis/vault_permesi" sql_is "genesis:vault_genesis,permesi:vault_permesi" postgres \
+check "databases genesis/permesi owned by ${provider}_genesis/${provider}_permesi" sql_is "genesis:${provider}_genesis,permesi:${provider}_permesi" postgres \
   "SELECT string_agg(datname||':'||pg_get_userbyid(datdba), ',' ORDER BY datname) FROM pg_database WHERE datname IN ('genesis','permesi')"
 check "vault_* owners: LOGIN CREATEROLE, not superuser" sql_is "2" postgres \
-  "SELECT count(*) FROM pg_roles WHERE rolname IN ('vault_genesis','vault_permesi') AND rolcanlogin AND rolcreaterole AND NOT rolsuper AND NOT rolcreatedb"
-if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && PGPASSWORD=change-me psql -X -U vault_permesi -d permesi -h 127.0.0.1 -c "select 1"' >/dev/null 2>&1; then
-  fail "vault_permesi must not accept the change-me placeholder password"
+  "SELECT count(*) FROM pg_roles WHERE rolname IN ('${provider}_genesis','${provider}_permesi') AND rolcanlogin AND rolcreaterole AND NOT rolsuper AND NOT rolcreatedb"
+if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && PGPASSWORD=change-me psql -X -U "$1" -d permesi -h 127.0.0.1 -c "select 1"' sh "${provider}_permesi" >/dev/null 2>&1; then
+  fail "${provider}_permesi must not accept the change-me placeholder password"
 else
-  pass "vault_permesi rejects the change-me placeholder password"
+  pass "${provider}_permesi rejects the change-me placeholder password"
 fi
 check "runtime roles NOLOGIN, not superuser" sql_is "2" postgres \
   "SELECT count(*) FROM pg_roles WHERE rolname IN ('genesis_runtime','permesi_runtime') AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreaterole"
 check "owners hold runtime roles WITH ADMIN OPTION (canonical grant)" sql_is "2" postgres \
-  "SELECT count(*) FROM pg_auth_members m WHERE m.admin_option AND (pg_get_userbyid(m.roleid),pg_get_userbyid(m.member)) IN (('genesis_runtime','vault_genesis'),('permesi_runtime','vault_permesi'))"
+  "SELECT count(*) FROM pg_auth_members m WHERE m.admin_option AND (pg_get_userbyid(m.roleid),pg_get_userbyid(m.member)) IN (('genesis_runtime','${provider}_genesis'),('permesi_runtime','${provider}_permesi'))"
 check "owners hold pg_signal_backend (lease revocation)" sql_is "2" postgres \
-  "SELECT count(*) FROM pg_auth_members WHERE roleid='pg_signal_backend'::regrole AND pg_get_userbyid(member) IN ('vault_genesis','vault_permesi')"
+  "SELECT count(*) FROM pg_auth_members WHERE roleid='pg_signal_backend'::regrole AND pg_get_userbyid(member) IN ('${provider}_genesis','${provider}_permesi')"
 check "permesi_runtime has no CREATE on schema public" sql_is "f" permesi "SELECT has_schema_privilege('permesi_runtime','public','CREATE')"
 check "genesis_runtime has no CREATE on schema public" sql_is "f" genesis "SELECT has_schema_privilege('genesis_runtime','public','CREATE')"
 check "no cross-database CONNECT for the other owner" sql_is "false,false" postgres \
-  "SELECT has_database_privilege('vault_genesis','permesi','CONNECT')::text||','||has_database_privilege('vault_permesi','genesis','CONNECT')::text"
+  "SELECT has_database_privilege('${provider}_genesis','permesi','CONNECT')::text||','||has_database_privilege('${provider}_permesi','genesis','CONNECT')::text"
 check "Genesis test client 00000000-0000-0000-0000-000000000000 seeded" sql_is "1" genesis \
   "SELECT count(*) FROM clients WHERE uuid='00000000-0000-0000-0000-000000000000'"
 check "no trust authentication for TCP connections" sql_is "0" postgres \
   "SELECT count(*) FROM pg_hba_file_rules WHERE type LIKE 'host%' AND auth_method='trust'"
-if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && psql -X -U vault_permesi -d permesi -h 127.0.0.1 -w -c "select 1"' >/dev/null 2>&1; then
+if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && psql -X -U "$1" -d permesi -h 127.0.0.1 -w -c "select 1"' sh "${provider}_permesi" >/dev/null 2>&1; then
   fail "TCP login without a password must fail"
 else
   pass "TCP login without a password fails"
 fi
-echo "INFO: verify_permesi.sql ran as vault_permesi in the bootstrap Job; check.sql (pg_cron) is NOT exercised by the quickstart"
+echo "INFO: verify_permesi.sql ran as ${provider}_permesi in the bootstrap Job; check.sql (pg_cron) is NOT exercised by the quickstart"
 
 section "Vault mounts, keys and PKI"
 mount_type() { vroot read -field=type "sys/mounts/$1" 2>/dev/null; }
@@ -170,8 +174,10 @@ for k in transit/permesi/keys/totp:chacha20-poly1305 transit/genesis/keys/genesi
   [[ "$k" != transit/permesi/keys/oidc-signing:* || "$OIDC_ENABLED" == true ]] || continue
   key="${k%%:*}"
   check "${key} type ${k##*:}" test "$(vroot read -field=type "${key}" 2>/dev/null)" = "${k##*:}"
-  check "${key} non-exportable, no plaintext backup, 30d rotation" test \
-    "$(vroot read -field=exportable "${key}")/$(vroot read -field=allow_plaintext_backup "${key}")/$(vroot read -field=auto_rotate_period "${key}")" = "false/false/2592000"
+  period=2592000
+  if [[ "$provider/$key" == openbao/transit/genesis/keys/genesis-signing ]]; then period=0; fi
+  check "${key} non-exportable, no plaintext backup, configured rotation" test \
+    "$(vroot read -field=exportable "${key}")/$(vroot read -field=allow_plaintext_backup "${key}")/$(vroot read -field=auto_rotate_period "${key}")" = "false/false/${period}"
 done
 seed_fp="$(vroot kv get -mount=secret/permesi -field=opaque_server_seed config 2>/dev/null | sha256sum | cut -c1-12 || true)"
 pepper_len="$(vroot kv get -mount=secret/permesi -field=mfa_recovery_pepper config 2>/dev/null | base64 -d 2>/dev/null | wc -c || true)"
@@ -246,9 +252,9 @@ else
 fi
 allow "permesi issues its listener certificate" "${PT}" write -field=serial_number pki-int/issue/permesi-runtime common_name="${svc_fqdn}" ttl=5m
 allow "permesi reads pki-int/cert/ca_chain" "${PT}" read -field=certificate pki-int/cert/ca_chain
-allow "genesis signs with transit/genesis/sign/genesis-signing" "${GT}" write -field=signature transit/genesis/sign/genesis-signing input=cXVpY2tzdGFydA==
+allow "genesis signs with transit/genesis/sign/genesis-signing" "${GT}" write -field=signature transit/genesis/sign/genesis-signing input=cXVpY2tzdGFydA== key_version=1
 allow "genesis issues its listener certificate" "${GT}" write -field=serial_number pki-int/issue/genesis-runtime common_name="${GENESIS_NAME}.${NAMESPACE}.svc" ttl=5m
-deny "permesi -> transit/genesis/sign/genesis-signing" "${PT}" write transit/genesis/sign/genesis-signing input=cXVpY2tzdGFydA==
+deny "permesi -> transit/genesis/sign/genesis-signing" "${PT}" write transit/genesis/sign/genesis-signing input=cXVpY2tzdGFydA== key_version=1
 deny "permesi -> database/creds/genesis" "${PT}" read database/creds/genesis
 deny "permesi -> pki-int/issue/genesis-runtime" "${PT}" write pki-int/issue/genesis-runtime common_name="${GENESIS_NAME}.${NAMESPACE}.svc"
 deny "permesi -> transit/permesi/keys/oidc-signing/rotate" "${PT}" write -f transit/permesi/keys/oidc-signing/rotate
@@ -276,6 +282,13 @@ for pair in permesi:"${PT}" genesis:"${GT}"; do
     LEASES+=("${lease}")
     # SQL literal quoting, even though the normal Vault username is generated.
     quoted_user="${username//\'/\'\'}"
+    lookup_privilege="has_table_privilege(oid,'users','SELECT')"
+    if [[ "$svc" == genesis ]]; then
+      lookup_privilege="has_column_privilege(oid,'clients','uuid','SELECT')"
+      if [[ "$provider" == openbao ]]; then
+        lookup_privilege+=" AND NOT has_table_privilege(oid,'clients','SELECT') AND rolconnlimit=10"
+      fi
+    fi
     check "database/creds/${svc}: exact issued identity has only its runtime role and required privileges" \
       sql_is "t" "${svc}" \
       "SELECT pg_has_role(oid,'${svc}_runtime','MEMBER') AND NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb AND rolcanlogin
@@ -283,7 +296,7 @@ for pair in permesi:"${PT}" genesis:"${GT}"; do
        AND has_database_privilege(oid,'${svc}','CONNECT')
        AND NOT has_database_privilege(oid,'$([[ "${svc}" == permesi ]] && echo genesis || echo permesi)','CONNECT')
        AND has_schema_privilege(oid,'public','USAGE') AND NOT has_schema_privilege(oid,'public','CREATE')
-       AND has_table_privilege(oid,'$([[ "${svc}" == permesi ]] && echo users || echo clients)','SELECT')
+       AND $lookup_privilege
        FROM pg_roles WHERE rolname='${quoted_user}'"
     if vroot lease revoke -sync "${lease}" >/dev/null 2>&1; then
       LEASES=("${LEASES[@]:0:${#LEASES[@]}-1}")
@@ -298,7 +311,7 @@ for pair in permesi:"${PT}" genesis:"${GT}"; do
   fi
 done
 for token_var in PT GT; do
-  if vas "${!token_var}" token revoke -self >/dev/null 2>&1; then
+  if revoke_test_token "${!token_var}"; then
     printf -v "${token_var}" ''
     pass "temporary ${token_var} service token revoked"
   else

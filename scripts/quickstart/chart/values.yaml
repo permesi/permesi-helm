@@ -1,3 +1,4 @@
+secretsProvider: vault
 # permesi-quickstart: disposable development dependencies.
 #
 # WARNING: development-only. In-memory dev Vault, ephemeral PostgreSQL, and a

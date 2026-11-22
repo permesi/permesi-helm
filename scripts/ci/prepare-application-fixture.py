@@ -6,6 +6,7 @@ checkout. Inputs name all three real image manifests; render success alone never
 establishes image provenance or application compatibility.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -48,12 +49,21 @@ def main():
     dirty = subprocess.check_output(["git", "-C", str(args.app_source), "status", "--porcelain"], text=True)
     if dirty or not (args.app_source / "db/sql/00_init.sql").is_file():
         parser.error("application source must be a clean checkout with canonical SQL")
+    chart_dirty = subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain",
+                                           "--untracked-files=no"], text=True)
+    if chart_dirty:
+        parser.error("qualification requires committed chart sources")
     args.destination.mkdir(parents=True)
     for directory in ("charts", "scripts", "docs"):
         shutil.copytree(ROOT / directory, args.destination / directory,
                         ignore=shutil.ignore_patterns("__pycache__", "target"))
     lock_path = args.destination / "scripts/quickstart/lock.json"
     lock = json.loads(lock_path.read_text())
+    sql_archive = args.destination / "application-sql.tar.gz"
+    subprocess.run(["git", "-C", str(args.app_source), "archive", "--format=tar.gz",
+                    f"--prefix=permesi-{revision}/", "-o", str(sql_archive), revision, "db/sql"], check=True)
+    lock["appArchiveSha256"] = hashlib.sha256(sql_archive.read_bytes()).hexdigest()
+    lock["chartRevision"] = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
     lock["appRevision"] = revision
     lock["images"].update(images)
     lock_path.write_text(json.dumps(lock, indent=2) + "\n")

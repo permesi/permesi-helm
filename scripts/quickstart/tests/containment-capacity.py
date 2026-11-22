@@ -125,7 +125,7 @@ def measure(kube, core, edge, binary, record):
             verifier = secrets.token_urlsafe(40)
             state = secrets.token_urlsafe(32)
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-            query = urlencode(dict(client_id=client, response_type="code", redirect_uri=CALLBACK, scope="openid offline_access",
+            query = urlencode(dict(client_id=client, response_type="code", redirect_uri=CALLBACK, scope="openid offline_access", prompt="consent",
                                    code_challenge=challenge, code_challenge_method="S256", state=state,
                                    nonce=secrets.token_urlsafe(32), organization_id=org["id"]))
             page, hdr = request("/authorize?" + query, headers={"Cookie": cookie}, expect=(200, 302, 303))
@@ -140,6 +140,8 @@ def measure(kube, core, edge, binary, record):
             params = parse_qs(redirect.query)
             if hdr["Location"].split("?")[0] != CALLBACK or params.get("state") != [state] or params.get("iss") != [ISSUER]:
                 raise RuntimeError("authorization callback identity mismatch")
+            if "code" not in params:
+                raise RuntimeError("authorization grant was denied")
             return api("/token", "POST", form=dict(grant_type="authorization_code", code=params["code"][0],
                        client_id=client, code_verifier=verifier, redirect_uri=CALLBACK))
         first = code()

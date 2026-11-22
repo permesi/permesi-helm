@@ -1,4 +1,5 @@
 quickstart:
+  secretsProvider: vault
   enabled: true
   acknowledgeDevelopment: true
   fullnameOverride: atlas-quickstart
@@ -19,6 +20,7 @@ quickstart:
       genesis:
         serviceAccount: token-backend-identity
 permesi:
+  secretsProvider: vault
   enabled: true
   replicaCount: 2
   serviceAccount:
@@ -73,6 +75,7 @@ permesi:
     value: example.test
   fullnameOverride: api-backend
 genesis:
+  secretsProvider: vault
   enabled: true
   replicaCount: 2
   serviceAccount:

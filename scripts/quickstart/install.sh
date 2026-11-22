@@ -87,9 +87,6 @@ for f in "${QS_VALUES[@]}"; do [[ -f "${f}" ]] || die "values file not found: ${
 for t in helm kubectl python3; do command -v "${t}" >/dev/null || die "${t} not found on PATH"; done
 
 lock() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(v["images"][sys.argv[2]][sys.argv[3]])' "${SCRIPT_DIR}/lock.json" "$1" "$2"; }
-# repository:tag@digest is a standard OCI reference, compatible with the
-# component charts before and after addition of a dedicated image.digest key.
-locked_tag() { printf '%s@%s' "$(lock "$1" tag)" "$(lock "$1" digest)"; }
 
 # --- Derived names (one place; everything else uses these) -----------------
 # Helm fullname rule: release if it contains the chart name, else release-chart.
@@ -176,8 +173,9 @@ else
 fi
 
 # --- Schema source -----------------------------------------------------------
+provider="$(python3 -c 'import json,sys; print("openbao" if "openbao" in json.load(open(sys.argv[1]))["images"] else "vault")' "${SCRIPT_DIR}/lock.json")"
 QS_ARGS=(--set-string "postgresql.image.digest=$(lock postgresql digest)"
-         --set-string "vault.image.digest=$(lock vault digest)")
+         --set-string "vault.image.digest=$(lock "$provider" digest)")
 if [[ -n "${APP_SOURCE}" ]]; then
   sql_dir="${APP_SOURCE%/}/db/sql"
   [[ -f "${sql_dir}/00_init.sql" ]] || die "${sql_dir}/00_init.sql not found"
@@ -235,7 +233,7 @@ diagnose_bootstrap() {
   [[ -n "${job}" ]] && "${K[@]}" -n "${NAMESPACE}" logs "${job}" --all-containers --tail=40 || true
 }
 
-log "installing dependency chart ${QS_RELEASE} (PostgreSQL + dev Vault + bootstrap)"
+log "installing dependency chart ${QS_RELEASE} (PostgreSQL + dev ${provider} + bootstrap)"
 if ! "${H[@]}" upgrade --install "${QS_RELEASE}" "${QS_CHART}" -n "${NAMESPACE}" \
     --set acknowledgeDevelopment=true \
     --set-string "fullnameOverride=${QS_FULLNAME}" \
@@ -263,6 +261,15 @@ if [[ "${DEPS_ONLY}" != true ]]; then
   pg_host="${helper_fields[1]}"
   pg_port="${helper_fields[2]}"
   vault_address="${helper_fields[4]}"
+  if [[ "$provider" == openbao ]]; then
+    # Operator action for this disposable installation. CAS zero cannot replace a withdrawn authority.
+    bao=("${K[@]}" -n "$NAMESPACE" exec -i "deploy/${helper_fields[3]}" -c vault -- bao)
+    if ! "${bao[@]}" kv metadata get -mount=secret/permesi admission-authority >/dev/null 2>&1; then
+      "${bao[@]}" read -format=json transit/genesis/keys/genesis-signing |
+        python3 -c 'import json,sys; key=json.load(sys.stdin)["data"]; assert key["type"]=="ed25519"; print(json.dumps({"minimum_version":1,"keys":{"1":key["keys"]["1"]["public_key"]}}))' |
+        "${bao[@]}" kv put -mount=secret/permesi -cas=0 admission-authority - >/dev/null
+    fi
+  fi
   for svc in genesis permesi; do
     if [[ "$svc" == genesis ]]; then app_release="$GENESIS_RELEASE"; app_name="$GENESIS_NAME"; else app_release="$PERMESI_RELEASE"; app_name="$PERMESI_NAME"; fi
     cat > "${VALUES_TMP}/${svc}.yaml" <<EOF
@@ -277,7 +284,8 @@ vault:
   agent:
     enabled: true
     image:
-      tag: "$(locked_tag vault)"
+      repository: "$(lock "$provider" repository)"
+      digest: "$(lock "$provider" digest)"
     address: "${vault_address}"
     auth:
       role: "${svc}"
@@ -309,6 +317,9 @@ extraEnv:
   - {name: PERMESI_SIGNUP_ALLOWED_DOMAINS, value: "example.test"}
   - {name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS, value: "example.test"}
 EOF
+    fi
+    if [[ "$provider" == openbao && "$svc" == permesi ]]; then
+      sed -i '/^  paserkUrl:/d' "${VALUES_TMP}/${svc}.yaml"
     fi
     log "installing ${svc} (${app_release}, two replicas, native Agent)"
     "${H[@]}" upgrade --install "$app_release" "${CHARTS_DIR}/${svc}" -n "$NAMESPACE" \

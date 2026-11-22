@@ -32,7 +32,7 @@ on:
         type: string
         default: ''
       tag_only:
-        description: Acknowledge a tag-only release without digests (clears existing digests)
+        description: Resolve all immutable image digests from the published version tags
         required: false
         type: boolean
         default: false
@@ -42,12 +42,19 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: helm-release-bump
+  cancel-in-progress: false
+
 jobs:
   bump:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: main
 
       - name: Resolve release
         id: meta
@@ -55,63 +62,89 @@ jobs:
         # Reads the event JSON with jq only; no event value is interpolated into shell.
         run: ./scripts/ci/release-event.sh
 
-      - name: Bump chart versions
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
+
+      - name: Resolve the tagged application source and published manifests
         id: bump
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
           CHART_VERSION: ${{ steps.meta.outputs.chart_version }}
+          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
+          SOURCE_TAG: ${{ steps.meta.outputs.source_tag }}
           MODE: ${{ steps.meta.outputs.mode }}
           PERMESI_DIGEST: ${{ steps.meta.outputs.permesi_digest }}
           GENESIS_DIGEST: ${{ steps.meta.outputs.genesis_digest }}
           WEB_DIGEST: ${{ steps.meta.outputs.web_digest }}
         run: |
           set -euo pipefail
-
-          args=()
-          if [[ -n "${CHART_VERSION}" ]]; then
-            args+=(--chart-version "${CHART_VERSION}")
+          python3 -m pip install PyYAML==6.0.3
+          app="$RUNNER_TEMP/release-app"
+          git init -q "$app"
+          url=https://github.com/permesi/permesi.git
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            mapfile -t tags < <(git ls-remote --refs --tags "$url" "refs/tags/$VERSION" "refs/tags/v$VERSION" | cut -f2)
+            [[ ${#tags[@]} == 1 ]]
+            tag="${tags[0]}"
+          else
+            tag="refs/tags/$SOURCE_TAG"
           fi
-          case "${MODE}" in
-            digest)
-              args+=(
-                --digest "permesi=${PERMESI_DIGEST}"
-                --digest "genesis=${GENESIS_DIGEST}"
-                --digest "web=${WEB_DIGEST}"
-              )
-              ;;
-            tag-only)
-              args+=(--tag-only)
-              ;;
-            *)
-              echo "Unexpected mode '${MODE}'" >&2
-              exit 1
-              ;;
-          esac
+          git -C "$app" fetch -q --depth=1 "$url" "$tag"
+          git -C "$app" checkout -q --detach 'FETCH_HEAD^{commit}'
+          revision="$(git -C "$app" rev-parse HEAD)"
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$SOURCE_SHA" == "$revision" ]]
+          curl -fsSL --retry 3 "https://github.com/permesi/permesi/archive/$revision.tar.gz" -o "$RUNNER_TEMP/source.tar.gz"
+          args=()
+          for svc in permesi genesis web; do
+            var="${svc^^}_DIGEST"
+            image="ghcr.io/permesi/$svc"
+            digest="$(skopeo inspect --format '{{.Digest}}' "docker://$image:$VERSION")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ "$MODE" == tag-only || "$digest" == "${!var}" ]]
+            gh attestation verify "oci://$image@$digest" --repo permesi/permesi \
+              --signer-workflow permesi/permesi/.github/workflows/release.yml --source-digest "$revision" >/dev/null
+            args+=(--digest "$svc=$digest")
+          done
+          python3 scripts/ci/apply-release.py --app-source "$app" --archive "$RUNNER_TEMP/source.tar.gz" \
+            --version "$VERSION" --revision "$revision" --chart-version "$CHART_VERSION" "${args[@]}"
+          echo "chart_version=$(awk '/^version:/{print $2; exit}' charts/permesi-stack/Chart.yaml)" >> "$GITHUB_OUTPUT"
 
-          ./scripts/bump-release.sh "${args[@]}" "${VERSION}"
-
-          chart_version="$(awk '/^version:/{print $2; exit}' charts/permesi-stack/Chart.yaml)"
-          echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
+      - name: Install packaged release and authenticate before opening the PR
+        uses: helm/kind-action@v1
+        with:
+          node_image: kindest/node:v1.32.2
+      - shell: bash
+        run: |
+          cargo build --locked --release --manifest-path scripts/quickstart/admission/Cargo.toml --target-dir "$RUNNER_TEMP/client"
+          python3 scripts/quickstart/tests/real-packaged-stack.py --context "$(kubectl config current-context)" \
+            --app-source "$RUNNER_TEMP/release-app" --admission-bin "$RUNNER_TEMP/client/release/quickstart-admission"
 
       - name: Create pull request
         id: cpr
         uses: peter-evans/create-pull-request@v8
         with:
           branch: chore/release-${{ steps.meta.outputs.version }}
+          add-paths: |
+            README.md
+            charts
+            scripts/quickstart/lock.json
+            scripts/quickstart/chart/values.yaml
           delete-branch: true
           sign-commits: true
-          commit-message: 'chore(release): bump charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
-          title: 'chore(release): bump charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
+          commit-message: 'Update charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
+          title: 'Update charts to ${{ steps.bump.outputs.chart_version }} (app ${{ steps.meta.outputs.version }})'
           body: |
             Automated release bump.
 
             - App version: `${{ steps.meta.outputs.version }}`
             - Chart version: `${{ steps.bump.outputs.chart_version }}`
             - Image mode: `${{ steps.meta.outputs.mode }}`
-            - `ghcr.io/permesi/permesi:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.permesi_digest || 'none (tag-only)' }}`
-            - `ghcr.io/permesi/genesis:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.genesis_digest || 'none (tag-only)' }}`
-            - `ghcr.io/permesi/web:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.web_digest || 'none (tag-only)' }}`
+            - `ghcr.io/permesi/permesi:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.permesi_digest || 'resolved from published tag' }}`
+            - `ghcr.io/permesi/genesis:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.genesis_digest || 'resolved from published tag' }}`
+            - `ghcr.io/permesi/web:${{ steps.meta.outputs.version }}` digest: `${{ steps.meta.outputs.web_digest || 'resolved from published tag' }}`
             - Trigger: `${{ github.event_name }}` by `${{ steps.meta.outputs.source_actor }}`
             - Source repo: `${{ steps.meta.outputs.source_repo }}`
             - Source SHA: `${{ steps.meta.outputs.source_sha }}`
@@ -171,14 +204,11 @@ jobs:
             run_id="$(gh run list --workflow "Charts CI" --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${MERGE_SHA}\") | .databaseId" | head -n1 || true)"
           fi
           if [[ -z "${run_id}" ]]; then
-            run_id="$(gh run list --workflow "Charts CI" --branch main --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId' || true)"
-          fi
-
-          if [[ -z "${run_id}" ]]; then
             echo "Could not determine Charts CI run id." >&2
             exit 1
           fi
 
+          [[ "$(gh run view "$run_id" --json headSha,headBranch,workflowName,event --jq '[.headSha,.headBranch,.workflowName,.event]|join("/")')" == "$MERGE_SHA/main/Charts CI/workflow_dispatch" ]]
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
 
       - name: Wait for Charts CI completion

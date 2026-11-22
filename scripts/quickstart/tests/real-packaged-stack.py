@@ -69,9 +69,12 @@ def main():
             "packaged stack SQL checkout matches the qualification revision")
     require(not run(["git", "-C", str(args.app_source), "status", "--porcelain", "--", "db/sql"]),
             "packaged stack SQL checkout is clean")
+    release_openbao = not args.openbao_image and "openbao" in lock["images"]
     if args.openbao_image:
         qualification = {key: lock[key] for key in ("appRevision", "chartRevision", "appArchiveSha256")}
         qualification["outcome"] = "incomplete"
+        qualification["applicationArtifact"] = {"id": os.environ.get("ARTIFACT_ID"),
+                                              "digest": os.environ.get("ARTIFACT_DIGEST")}
         qualification["requestedChecks"] = {"capacity": args.capacity, "rollback": bool(args.previous_core),
                                             "sharedDependencyOutage": args.profile == "shared",
                                             "eviction": True, "offlineReuse": True, "partition": True, "withdrawal": True}
@@ -117,15 +120,17 @@ def main():
             directory = Path(directory)
             run(["helm", "package", str(charts / "permesi-stack"), "-d", str(directory)])
             package = next(directory.glob("permesi-stack-*.tgz"))
-            profile_values = (charts / "permesi-stack/examples/quickstart.yaml").read_text()
+            example = "quickstart-openbao.yaml" if args.openbao_image or release_openbao else "quickstart.yaml"
+            profile_values = (charts / "permesi-stack/examples" / example).read_text()
             values = yaml.safe_load(profile_values.replace(".permesi-quickstart", "." + namespace))
-            values["quickstart"]["bootstrap"]["schema"] = {
-                "sourceUrl": "", "sha256": "", "revision": lock["appRevision"],
-                "existingConfigMaps": configmaps}
-            for service in ("permesi", "genesis", "web"):
-                image = lock["images"][service]
-                values[service]["image"] = {**image,
-                    "pullPolicy": "Never" if image["repository"].startswith("localhost/") else "IfNotPresent"}
+            if not release_openbao:
+                values["quickstart"]["bootstrap"]["schema"] = {
+                    "sourceUrl": "", "sha256": "", "revision": lock["appRevision"],
+                    "existingConfigMaps": configmaps}
+                for service in ("permesi", "genesis", "web"):
+                    image = lock["images"][service]
+                    values[service]["image"] = {**image,
+                        "pullPolicy": "Never" if image["repository"].startswith("localhost/") else "IfNotPresent"}
             if args.openbao_image:
                 def pinned(reference):
                     repository, digest = reference.split("@")
@@ -190,6 +195,7 @@ def main():
                             for key in ("openbao", "postgres")), "every dependency manifest was observed")
                 qualification["runningDependencies"] = observed
                 (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
+            if args.openbao_image or release_openbao:
                 # Operator action outside the release. CAS zero protects an existing withdrawal floor.
                 operator = k + ["exec", "-i", "deploy/" + core + "-vault", "-c", "vault", "--", "bao"]
                 metadata = json.loads(run((reader or operator + ["read"]) + ["-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
@@ -204,6 +210,9 @@ def main():
                     require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
                             "packaged embedded stack passes real TLS/admission and dependency policy verification")
             verify_profile()
+            if release_openbao:
+                runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
+                    k, core, edge, args.admission_bin, {}, login_only=True)
             before = records()
             require(not before.startswith("0:"), "real signup created protected application records")
             run(install)

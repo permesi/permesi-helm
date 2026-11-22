@@ -12,6 +12,10 @@
 {{- $genesisPort := default 8080 .Values.genesis.service.port | toString -}}
 {{- $genesisUrl := printf "https://%s:%s/paserk.json" $genesisHost $genesisPort -}}
 Genesis is deployed as {{ $genesisFullname }}.
+{{ if eq .Values.genesis.secretsProvider "openbao" -}}
+Use the operator-owned core OpenBao admission authority. Initialize it once
+before the first admission request, then publish each new key before switching Genesis.
+{{- else }}
 Admission public keys are published by the Genesis Service at:
   {{ $genesisUrl }}
 
@@ -33,6 +37,8 @@ ignored in that case.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{ end }}
 
 {{ if .Values.quickstart.enabled }}
 !!!!!!!!!!!!!!!!!!! DEVELOPMENT ONLY — NOT FOR PRODUCTION !!!!!!!!!!!!!!!!!!!

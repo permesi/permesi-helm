@@ -81,7 +81,7 @@ class ReleaseFixtureTests(unittest.TestCase):
         for service in SERVICES:
             self.assertEqual(lock["images"][service]["digest"], self.digests[service])
             self.assertEqual(lock["images"][service]["tag"], self.version)
-        for dependency in ("postgresql", "vault"):
+        for dependency in old["images"].keys() - set(SERVICES):
             self.assertEqual(lock["images"][dependency], old["images"][dependency])
 
     def test_revision_digest_and_archive_mismatch_leave_all_files_unchanged(self):

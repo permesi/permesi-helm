@@ -1,0 +1,74 @@
+name: Qualify one packaged OpenBao profile
+description: Qualify one packaged OpenBao profile
+inputs:
+  rollback-id:
+    description: Rollback archive artifact ID
+    required: true
+  profile:
+    description: Shared or isolated
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Select the rollback baseline
+      shell: bash
+      run: jq -r '"PREVIOUS_SHA=" + .revision, "EXCLUDED_CORE=" + .excludedCore' scripts/ci/rollback-baseline.json >> "$GITHUB_ENV"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: permesi/permesi
+        ref: ${{ env.APP_SHA }}
+        path: application
+        persist-credentials: false
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      with:
+        artifact-ids: ${{ inputs.rollback-id }}
+        merge-multiple: true
+        path: archives
+    - name: Download and verify the application CI archives
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: python3 scripts/ci/sandbox_artifact.py download
+    - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
+      with:
+        version: v3.16.4
+    - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1
+      with:
+        cluster_name: containment
+        node_image: kindest/node:v1.32.2
+    - name: Verify the current and previous manifests and build the admission client
+      shell: bash
+      run: |
+        python3 -m pip install PyYAML==6.0.3
+        cargo build --locked --release --manifest-path scripts/quickstart/admission/Cargo.toml --target-dir "$RUNNER_TEMP/admission"
+        python3 scripts/ci/load-candidate-archives.py
+        jq -r '"OPENBAO_IMAGE=" + (.openbao | .repository + "@" + .digest), "POSTGRES_IMAGE=" + (.postgresql | .repository + "@" + .digest)' scripts/quickstart/openbao-images.json >> "$GITHUB_ENV"
+    - name: Measure the packaged containment profile
+      env:
+        PROFILE: ${{ inputs.profile }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 scripts/quickstart/tests/real-packaged-stack.py --capacity --profile "$PROFILE" --context kind-containment \
+          --app-source application --fixture "$RUNNER_TEMP/fixture" --admission-bin "$RUNNER_TEMP/admission/release/quickstart-admission" \
+          --previous-core "$PREVIOUS_IMAGE" --previous-revision "$PREVIOUS_SHA" --openbao-image "$OPENBAO_IMAGE" \
+          --postgres-image "$POSTGRES_IMAGE" | tee "$RUNNER_TEMP/qualification.log"
+        python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$EXCLUDED_CORE" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE" --companion "$OPENBAO_IMAGE"
+    - name: Simulate the upcoming release from the same CI images
+      if: inputs.profile == 'shared'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 scripts/ci/check-release-fixture.py
+        curl -fsSL --retry 3 "https://github.com/permesi/permesi/archive/$APP_SHA.tar.gz" -o "$RUNNER_TEMP/source.tar.gz"
+        python3 scripts/ci/simulate-release.py --cluster containment --archives archives --app-source application \
+          --source-archive "$RUNNER_TEMP/source.tar.gz" --admission-bin "$RUNNER_TEMP/admission/release/quickstart-admission"
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      if: always()
+      with:
+        name: containment-${{ inputs.profile }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/fixture/qualification.json
+          ${{ runner.temp }}/qualification.log
+          ${{ runner.temp }}/fixture/application-sql.tar.gz
+          ${{ runner.temp }}/fixture/scripts/quickstart/lock.json

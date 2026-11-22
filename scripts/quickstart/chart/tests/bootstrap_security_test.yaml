@@ -45,12 +45,13 @@ tests:
             value: atlas-api,atlas-api.qs-regression,atlas-api.qs-regression.svc,atlas-api.qs-regression.svc.cluster.local,api.localhost
   - it: uses supplied image digests instead of a mutable tag for bootstrap containers
     set:
+      vault.image.repository: docker.io/openbao/openbao
       vault.image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       postgresql.image.digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: docker.io/hashicorp/vault@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          value: docker.io/openbao/openbao@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       - equal:
           path: spec.template.spec.initContainers[1].image
           value: docker.io/library/postgres@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

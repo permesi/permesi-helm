@@ -10,7 +10,7 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILE = ROOT / "docs/examples/vault-agent-stack.yaml"
+PROFILE = ROOT / "docs/examples/openbao-shared.yaml"
 
 
 class ChartContracts(unittest.TestCase):

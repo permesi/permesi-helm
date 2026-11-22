@@ -71,9 +71,12 @@ def bootstrap_rotation(a, k, root, helper_fullname):
                                 '-v', 'ON_ERROR_STOP=1'], input=query).strip()
 
         def hashes(suffix=''):
+            prefix = "vault" if suffix else provider
             rows = sql("SELECT rolname,rolpassword FROM pg_authid WHERE rolname IN "
-                       f"('vault_permesi{suffix}','vault_genesis{suffix}') ORDER BY rolname")
-            return dict(row.split('|', 1) for row in rows.splitlines())
+                       f"('{prefix}_permesi{suffix}','{prefix}_genesis{suffix}') ORDER BY rolname")
+            result = dict(row.split('|', 1) for row in rows.splitlines())
+            require(len(result) == 2 and all(result.values()), 'both database role hashes were observed')
+            return result
 
         def marker_path(service):
             return 'bootstrap/manager-rotation/' + service
@@ -135,6 +138,10 @@ def bootstrap_rotation(a, k, root, helper_fullname):
         passwords = {service: base64.b64decode(secret[f'vault-{service}-password']).decode()
                      for service in ('permesi', 'genesis')}
         original_token = base64.b64decode(secret['vault-root-token']).decode()
+        helper = json.loads(checked(["helm", "--kube-context", a.context, "-n", a.namespace,
+                                     "get", "values", a.release + "-quickstart", "--all", "-o", "json"]))
+        provider = helper["secretsProvider"]
+        require(provider in ("vault", "openbao"), "known database owner contract")
         owners = hashes()
         for policy in ('permesi', 'genesis'):
             token = json.loads(checked(root + ['token', 'create', '-format=json', '-no-default-policy',
@@ -200,7 +207,7 @@ def bootstrap_rotation(a, k, root, helper_fullname):
         require(hashes('_manager') == before, 'marker-read failure refuses bootstrap without rotating')
         limited_install('database/config/permesi', ['deny'], 'cannot inspect database/config/permesi')
         require(hashes('_manager') == before, 'config-read failure refuses to overwrite private credentials')
-        checked(root + ['write', 'database/config/permesi', 'username=vault_permesi', 'verify_connection=false'])
+        checked(root + ['write', 'database/config/permesi', f'username={provider}_permesi', 'verify_connection=false'])
         try:
             installer(False, 'legacy owner-as-manager')
             require(hashes('_manager') == before, 'legacy owner-as-manager config is still explicitly refused')

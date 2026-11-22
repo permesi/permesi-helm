@@ -3,6 +3,14 @@
 Helm charts for Permesi IAM, Genesis admission, and the web UI. Install components
 separately or together with `charts/permesi-stack`.
 
+For application 0.6 and later, use the OpenBao shared profile. Add the isolated
+overlay when Genesis has its own PostgreSQL and OpenBao endpoints. Both profiles
+use offline admission verification from core-owned public keys. The published
+0.5.2 lock records the earlier release until the next application release event.
+See [shared values](docs/examples/openbao-shared.yaml),
+[isolated overrides](docs/examples/openbao-isolated.yaml) and
+[release qualification](docs/operations.md#release-and-sandbox-qualification).
+
 ## Choose your path
 
 ### Disposable development: one command
@@ -34,7 +42,7 @@ Use the fixed release/namespace profile documented in the
 It requires both development acknowledgements and `--wait --wait-for-jobs`;
 it is the same disposable dependency model, not a production installation.
 
-### Production: external PostgreSQL + Vault
+### Published 0.5 production profile
 
 Use the [manual installation guide](docs/install-guide.md) and
 [Vault Agent profile](docs/examples/vault-agent-stack.yaml). Agent supplies

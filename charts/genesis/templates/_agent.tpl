@@ -93,5 +93,5 @@ template_config {
 {{- end -}}
 
 {{- define "genesis.agentProbeCommand" -}}
-vault token lookup -address="unix://{{ include "genesis.agentSocketPath" . }}" >/dev/null 2>&1{{ if not (default "" .Values.config.socketPath) }} && test -s {{ .Values.tls.pemBundlePath | quote }}{{ end }}
+{{ if eq .Values.secretsProvider "openbao" }}bao{{ else }}vault{{ end }} token lookup -address="unix://{{ include "genesis.agentSocketPath" . }}" >/dev/null 2>&1{{ if not (default "" .Values.config.socketPath) }} && test -s {{ .Values.tls.pemBundlePath | quote }}{{ end }}
 {{- end -}}

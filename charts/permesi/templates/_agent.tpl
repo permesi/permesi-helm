@@ -126,5 +126,5 @@ template_config {
 {{- end -}}
 
 {{- define "permesi.agentProbeCommand" -}}
-vault token lookup -address="unix://{{ include "permesi.agentSocketPath" . }}" >/dev/null 2>&1{{ if not (default "" .Values.config.socketPath) }} && test -s {{ .Values.tls.pemBundlePath | quote }}{{ end }}{{ if .Values.vault.agent.paserkCa.enabled }} && test -s {{ include "permesi.agentAdmissionCaPath" . | quote }}{{ end }}
+{{ if eq .Values.secretsProvider "openbao" }}bao{{ else }}vault{{ end }} token lookup -address="unix://{{ include "permesi.agentSocketPath" . }}" >/dev/null 2>&1{{ if not (default "" .Values.config.socketPath) }} && test -s {{ .Values.tls.pemBundlePath | quote }}{{ end }}{{ if .Values.vault.agent.paserkCa.enabled }} && test -s {{ include "permesi.agentAdmissionCaPath" . | quote }}{{ end }}
 {{- end -}}

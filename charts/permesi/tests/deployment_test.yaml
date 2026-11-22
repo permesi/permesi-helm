@@ -4,6 +4,8 @@ release:
   namespace: permesi
 templates:
   - deployment.yaml
+values:
+  - published-values.yaml
 tests:
   - it: renders default grace period, seccomp, and pod automount
     asserts:

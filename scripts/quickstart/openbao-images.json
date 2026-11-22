@@ -1,0 +1,12 @@
+{
+  "openbao": {
+    "repository": "docker.io/openbao/openbao",
+    "tag": "2.7.3",
+    "digest": "sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b"
+  },
+  "postgresql": {
+    "repository": "docker.io/library/postgres",
+    "tag": "19.0",
+    "digest": "sha256:d2c8a7d3d224a9c0335bf9f69ae6ad0b9aa7d88c4b64bab89f0f261332f6d4de"
+  }
+}

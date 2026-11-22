@@ -7,6 +7,8 @@ templates:
 capabilities:
   majorVersion: 1
   minorVersion: 29
+values:
+  - published-values.yaml
 tests:
   - it: renders the agent HCL with proxy auth token, no force, no cache
     set:

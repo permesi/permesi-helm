@@ -30,21 +30,29 @@ jobs:
         ) &&
         github.event.workflow_run.head_branch == 'main'
       ) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve the trusted main revision
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.head_sha || github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ && "${REQUESTED:-$sha}" == "$sha" ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Checkout tested SHA
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.head_sha || 'main') || github.event.workflow_run.head_sha }}
-          fetch-depth: 0
+          ref: ${{ steps.target.outputs.sha }}
+          persist-credentials: false
 
-      - name: Resolve release target SHA
-        id: target
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Require successful CI for this main revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/require-release-ci.sh
 
       - name: Resolve release version
         id: meta

@@ -1,0 +1,33 @@
+# Apply after openbao-shared.yaml. The operator reader authenticates to the edge separately.
+genesis:
+  database:
+    dsn:
+      existingSecret: genesis-edge-db
+  vault:
+    agent:
+      address: https://edge-openbao.example.com:8200
+      ca:
+        existingConfigMap: edge-openbao-ca
+  networkPolicy:
+    egress:
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+      ports:
+      - port: 53
+        protocol: UDP
+      - port: 53
+        protocol: TCP
+    - to:
+      - ipBlock:
+          cidr: 10.21.0.0/16
+      ports:
+      - port: 5432
+        protocol: TCP
+    - to:
+      - ipBlock:
+          cidr: 10.31.0.0/16
+      ports:
+      - port: 8200
+        protocol: TCP

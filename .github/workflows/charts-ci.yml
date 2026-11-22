@@ -44,6 +44,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
+
       - name: Validate release and verifier contracts
         run: |
           python3 -m pip install PyYAML==6.0.3
@@ -180,7 +184,8 @@ jobs:
         run: |
           set -euo pipefail
           helm dependency build charts/permesi-stack
-          helm template permesi charts/permesi-stack -n permesi -f docs/examples/production-stack.yaml > /dev/null
+          helm template permesi charts/permesi-stack -n permesi --kube-version 1.32.2 -f docs/examples/openbao-shared.yaml > /dev/null
+          helm template permesi charts/permesi-stack -n permesi --kube-version 1.32.2 -f docs/examples/openbao-shared.yaml -f docs/examples/openbao-isolated.yaml > /dev/null
 
   install:
     runs-on: ubuntu-latest

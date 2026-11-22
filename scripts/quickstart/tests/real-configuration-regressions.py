@@ -108,7 +108,8 @@ def main():
             run(verify)
 
             job_name = args.release + "-expected-failure"
-            lock = json.loads((QUICKSTART / "lock.json").read_text())["images"]["vault"]
+            images = json.loads((QUICKSTART / "lock.json").read_text())["images"]
+            lock = images.get("openbao") or images["vault"]
             image = lock["repository"] + "@" + lock["digest"]
             failed_job = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {
                 "name": job_name, "labels": {"app.kubernetes.io/instance": helper,

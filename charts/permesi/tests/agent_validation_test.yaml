@@ -7,6 +7,8 @@ templates:
 capabilities:
   majorVersion: 1
   minorVersion: 29
+values:
+  - published-values.yaml
 tests:
   - it: fails below Kubernetes 1.29
     capabilities:

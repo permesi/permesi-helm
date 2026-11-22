@@ -47,6 +47,21 @@ def validate(root, lock=None, schema=None):
     stack_chart = yaml.safe_load((root / "charts/permesi-stack/Chart.yaml").read_text())
     if str(stack_chart["appVersion"]) not in tags:
         raise ValueError("umbrella appVersion and image fixture disagree")
+    if tuple(map(int, next(iter(tags)).split("."))) >= (0, 6, 0):
+        pins = json.loads((root / "scripts/quickstart/openbao-images.json").read_text())
+        helper = yaml.safe_load((root / "scripts/quickstart/chart/values.yaml").read_text())
+        if "vault" in lock["images"] or helper["secretsProvider"] != "openbao":
+            raise ValueError("0.6 requires the OpenBao fixture")
+        for key, name in (("openbao", "vault"), ("postgresql", "postgresql")):
+            image = pins[key]
+            if (not re.fullmatch(DIGEST, image["digest"]) or lock["images"][key] != image or
+                    any(helper[name]["image"][k] != v for k, v in image.items())):
+                raise ValueError("dependency image and release fixture disagree")
+        for service in ("permesi", "genesis"):
+            values = yaml.safe_load((root / "charts" / service / "values.yaml").read_text())
+            if (values["secretsProvider"] != "openbao" or
+                    any(values["vault"]["agent"]["image"][k] != v for k, v in pins["openbao"].items())):
+                raise ValueError("release Agent and OpenBao fixture disagree")
     if schema is None:
         schema = yaml.safe_load((root / "scripts/quickstart/chart/values.yaml").read_text())["bootstrap"]["schema"]
     if (schema["revision"] != lock["appRevision"] or schema["sha256"] != lock["appArchiveSha256"] or

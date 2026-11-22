@@ -480,3 +480,43 @@ For instance-specific eviction, provision separate revocable bootstrap identitie
 The candidate workflow writes the application revision, chart revision, SQL archive checksum, previous core image and running dependency manifests to the fixture’s `qualification.json`. The release fixture lock continues to describe the published binaries. The two capacity profiles use separate dependency deployments and two serving cores. Each flow offers 50 operations, one every 18 seconds, during a 15-minute baseline and repeats that load with Genesis offline. A successful authorization-code sample completes both interactive consent and a PKCE exchange. The cadence leaves room under the default 100 authorization requests per source per ten minutes. Both initial 150-operation trials missed gates and are retained in the qualification evidence. With 50 samples per phase, one failed request misses the 99 percent gate. The report records success, throughput and p95 separately for each flow. Kubelet CPU measures the whole sampled container interval, including readiness work. The SQL and signing counters measure only the selected issuance operations. Results describe the tested replica count, dependency limits and fault.
 
 The [November 2026 qualification record](engineering/containment-qualification-2026-11-22.json) includes both offered loads, per-flow outcomes, manifest identities, SQL checksums, withdrawal timings and test boundaries.
+
+## Release and sandbox qualification
+
+Application CI archives the three built OCI images on sandbox. Its successful
+test, coverage, browser and scenario gates invoke the qualification actions
+from the exact chart commit, passing the artifact ID and SHA-256 of the ZIP. A chart push resolves the
+successful application build for the current sandbox head. Missing or expired
+artifacts fail qualification. Each profile imports the same three manifest
+digests into its own KinD cluster and checks the running binaries. The distinct
+rollback trial builds a previous core revision and records its own digest.
+
+A successful matrix records a commit status scoped to the originating run and
+attempt after rechecking both sandbox heads. Each status links to its evidence.
+Run `python3 scripts/ci/last-qualified.py` with authenticated GitHub CLI access
+to read the newest successful pair. Failed attempts produce no success record.
+When artifact retention expires, start a fresh application sandbox build.
+
+The existing `permesi-release` event and manual release workflow resolve the
+application tag, verify each published manifest and its source attestation, then
+use `refresh-release-fixture.py` to bind the canonical SQL archive and bootstrap
+schema to the same commit. An explicitly acknowledged tag-only event resolves
+the release tags to immutable digests. Identical replays preserve the chart
+version. A chart version can advance independently of the application version.
+
+The first 0.6 bump replaces the released fixture’s legacy dependency pins with
+OpenBao and PostgreSQL 19 and selects the OpenBao quickstart defaults. The release
+gate installs the package with its pinned source archive, initializes public
+authority once with CAS zero, completes OPAQUE login, and verifies a full session.
+For a Helm-only disposable install, initialize the authority through the
+application's `scripts/admission-authority initialize 1` with the development
+core OpenBao operator environment. The standalone installer performs this
+one-time initialization. Preserve the core KV mount across application rollbacks.
+
+Use `docs/examples/openbao-shared.yaml` for production, adding
+`docs/examples/openbao-isolated.yaml` last for isolated Genesis dependencies.
+Set site-specific CA, network CIDRs, database DSNs, PKI SANs and the approved
+signing version. The isolated operator's edge reader receives only read access
+to `transit/genesis/keys/genesis-signing` through its dedicated Agent socket.
+Only the operator may write core authority. Application pods receive their own
+service Agent sockets. Publish a new public version before switching Genesis.

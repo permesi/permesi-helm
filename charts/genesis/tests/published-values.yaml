@@ -1,0 +1,5 @@
+# Explicit published 0.5 values for tests of that chart API. No containers are launched.
+secretsProvider: vault
+vault:
+  agent:
+    image: {repository: hashicorp/vault, tag: 1.20.4, digest: ""}

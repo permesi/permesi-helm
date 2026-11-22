@@ -7,116 +7,71 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
-env:
-  APP_SHA: eb80b88ba3ed16dcb556e9e6ed02cbc92ed3d0e8
-  PREVIOUS_SHA: 2c4d3875eafa6e45c5bd72bdd99a4c24282c9261
-  OPENBAO_IMAGE: docker.io/openbao/openbao@sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b
-  POSTGRES_IMAGE: docker.io/library/postgres@sha256:d2c8a7d3d224a9c0335bf9f69ae6ad0b9aa7d88c4b64bab89f0f261332f6d4de
 
 jobs:
   images:
     runs-on: ubuntu-latest
     timeout-minutes: 100
+    outputs:
+      app_sha: ${{ steps.source.outputs.app_sha }}
+      helm_sha: ${{ steps.source.outputs.helm_sha }}
+      artifact_id: ${{ steps.source.outputs.artifact_id }}
+      artifact_digest: ${{ steps.source.outputs.artifact_digest }}
+      rollback_id: ${{ steps.source.outputs.rollback_id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: permesi/permesi
-          ref: ${{ env.APP_SHA }}
-          path: application
+          repository: permesi/permesi-helm
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          repository: permesi/permesi
-          ref: ${{ env.PREVIOUS_SHA }}
-          path: previous
-          persist-credentials: false
-      - uses: ./application/.github/actions/rust-toolchain
-        with:
-          targets: x86_64-unknown-linux-musl wasm32-unknown-unknown
-      - uses: ./application/.github/actions/ensure-musl-toolchain
-      - name: Build immutable application archives
-        shell: bash
-        run: |
-          set -euo pipefail
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/candidate-target"
-          mkdir archives
-          (cd application && ./scripts/install-trunk && cd apps/web && npm ci && npm run css:build && trunk build --release)
-          for checkout in previous application; do
-            revision="$(git -C "$checkout" rev-parse HEAD)"
-            services=(permesi)
-            if [[ "$checkout" == application ]]; then services+=(genesis web); fi
-            for svc in "${services[@]}"; do
-              file="services/$svc/Dockerfile"
-              if [[ "$svc" == web ]]; then
-                file=apps/web/Dockerfile
-              else
-                (cd "$checkout" && BUILD_GIT_COMMIT_HASH="$revision" cargo build --release --locked --target x86_64-unknown-linux-musl -p "$svc" --features telemetry)
-                mkdir -p "$checkout/dist-bin"
-                cp "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/$svc" "$checkout/dist-bin/"
-              fi
-              image="localhost/permesi-candidate/$svc:$revision"
-              podman build --format oci -f "$checkout/$file" -t "$image" "$checkout"
-              podman save --format oci-archive -o "archives/$checkout-$svc.tar" "$image"
-            done
-          done
-      - uses: actions/upload-artifact@v7
-        with:
-          name: candidate-archives
-          path: archives/*.tar
-          if-no-files-found: error
-          retention-days: 3
+      - id: source
+        uses: ./.github/actions/containment-source
 
   qualify:
-    runs-on: ubuntu-latest
     needs: images
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         profile: [shared, isolated]
+    env:
+      APP_SHA: ${{ needs.images.outputs.app_sha }}
+      ARTIFACT_ID: ${{ needs.images.outputs.artifact_id }}
+      ARTIFACT_DIGEST: ${{ needs.images.outputs.artifact_digest }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: permesi/permesi
-          ref: ${{ env.APP_SHA }}
-          path: application
+          repository: permesi/permesi-helm
+          ref: ${{ needs.images.outputs.helm_sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: ./.github/actions/containment-profile
         with:
-          name: candidate-archives
-          path: archives
-      - uses: azure/setup-helm@v5
-        with:
-          version: v3.16.4
-      - uses: helm/kind-action@v1
-        with:
-          cluster_name: containment
-          node_image: kindest/node:v1.32.2
-      - name: Verify the current and previous manifests and build the admission client
-        run: |
-          python3 -m pip install PyYAML==6.0.3
-          cargo build --locked --release --manifest-path scripts/quickstart/admission/Cargo.toml --target-dir "$RUNNER_TEMP/admission"
-          python3 scripts/ci/load-candidate-archives.py
-      - name: Measure the packaged containment profile
+          rollback-id: ${{ needs.images.outputs.rollback_id }}
+          profile: ${{ matrix.profile }}
+
+  record:
+    needs: [images, qualify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Record the successful pair on the triggering commit
         env:
-          PROFILE: ${{ matrix.profile }}
-        shell: bash
+          GH_TOKEN: ${{ github.token }}
+          APP_SHA: ${{ needs.images.outputs.app_sha }}
+          HELM_SHA: ${{ needs.images.outputs.helm_sha }}
+          ARTIFACT_ID: ${{ needs.images.outputs.artifact_id }}
         run: |
           set -euo pipefail
-          python3 scripts/quickstart/tests/real-packaged-stack.py --capacity --profile "$PROFILE" --context kind-containment \
-            --app-source application --fixture "$RUNNER_TEMP/fixture" --admission-bin "$RUNNER_TEMP/admission/release/quickstart-admission" \
-            --previous-core "$PREVIOUS_IMAGE" --previous-revision "$PREVIOUS_SHA" --openbao-image "$OPENBAO_IMAGE" \
-            --postgres-image "$POSTGRES_IMAGE" | tee "$RUNNER_TEMP/qualification.log"
-          python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$(jq -r '.images.permesi|.repository+"@"+.digest' scripts/quickstart/lock.json)" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE" --companion "$OPENBAO_IMAGE"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: containment-${{ matrix.profile }}
-          path: |
-            ${{ runner.temp }}/fixture/qualification.json
-            ${{ runner.temp }}/qualification.log
-            ${{ runner.temp }}/fixture/application-sql.tar.gz
-            ${{ runner.temp }}/fixture/scripts/quickstart/lock.json
+          [[ "$(gh api repos/permesi/permesi/git/ref/heads/sandbox --jq .object.sha)" == "$APP_SHA" ]]
+          [[ "$(gh api repos/permesi/permesi-helm/git/ref/heads/sandbox --jq .object.sha)" == "$HELM_SHA" ]]
+          counterpart="Helm $HELM_SHA"
+          if [[ "$GITHUB_REPOSITORY" == permesi/permesi-helm ]]; then counterpart="App $APP_SHA"; fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=success -f context="containment/$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" \
+            -f description="$counterpart, OCI artifact $ARTIFACT_ID" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" >/dev/null

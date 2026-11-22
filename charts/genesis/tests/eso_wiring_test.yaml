@@ -3,6 +3,8 @@ release:
   name: my-release
 templates:
   - deployment.yaml
+values:
+  - published-values.yaml
 tests:
   - it: consumes explicit existing secrets for DSN, TLS, and Vault
     set:

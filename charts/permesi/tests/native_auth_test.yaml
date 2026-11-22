@@ -5,6 +5,7 @@ release:
 templates:
 - deployment.yaml
 values:
+- published-values.yaml
 - native_values.yaml
 tests:
 - it: projects an audience-scoped JWT only into the application without AppRole credentials

@@ -31,7 +31,7 @@ FRONTEND = "http://localhost:8080"
 CALLBACK = "https://client.example.test/callback"
 
 
-def measure(kube, core, edge, binary, record):
+def measure(kube, core, edge, binary, record, *, login_only=False):
     """Provision one test-owned principal and measure its existing session and OAuth grants."""
     with ExitStack() as stack:
         cas = [run(kube + ["exec", "deploy/" + prefix + "-vault", "-c", "vault", "--", "bao",
@@ -108,6 +108,9 @@ def measure(kube, core, edge, binary, record):
             if api("/v1/auth/session", headers=browser)["session_kind"] != "full":
                 raise RuntimeError("session is not full")
         session()
+        if login_only:
+            require(True, "packaged release created a full authenticated OPAQUE session")
+            return
         org = api("/v1/orgs", "POST", data={"name": "Capacity trial", "slug": "capacity-" + secrets.token_hex(4)},
                   headers=browser, expect=(201,))
         path = "/v1/orgs/" + org["slug"] + "/projects"

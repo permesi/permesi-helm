@@ -13,11 +13,13 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   packages: write
 
 jobs:
   publish:
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,14 +31,11 @@ jobs:
       - name: Resolve release version
         id: meta
         shell: bash
+        env:
+          RAW_VERSION: ${{ github.event.release.tag_name || inputs.version }}
         run: |
           set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            raw="${{ github.event.release.tag_name }}"
-          else
-            raw="${{ inputs.version }}"
-          fi
+          raw="$RAW_VERSION"
 
           version="${raw#v}"
           if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -45,6 +44,17 @@ jobs:
           fi
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Require the published tag and its successful main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          git fetch --no-tags origin "refs/tags/v$VERSION"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$(git rev-parse HEAD)" ]]
+          gh release view "v$VERSION" --json isDraft --jq '.isDraft == false' | grep -qx true
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$(git rev-parse HEAD)" ]]
+          bash scripts/ci/require-release-ci.sh
 
       - name: Validate chart versions
         shell: bash

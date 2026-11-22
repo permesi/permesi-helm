@@ -106,12 +106,20 @@ tests:
           errorPattern: Genesis issuer/audience must match Permesi admission
   - it: rejects a plaintext or external PASERK URL
     set:
+      permesi.secretsProvider: vault
+      genesis.secretsProvider: vault
+      quickstart.secretsProvider: vault
+      permesi.vault.agent.paserkCa.enabled: true
       permesi.admission.paserkUrl: http://permesi-genesis:8080/paserk.json
     asserts:
       - failedTemplate:
           errorPattern: Genesis Service HTTPS PASERK URL
   - it: rejects using an untrusted CA source for PASERK
     set:
+      permesi.secretsProvider: vault
+      genesis.secretsProvider: vault
+      quickstart.secretsProvider: vault
+      permesi.vault.agent.paserkCa.enabled: true
       permesi.vault.agent.paserkCa.path: pki-root/cert/ca
     asserts:
       - failedTemplate:

@@ -55,11 +55,12 @@ api_proxy {{ use_auto_auth_token = true }}
         "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001,
                             "seccompProfile": {"type": "RuntimeDefault"}},
         "volumes": [{"name": "config", "configMap": {"name": metadata["name"]}},
-                    {"name": "run", "emptyDir": {"medium": "Memory"}},
-                    {"name": "identity", "projected": {"sources": [{"serviceAccountToken": {
+                    {"name": "run", "emptyDir": {"medium": "Memory", "sizeLimit": "1Mi"}},
+                    {"name": "identity", "projected": {"defaultMode": 0o400, "sources": [{"serviceAccountToken": {
                         "path": "token", "audience": "admission-reader", "expirationSeconds": 600}}]}}],
         "containers": [{"name": "agent", "image": image["repository"] + "@" + image["digest"],
             "command": ["/usr/bin/bao", "agent", "-config=/config/agent.hcl"],
+            "resources": {"requests": {"cpu": "20m", "memory": "64Mi"}, "limits": {"cpu": "100m", "memory": "128Mi"}},
             "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
             "volumeMounts": [{"name": name, "mountPath": path, "readOnly": name != "run"}
                              for name, path in [("config", "/config"), ("identity", "/identity"), ("run", "/run/reader")]],

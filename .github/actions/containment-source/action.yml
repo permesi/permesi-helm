@@ -1,0 +1,68 @@
+name: Resolve application artifacts and build the rollback control
+description: Resolve application artifacts and build the rollback control
+inputs:
+  artifact-id:
+    description: Caller artifact ID
+    required: false
+  artifact-digest:
+    description: Caller artifact checksum
+    required: false
+outputs:
+  app_sha:
+    description: app_sha
+    value: ${{ steps.source.outputs.app_sha }}
+  helm_sha:
+    description: helm_sha
+    value: ${{ steps.source.outputs.helm_sha }}
+  artifact_id:
+    description: artifact_id
+    value: ${{ steps.source.outputs.artifact_id }}
+  artifact_digest:
+    description: artifact_digest
+    value: ${{ steps.source.outputs.artifact_digest }}
+  rollback_id:
+    description: rollback_id
+    value: ${{ steps.rollback.outputs.artifact-id }}
+runs:
+  using: composite
+  steps:
+    - name: Select the rollback baseline
+      shell: bash
+      run: jq -r '"PREVIOUS_SHA=" + .revision, "EXCLUDED_CORE=" + .excludedCore' scripts/ci/rollback-baseline.json >> "$GITHUB_ENV"
+    - id: source
+      name: Resolve the exact application build artifact
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+        ARTIFACT_DIGEST: ${{ inputs.artifact-digest }}
+      shell: bash
+      run: python3 scripts/ci/sandbox_artifact.py resolve
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: permesi/permesi
+        ref: ${{ env.PREVIOUS_SHA }}
+        path: previous
+        persist-credentials: false
+    - uses: ./previous/.github/actions/rust-toolchain
+      with:
+        targets: x86_64-unknown-linux-musl
+    - uses: ./previous/.github/actions/ensure-musl-toolchain
+    - name: Build the previous core for the rollback trial
+      working-directory: previous
+      env:
+        BUILD_GIT_COMMIT_HASH: ${{ env.PREVIOUS_SHA }}
+      shell: bash
+      run: |
+        cargo build --release --locked --target x86_64-unknown-linux-musl -p permesi --features telemetry
+        mkdir -p dist-bin
+        cp target/x86_64-unknown-linux-musl/release/permesi dist-bin/
+        image="localhost/permesi-candidate/permesi:$PREVIOUS_SHA"
+        podman build --format oci -f services/permesi/Dockerfile -t "$image" .
+        podman save --format oci-archive -o "$RUNNER_TEMP/previous-permesi.tar" "$image"
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      id: rollback
+      with:
+        name: rollback-core-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/previous-permesi.tar
+        if-no-files-found: error
+        retention-days: 7

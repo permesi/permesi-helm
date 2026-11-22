@@ -100,7 +100,7 @@
 {{- if or $w.ingress.enabled (ne $w.service.type "ClusterIP") $w.runtimeConfig.existingConfigMap $w.extraEnvFrom -}}
 {{- fail "permesi-stack: quickstart web requires managed runtimeConfig and internal ClusterIP, no ingress" -}}
 {{- end -}}
-{{- if or (ne $w.runtimeConfig.apiBaseUrl "https://api.localhost:8443") (ne $w.runtimeConfig.tokenBaseUrl "https://genesis.localhost:9443") (ne $w.runtimeConfig.clientId "00000000-0000-0000-0000-000000000000") (ne $w.runtimeConfig.opaqueServerId "api.localhost") (ne $p.auth.frontendBaseUrl "http://localhost:8080") (ne $p.auth.corsAllowedOrigins "http://localhost:8080") (ne $p.auth.opaqueServerId $w.runtimeConfig.opaqueServerId) (ne $p.admission.issuer $w.runtimeConfig.tokenBaseUrl) (eq $p.admission.audience "") -}}
+{{- if or (ne $w.runtimeConfig.apiBaseUrl "https://api.localhost:8443") (ne $w.runtimeConfig.tokenBaseUrl "https://genesis.localhost:9443") (ne $w.runtimeConfig.clientId "00000000-0000-0000-0000-000000000000") (ne $w.runtimeConfig.opaqueServerId "api.localhost") (not (or (eq $p.auth.frontendBaseUrl "http://localhost:8080") (and (eq $p.secretsProvider "openbao") (eq $p.auth.frontendBaseUrl "https://api.localhost:8443")))) (ne $p.auth.corsAllowedOrigins "http://localhost:8080") (ne $p.auth.opaqueServerId $w.runtimeConfig.opaqueServerId) (ne $p.admission.issuer $w.runtimeConfig.tokenBaseUrl) (eq $p.admission.audience "") -}}
 {{- fail "permesi-stack: quickstart frontend/admission settings must match the seeded development client and localhost profile" -}}
 {{- end -}}
 {{- end -}}

@@ -110,6 +110,7 @@ def main():
                     repository, digest = reference.split("@")
                     return {"repository": repository, "digest": digest, "pullPolicy": "IfNotPresent"}
                 if args.capacity:
+                    values["permesi"]["auth"]["frontendBaseUrl"] = "https://api.localhost:8443"
                     values["permesi"]["extraEnv"].extend([
                         {"name": "PERMESI_OIDC_ISSUER", "value": "https://api.localhost:8443"},
                         {"name": "PERMESI_OAUTH_AUDIENCE", "value": "capacity-api"}])

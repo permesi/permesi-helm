@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import tempfile
@@ -133,6 +134,8 @@ def main():
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
             require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
                     "reinstalled packaged embedded stack passes the common full verifier")
+            if args.openbao_image:
+                runpy.run_path(str(Path(__file__).with_name("admission-containment.py")))["trial"](k)
     finally:
         try:
             run(h + ["uninstall", "permesi", "--ignore-not-found"])

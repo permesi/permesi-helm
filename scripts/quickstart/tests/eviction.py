@@ -13,8 +13,39 @@ helpers = runpy.run_path(str(Path(__file__).resolve().parents[1] / "verify-runti
 run, require = helpers["run"], helpers["require"]
 
 
+def revoke_approle(admin):
+    """Fence the fixture enrollment, including unconsumed wrappers and its issued token."""
+    mount = "trial-approle"
+    run(admin + ["auth", "enable", "-path=" + mount, "approle"])
+    try:
+        path = "auth/" + mount + "/role/eviction"
+        run(admin + ["write", path, "token_policies=genesis", "token_no_default_policy=true", "token_ttl=10m",
+                     "secret_id_ttl=10m"])
+        role_id = run(admin + ["read", "-field=role_id", path + "/role-id"])
+        # Enroll a legitimate trial instance once, before withdrawal. Only its
+        # accessor is retained. Administrative lookups verify revocation.
+        credentials = json.loads(run(admin + ["write", "-force", "-format=json", path + "/secret-id"]))["data"]
+        issued = json.loads(run(admin + ["write", "-format=json", "auth/" + mount + "/login", "-"],
+                                input=json.dumps({"role_id": role_id, "secret_id": credentials.pop("secret_id")})))
+        accessor = issued["auth"]["accessor"]
+        del issued
+        wrapped = json.loads(run(admin + ["write", "-wrap-ttl=5m", "-format=json", "-force", path + "/secret-id"]))
+        wrapper = wrapped["wrap_info"]["accessor"]
+        del wrapped
+        # Disable minting first. Independently revoke issued service and wrapping tokens.
+        run(admin + ["delete", path])
+        for value in [accessor, wrapper]:
+            run(admin + ["write", "auth/token/revoke-accessor", "accessor=-"], input=value)
+        remaining = json.loads(run(admin + ["list", "-format=json", "auth/token/accessors"]))
+        require(accessor not in remaining and wrapper not in remaining,
+                "AppRole enrollment and issued service and wrapping token accessors were removed")
+    finally:
+        run(admin + ["auth", "disable", mount])
+
+
 def trial(kube, namespace, edge):
     admin = kube + ["exec", "-i", "deploy/" + edge + "-vault", "-c", "vault", "--", "bao"]
+    revoke_approle(admin)
     label = "eviction-genesis"
     def obj(kind, name):
         return json.loads(run(kube + ["get", kind, name, "-o", "json"]))

@@ -33,7 +33,7 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     def replicas():
         return sorted(p["metadata"]["name"] for p in json.loads(run(kube + ["get", "pods", "-l", selector,
-            "-o", "json"]))["items"] if any(c["type"] == "Ready" and c["status"] == "True"
+            "-o", "json"]))["items"] if "deletionTimestamp" not in p["metadata"] and any(c["type"] == "Ready" and c["status"] == "True"
             for c in p["status"].get("conditions", [])))
     nodes = replicas()
     require(len(nodes) == deployment["spec"]["replicas"] >= 2, "every core replica is ready for withdrawal measurement")

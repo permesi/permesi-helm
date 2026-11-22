@@ -80,9 +80,11 @@ def verify(kube, lock, client, namespace):
         ports = {}
         for service, prefix in [("permesi", "core"), ("genesis", "edge"), ("web", None)]:
             name = "permesi" if service == "permesi" else "permesi-" + service
+            run(kube + ["rollout", "status", "deploy/" + name, "--timeout=180s"])
             deployment = json.loads(run(kube + ["get", "deployment", name, "-o", "json"]))
             selector = ",".join(k + "=" + v for k, v in deployment["spec"]["selector"]["matchLabels"].items())
             pods = json.loads(run(kube + ["get", "pods", "-l", selector, "-o", "json"]))["items"]
+            pods = [pod for pod in pods if "deletionTimestamp" not in pod["metadata"]]
             require(len(pods) == deployment["status"]["readyReplicas"] == 2, f"two ready isolated-profile {service} replicas")
             image = lock["images"][service]
             for pod in pods:

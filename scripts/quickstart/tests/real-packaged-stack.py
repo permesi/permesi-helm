@@ -166,6 +166,7 @@ def main():
                 run(k + ["apply", "-f", "-"], input=policy)
                 repo, digest = args.previous_core.split("@")
                 def verify_previous():
+                    run(k + ["rollout", "status", "deploy/permesi", "--timeout=120s"])
                     deploy = json.loads(run(k + ["get", "deploy", "permesi", "-o", "json"]))
                     selector = ",".join(key + "=" + val for key, val in deploy["spec"]["selector"]["matchLabels"].items())
                     pods = json.loads(run(k + ["get", "pods", "-l", selector, "-o", "json"]))["items"]

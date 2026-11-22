@@ -107,7 +107,8 @@ def main():
     def pods(name):
         selector = kj('get', 'deploy', name)['spec']['selector']['matchLabels']
         labels = ','.join(f'{key}={value}' for key, value in selector.items())
-        return kj('get', 'pods', '-l', labels)['items']
+        return [pod for pod in kj('get', 'pods', '-l', labels)['items']
+                if 'deletionTimestamp' not in pod['metadata']]
     def agent(pod, *args, invalid=False):
         cmd = k + ['exec', pod, '-c', 'vault-agent', '--', 'env',
                    f'VAULT_TOKEN={"invalid-operator-token" if invalid else ""}',

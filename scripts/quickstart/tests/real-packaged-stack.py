@@ -168,6 +168,9 @@ def main():
             if args.capacity:
                 runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
                     k, core, edge, args.admission_bin, lock)
+            if args.openbao_image and not isolated:
+                runpy.run_path(str(tests / "shared-dependency-outage.py"))["trial"](k, core)
+                verify_profile()
             rollback = None
             if args.previous_core:
                 identity = lock["images"]["permesi"]

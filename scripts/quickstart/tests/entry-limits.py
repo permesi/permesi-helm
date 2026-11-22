@@ -40,48 +40,44 @@ def measure(kube, pod, namespace, admin, edge):
                 res.read()
                 return res.status
     try:
-        run(admin + ["audit", "enable", "-path=trial", "file", "file_path=/tmp/entry-audit.json"])
-        try:
-            probe = base64.b64encode(b"genesis readiness v1").decode()
-            digest = run(admin + ["write", "-field=hash", "sys/audit-hash/trial", "input=" + probe])
-            def signatures():
-                # Count only requests inside the service. Keep the default audit HMAC protection.
-                awk = '/"type":"request"/ && /"path":"transit\\/genesis\\/sign\\/genesis-signing"/ && index($0, h)==0 { n++ } END { print n+0 }'
-                return int(run(kube + ["exec", "deploy/" + edge + "-vault", "-c", "vault", "--",
-                                       "awk", "-v", "h=" + digest, awk, "/tmp/entry-audit.json"]))
-            # Wait for kubelet to observe the new container before sampling.
-            deadline = time.monotonic() + 45
-            while True:
-                try:
-                    cpu_before = cpu()
-                    break
-                except (StopIteration, KeyError):
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError("missing kubelet CPU observation")
-                    time.sleep(2)
-            before = counts()
-            signed = signatures()
-            started = time.monotonic()
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                statuses = list(pool.map(mint, range(16)))
-            elapsed = time.monotonic() - started
-            accepted = statuses.count(200)
-            require(accepted > 0 and statuses.count(429) > 0 and all(status in (200, 429) for status in statuses)
-                    and accepted <= 1 + int(elapsed), "configured one-request burst and one-per-second rate hold")
-            after = counts()
-            signatures_done = signatures() - signed
-            require(tuple(a-b for a, b in zip(after, before)) == (accepted, accepted) and signatures_done == accepted,
-                    "each success produced one lookup, receipt and signature; all entry rejections added zero")
-            deadline = time.monotonic() + 30
+        probe = base64.b64encode(b"genesis readiness v1").decode()
+        digest = run(admin + ["write", "-field=hash", "sys/audit-hash/trial", "input=" + probe])
+        def signatures():
+            # Count only requests inside the service. Keep the default audit HMAC protection.
+            awk = '/"type":"request"/ && /"path":"transit\\/genesis\\/sign\\/genesis-signing"/ && index($0, h)==0 { n++ } END { print n+0 }'
+            return int(run(kube + ["exec", "deploy/" + edge + "-vault", "-c", "vault", "--",
+                                   "awk", "-v", "h=" + digest, awk, "/audit/entry-audit.json"]))
+        # Wait for kubelet to observe the new container before sampling.
+        deadline = time.monotonic() + 45
+        while True:
+            try:
+                cpu_before = cpu()
+                break
+            except (StopIteration, KeyError):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("missing kubelet CPU observation")
+                time.sleep(2)
+        before = counts()
+        signed = signatures()
+        started = time.monotonic()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            statuses = list(pool.map(mint, range(16)))
+        elapsed = time.monotonic() - started
+        accepted = statuses.count(200)
+        require(accepted > 0 and statuses.count(429) > 0 and all(status in (200, 429) for status in statuses)
+                and accepted <= 1 + int(elapsed), "configured one-request burst and one-per-second rate hold")
+        after = counts()
+        signatures_done = signatures() - signed
+        require(tuple(a-b for a, b in zip(after, before)) == (accepted, accepted) and signatures_done == accepted,
+                "each success produced one lookup, receipt and signature; all entry rejections added zero")
+        deadline = time.monotonic() + 30
+        cpu_after = cpu()
+        while cpu_after == cpu_before and time.monotonic() < deadline:
+            time.sleep(1)
             cpu_after = cpu()
-            while cpu_after == cpu_before and time.monotonic() < deadline:
-                time.sleep(1)
-                cpu_after = cpu()
-            require(cpu_after > cpu_before, "kubelet observed CPU consumption across the burst interval")
-            print("ENTRY " + json.dumps(dict(accepted=accepted, rejected=statuses.count(429),
-                  lookup_calls=after[0]-before[0], receipt_calls=after[1]-before[1], signatures=signatures_done,
-                  interval_seconds=elapsed, sampled_cpu_ms=(cpu_after-cpu_before)/1e6)), flush=True)
-        finally:
-            run(admin + ["audit", "disable", "trial"])
+        require(cpu_after > cpu_before, "kubelet observed CPU consumption across the burst interval")
+        print("ENTRY " + json.dumps(dict(accepted=accepted, rejected=statuses.count(429),
+              lookup_calls=after[0]-before[0], receipt_calls=after[1]-before[1], signatures=signatures_done,
+              interval_seconds=elapsed, sampled_cpu_ms=(cpu_after-cpu_before)/1e6)), flush=True)
     finally:
         forward.close()

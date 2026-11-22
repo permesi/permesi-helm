@@ -37,6 +37,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
+        {{- if .Values.qualificationObservations }}
+        fsGroup: 1000
+        {{- end }}
         runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
@@ -45,6 +48,9 @@ spec:
           image: {{ include "quickstart.image" .Values.vault.image }}
           imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
           command: ["sh", "/scripts/start-dev-vault.sh"]
+          {{- if .Values.qualificationObservations }}
+          args: ["-config=/scripts/audit.hcl"]
+          {{- end }}
           env:
             - name: VAULT_DEV_ROOT_TOKEN_ID
               valueFrom:
@@ -87,6 +93,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 20
           volumeMounts:
+            {{- if .Values.qualificationObservations }}
+            - name: audit
+              mountPath: /audit
+            {{- end }}
             - name: tmp
               mountPath: /tmp
             - name: scripts
@@ -95,10 +105,18 @@ spec:
           resources:
             {{- toYaml .Values.vault.resources | nindent 12 }}
       volumes:
+        {{- if .Values.qualificationObservations }}
+        - name: audit
+          emptyDir: {sizeLimit: 128Mi}
+        {{- end }}
         - name: scripts
           configMap:
             name: {{ $fullname }}-scripts
             items:
+              {{- if .Values.qualificationObservations }}
+              - key: audit.hcl
+                path: audit.hcl
+              {{- end }}
               - key: start-dev-vault.sh
                 path: start-dev-vault.sh
         - name: tmp

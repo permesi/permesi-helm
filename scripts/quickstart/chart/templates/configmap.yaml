@@ -1,6 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  {{- if .Values.qualificationObservations }}
+  audit.hcl: |
+    audit "file" "trial" {
+      options { file_path = "/audit/entry-audit.json" }
+    }
+  {{- end }}
   name: {{ include "quickstart.fullname" . }}-scripts
   namespace: {{ .Release.Namespace }}
   labels:

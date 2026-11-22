@@ -116,7 +116,7 @@ def main():
                         {"name": "PERMESI_OIDC_ISSUER", "value": "https://api.localhost:8443"},
                         {"name": "PERMESI_OAUTH_AUDIENCE", "value": "capacity-api"}])
                 quickstart = values["quickstart"]
-                quickstart.update(secretsProvider="openbao", vault={"image": pinned(args.openbao_image)},
+                quickstart.update(secretsProvider="openbao", qualificationObservations=True, vault={"image": pinned(args.openbao_image)},
                                   postgresql={"image": pinned(args.postgres_image)})
                 for svc in ("permesi", "genesis"):
                     values[svc]["secretsProvider"] = "openbao"

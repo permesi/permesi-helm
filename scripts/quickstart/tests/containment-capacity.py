@@ -164,8 +164,8 @@ def measure(kube, core, edge, binary, record):
             call()
         def phase():
             start = time.monotonic()
-            # Code exchange and refresh both consume the default 100-per-600s
-            # token exchange budget for one source. Leave room for setup and
+            # Authorization and explicit consent both consume the default 100-per-600s
+            # authorization budget for one source. Leave room for setup and
             # measure successful legitimate traffic with all production limits on.
             duration, interval = 900, 18
             def sample(call):

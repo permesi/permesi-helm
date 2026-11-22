@@ -153,6 +153,31 @@ def main():
                     "SELECT count(*)||':'||coalesce(md5(string_agg(id::text||email||coalesce(encode(opaque_registration_record,'hex'),'<null>'),',' ORDER BY id)),'empty') FROM users"])
             run(install)
             if args.openbao_image:
+                # Capture actual dependency identities alongside the app and SQL
+                # inputs. For an index pin, verify the node's platform manifest.
+                pods = json.loads(run(k + ["get", "pods", "-o", "json"]))["items"]
+                observed = {}
+                for pod in pods:
+                    for container in pod["status"].get("containerStatuses", []):
+                        if container["name"] not in ("vault", "postgresql"):
+                            continue
+                        key = "openbao" if container["name"] == "vault" else "postgres"
+                        reference = qualification["images"][key]
+                        raw = container["imageID"].split("@")[-1]
+                        wanted = reference.split("@")[1]
+                        if raw != wanted:
+                            index = json.loads(run(["skopeo", "inspect", "--raw", "docker://" + reference]))
+                            node = json.loads(run(k + ["get", "node", pod["spec"]["nodeName"], "-o", "json"]))
+                            platform = node["status"]["nodeInfo"]
+                            require(any(m["digest"] == raw and m.get("platform", {}).get("os") == platform["operatingSystem"]
+                                        and m["platform"].get("architecture") == platform["architecture"]
+                                        for m in index.get("manifests", [])), "dependency platform manifest matches pinned index")
+                        observed[pod["metadata"]["name"]] = {"dependency": key, "digest": raw}
+                expected = 2 if isolated else 1
+                require(all(sum(v["dependency"] == key for v in observed.values()) == expected
+                            for key in ("openbao", "postgres")), "every dependency manifest was observed")
+                qualification["runningDependencies"] = observed
+                (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
                 # Operator action outside the release. CAS zero protects an existing withdrawal floor.
                 operator = k + ["exec", "-i", "deploy/" + core + "-vault", "-c", "vault", "--", "bao"]
                 metadata = json.loads(run((reader or operator + ["read"]) + ["-format=json", "transit/genesis/keys/genesis-signing"]))["data"]

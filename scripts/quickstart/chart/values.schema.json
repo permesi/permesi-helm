@@ -9,7 +9,6 @@
       "additionalProperties": false,
       "required": ["repository", "tag"],
       "properties": {
-    "secretsProvider": {"type":"string", "enum":["vault","openbao"]},
         "repository": {"type": "string", "minLength": 1},
         "tag": {"type": "string", "minLength": 1, "not": {"const": "latest"}},
         "digest": {"type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$"},
@@ -43,6 +42,7 @@
     }
   },
   "properties": {
+    "secretsProvider": {"enum": ["vault", "openbao"]},
     "acknowledgeDevelopment": {"type": "boolean"},
     "enabled": {"type": "boolean"},
     "nameOverride": {"type": "string"},

@@ -110,7 +110,7 @@ jobs:
             --app-source application --fixture "$RUNNER_TEMP/fixture" --admission-bin "$RUNNER_TEMP/admission/release/quickstart-admission" \
             --previous-core "$PREVIOUS_IMAGE" --previous-revision "$PREVIOUS_SHA" --openbao-image "$OPENBAO_IMAGE" \
             --postgres-image "$POSTGRES_IMAGE" | tee "$RUNNER_TEMP/qualification.log"
-          python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$(jq -r '.images.permesi|.repository+"@"+.digest' scripts/quickstart/lock.json)" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE"
+          python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$(jq -r '.images.permesi|.repository+"@"+.digest' scripts/quickstart/lock.json)" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE" --companion "$OPENBAO_IMAGE"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

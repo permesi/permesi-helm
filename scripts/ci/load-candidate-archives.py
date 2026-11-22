@@ -34,8 +34,18 @@ with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
                 runtime = [os.environ.get("KIND_EXPERIMENTAL_PROVIDER", "docker"), "exec", node]
                 ctr = runtime + ["ctr", "-n", "k8s.io", "images"]
                 pinned = repo + "@" + digest
+                def target_digest(name):
+                    lines = subprocess.check_output(ctr + ["ls", "name==" + name], text=True).splitlines()
+                    rows = [line.split() for line in lines if line.split()[:1] == [name]]
+                    if len(rows) != 1:
+                        raise ValueError("containerd lacks one exact image target")
+                    return rows[0][2]
+                if target_digest(reference) != digest:
+                    raise ValueError("imported containerd target differs from verified archive manifest")
                 if pinned not in subprocess.check_output(ctr + ["ls", "-q"], text=True).splitlines():
                     subprocess.run(ctr + ["tag", reference, pinned], check=True)
+                if target_digest(pinned) != digest:
+                    raise ValueError("pinned repository alias resolves to an unexpected manifest")
                 cri = json.loads(subprocess.check_output(runtime + ["crictl", "inspecti", pinned]))
                 if pinned not in cri["status"]["repoDigests"]:
                     raise ValueError("candidate manifest unavailable through CRI")

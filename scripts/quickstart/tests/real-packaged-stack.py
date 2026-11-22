@@ -72,6 +72,9 @@ def main():
     if args.openbao_image:
         qualification = {key: lock[key] for key in ("appRevision", "chartRevision", "appArchiveSha256")}
         qualification["outcome"] = "incomplete"
+        qualification["requestedChecks"] = {"capacity": args.capacity, "rollback": bool(args.previous_core),
+                                            "sharedDependencyOutage": args.profile == "shared",
+                                            "eviction": True, "offlineReuse": True, "partition": True, "withdrawal": True}
         qualification["profile"] = args.profile
         qualification["images"] = {name: lock["images"][name]["repository"] + "@" + lock["images"][name]["digest"]
                                    for name in ("permesi", "genesis", "web")}
@@ -304,15 +307,21 @@ def main():
             qualification["outcome"] = "failed"
         raise
     finally:
-        if args.openbao_image:
-            (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
         try:
-            if policy:
-                run(k + ["delete", "--ignore-not-found", "-f", "-"], input=policy)
-            for release in (["permesi", "core-quickstart", "edge-quickstart"] if args.profile == "isolated" else ["permesi"]):
-                run(h + ["uninstall", release, "--ignore-not-found"])
+            try:
+                if policy:
+                    run(k + ["delete", "--ignore-not-found", "-f", "-"], input=policy)
+                for release in (["permesi", "core-quickstart", "edge-quickstart"] if args.profile == "isolated" else ["permesi"]):
+                    run(h + ["uninstall", release, "--ignore-not-found"])
+            finally:
+                run(k + ["delete", "namespace", namespace, "--ignore-not-found", "--wait=true"])
+        except BaseException:
+            if args.openbao_image:
+                qualification["outcome"] = "cleanup_failed"
+            raise
         finally:
-            run(k + ["delete", "namespace", namespace, "--ignore-not-found", "--wait=true"])
+            if args.openbao_image:
+                (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
 
 
 if __name__ == "__main__":

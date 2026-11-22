@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--context", required=True)
-    for image in ("legacy", "previous", "current"):
+    for image in ("legacy", "previous", "current", "companion"):
         parser.add_argument("--" + image, required=True, help="complete image repository@digest")
     args = parser.parse_args()
     if len({args.legacy, args.previous, args.current}) != 3:
@@ -27,7 +27,7 @@ def main():
     helm = ["helm", "--kube-context", args.context, "-n", namespace]
     policy = subprocess.check_output(["python3", str(ROOT / "scripts/ci/core-image-policy.py"),
         "--namespace", namespace, "--deployment", "permesi", "--service-account", "permesi",
-        "--image", args.previous, "--image", args.current], text=True)
+        "--image", args.previous, "--image", args.current, "--companion-image", args.companion], text=True)
     subprocess.run(kube + ["create", "namespace", namespace], check=True)
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,7 +73,7 @@ spec:
             pod = {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "debug-check"},
                    "spec": {"containers": [{"name": "permesi", "image": args.current}]}}
             subprocess.run(kube + ["create", "-f", "-"], input=json.dumps(pod), text=True, check=True)
-            patch = {"spec": {"ephemeralContainers": [{"name": "diagnostic", "image": args.current}]}}
+            patch = {"spec": {"ephemeralContainers": [{"name": "diagnostic", "image": args.companion}]}}
             verdict = subprocess.run(kube + ["patch", "pod/debug-check", "--subresource=ephemeralcontainers",
                                      "--type=merge", "--dry-run=server", "-p", json.dumps(patch)],
                                      text=True, capture_output=True)

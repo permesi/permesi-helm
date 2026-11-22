@@ -38,10 +38,14 @@ def main():
     parser.add_argument("--app-source", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, default=ROOT)
     parser.add_argument("--admission-bin", default=os.environ.get("QS_ADMISSION_BIN"), required=False)
+    parser.add_argument("--previous-core", help="previous qualified core repository@digest for native rollback")
+    parser.add_argument("--previous-revision", help="full build commit embedded in the previous core")
     parser.add_argument("--profile", choices=("shared", "isolated"), default="shared")
     parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
     parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
     args = parser.parse_args()
+    if bool(args.previous_core) != bool(args.previous_revision) or (args.previous_core and not args.openbao_image):
+        parser.error("binary rollback requires both previous image and revision in a candidate profile")
     if args.profile == "isolated" and not args.openbao_image:
         parser.error("isolated qualification requires OpenBao")
     if bool(args.openbao_image) != bool(args.postgres_image):
@@ -72,6 +76,7 @@ def main():
     require(not run(k + ["get", "namespace", namespace, "--ignore-not-found", "-o", "name"]),
             "fixed embedded-profile namespace does not already exist")
     run(k + ["create", "namespace", namespace])
+    policy = None
     try:
         run(k + ["label", "namespace", namespace, "pod-security.kubernetes.io/enforce=restricted"])
         sql_files = sorted((args.app_source / "db/sql").glob("*.sql"))
@@ -149,10 +154,43 @@ def main():
             run(install)
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
             verify_profile()
+            rollback = None
+            if args.previous_core:
+                identity = lock["images"]["permesi"]
+                current = identity["repository"] + "@" + identity["digest"]
+                require(args.previous_core != current and args.previous_revision != lock["appRevision"],
+                        "binary rollback uses distinct revisions and immutable images")
+                policy = run(["python3", str(ROOT / "scripts/ci/core-image-policy.py"), "--namespace", namespace,
+                              "--deployment", "permesi", "--service-account", "permesi", "--image", current,
+                              "--image", args.previous_core])
+                run(k + ["apply", "-f", "-"], input=policy)
+                repo, digest = args.previous_core.split("@")
+                def verify_previous():
+                    deploy = json.loads(run(k + ["get", "deploy", "permesi", "-o", "json"]))
+                    selector = ",".join(key + "=" + val for key, val in deploy["spec"]["selector"]["matchLabels"].items())
+                    pods = json.loads(run(k + ["get", "pods", "-l", selector, "-o", "json"]))["items"]
+                    pods = [p for p in pods if "deletionTimestamp" not in p["metadata"]]
+                    require(len(pods) == deploy["status"]["readyReplicas"] == 2, "both rollback replicas are ready")
+                    for pod in pods:
+                        status = next(s for s in pod["status"]["containerStatuses"] if s["name"] == "permesi")
+                        require(status["imageID"].split("@")[-1] == digest and args.previous_revision in
+                                run(k + ["exec", pod["metadata"]["name"], "-c", "permesi", "--", "/app/permesi", "--version"]),
+                                "running core image and binary match the previous revision")
+                run(install + ["--set-string", "permesi.image.repository=" + repo,
+                               "--set-string", "permesi.image.digest=" + digest])
+                verify_previous()
+                revision = json.loads(run(h + ["status", "permesi", "-o", "json"]))["version"]
+                run(install)
+                verify_profile()
+                def rollback():
+                    run(h + ["rollback", "permesi", str(revision), "--wait", "--timeout", "120s"])
+                    verify_previous()
             if args.openbao_image:
-                runpy.run_path(str(Path(__file__).with_name("admission-containment.py")))["trial"](k, core, edge, reader)
+                runpy.run_path(str(Path(__file__).with_name("admission-containment.py")))["trial"](k, core, edge, reader, rollback)
     finally:
         try:
+            if policy:
+                run(k + ["delete", "--ignore-not-found", "-f", "-"], input=policy)
             for release in (["permesi", "core-quickstart", "edge-quickstart"] if args.profile == "isolated" else ["permesi"]):
                 run(h + ["uninstall", release, "--ignore-not-found"])
         finally:

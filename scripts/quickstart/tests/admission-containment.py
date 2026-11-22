@@ -20,7 +20,7 @@ helpers = runpy.run_path(str(Path(__file__).resolve().parents[1] / "verify-runti
 PortForward, run, require = (helpers[k] for k in ("PortForward", "run", "require"))
 
 
-def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=None):
+def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=None, rollback=None):
     def operator_for(prefix):
         return kube + ["exec", "-i", "deploy/" + prefix + "-vault", "-c", "vault", "--", "bao"]
     operator = operator_for(core)
@@ -116,3 +116,10 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
             if remaining:
                 time.sleep(2)
         require(not remaining and nodes == replicas(), "every serving core replica observed withdrawal within 60 seconds")
+        if rollback:
+            rollback()
+            for node in replicas():
+                fresh = PortForward(kube, "pod/" + node)
+                stack.callback(fresh.close)
+                require(time.time() < expiry and rejected(signup(fresh.port, token)),
+                        f"{node} rejected the same unexpired token after binary rollback")

@@ -89,7 +89,7 @@ def main():
             run(["helm", "package", str(charts / "permesi-stack"), "-d", str(directory)])
             package = next(directory.glob("permesi-stack-*.tgz"))
             profile_values = (charts / "permesi-stack/examples/quickstart.yaml").read_text()
-            values = yaml.safe_load(profile_values.replace(".permesi-quickstart.svc", "." + namespace + ".svc"))
+            values = yaml.safe_load(profile_values.replace(".permesi-quickstart", "." + namespace))
             values["quickstart"]["bootstrap"]["schema"] = {
                 "sourceUrl": "", "sha256": "", "revision": lock["appRevision"],
                 "existingConfigMaps": configmaps}

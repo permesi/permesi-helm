@@ -54,6 +54,7 @@ def main():
     if bool(args.openbao_image) != bool(args.postgres_image):
         parser.error("supply both dependency images")
     require(bool(args.admission_bin) and Path(args.admission_bin).is_file(), "actual admission client is available")
+    tests = args.fixture / "scripts/quickstart/tests"
     lock = json.loads((args.fixture / "scripts/quickstart/lock.json").read_text())
     require(run(["git", "-C", str(args.app_source), "rev-parse", "HEAD"]) == lock["appRevision"],
             "packaged stack SQL checkout matches the qualification revision")
@@ -126,7 +127,7 @@ def main():
             reader = None
             core = edge = "permesi-quickstart"
             if isolated:
-                isolated_checks = runpy.run_path(str(Path(__file__).with_name("isolated-dependencies.py")))
+                isolated_checks = runpy.run_path(str(tests / "isolated-dependencies.py"))
                 reader = isolated_checks["install_dependencies"](k, h, args.fixture, values, directory, namespace)
                 core, edge = "core-quickstart", "edge-quickstart"
             values_file = directory / "values.json"
@@ -163,9 +164,9 @@ def main():
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
             verify_profile()
             if args.openbao_image:
-                runpy.run_path(str(Path(__file__).with_name("eviction.py")))["trial"](k, namespace, edge)
+                runpy.run_path(str(tests / "eviction.py"))["trial"](k, namespace, edge)
             if args.capacity:
-                runpy.run_path(str(Path(__file__).with_name("containment-capacity.py")))["measure"](
+                runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
                     k, core, edge, args.admission_bin, lock)
             rollback = None
             if args.previous_core:
@@ -173,7 +174,7 @@ def main():
                 current = identity["repository"] + "@" + identity["digest"]
                 require(args.previous_core != current and args.previous_revision != lock["appRevision"],
                         "binary rollback uses distinct revisions and immutable images")
-                policy = run(["python3", str(ROOT / "scripts/ci/core-image-policy.py"), "--namespace", namespace,
+                policy = run(["python3", str(args.fixture / "scripts/ci/core-image-policy.py"), "--namespace", namespace,
                               "--deployment", "permesi", "--service-account", "permesi", "--image", current,
                               "--image", args.previous_core])
                 run(k + ["apply", "-f", "-"], input=policy)
@@ -200,7 +201,7 @@ def main():
                     run(h + ["rollback", "permesi", str(revision), "--wait", "--timeout", "120s"])
                     verify_previous()
             if args.openbao_image:
-                runpy.run_path(str(Path(__file__).with_name("admission-containment.py")))["trial"](k, core, edge, reader, rollback)
+                runpy.run_path(str(tests / "admission-containment.py"))["trial"](k, core, edge, reader, rollback)
     finally:
         try:
             if policy:

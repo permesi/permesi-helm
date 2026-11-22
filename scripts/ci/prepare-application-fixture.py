@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import shutil
+import tarfile
 import subprocess
 
 import yaml
@@ -54,16 +54,20 @@ def main():
     if chart_dirty:
         parser.error("qualification requires committed chart sources")
     args.destination.mkdir(parents=True)
-    for directory in ("charts", "scripts", "docs"):
-        shutil.copytree(ROOT / directory, args.destination / directory,
-                        ignore=shutil.ignore_patterns("__pycache__", "target"))
+    chart_revision = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
+    with subprocess.Popen(["git", "-C", str(ROOT), "archive", chart_revision, "charts", "scripts", "docs"],
+                          stdout=subprocess.PIPE) as git:
+        with tarfile.open(fileobj=git.stdout, mode="r|") as archive:
+            archive.extractall(args.destination, filter="data")
+        if git.wait() != 0:
+            parser.error("cannot archive the exact chart commit")
     lock_path = args.destination / "scripts/quickstart/lock.json"
     lock = json.loads(lock_path.read_text())
     sql_archive = args.destination / "application-sql.tar.gz"
     subprocess.run(["git", "-C", str(args.app_source), "archive", "--format=tar.gz",
                     f"--prefix=permesi-{revision}/", "-o", str(sql_archive), revision, "db/sql"], check=True)
     lock["appArchiveSha256"] = hashlib.sha256(sql_archive.read_bytes()).hexdigest()
-    lock["chartRevision"] = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
+    lock["chartRevision"] = chart_revision
     lock["appRevision"] = revision
     lock["images"].update(images)
     lock_path.write_text(json.dumps(lock, indent=2) + "\n")

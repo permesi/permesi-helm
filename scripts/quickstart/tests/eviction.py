@@ -34,9 +34,13 @@ def trial(kube, namespace, edge):
     require(count == 1, "eviction instance has its own Agent enrollment")
     volume["name"] = label
     apply("ConfigMap", data=cfg)
+    app = next(c for c in template["containers"] if c["name"] == "genesis")
+    app["env"].extend({"name": "GENESIS_PUBLIC_" + key, "value": "1"} for key in
+                      ["REQUESTS_PER_SECOND", "BURST", "MAX_IN_FLIGHT"])
     apply("Pod", spec=template)
     run(kube + ["wait", "--for=condition=Ready", "pod/" + label, "--timeout=180s"])
     identity = obj("pod", label)
+    runpy.run_path(str(Path(__file__).with_name("entry-limits.py")))["measure"](kube, identity, namespace, admin, edge)
     ip = identity["status"]["podIP"]
     from ipaddress import ip_address
     ip_address(ip)

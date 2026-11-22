@@ -42,6 +42,9 @@ spec:
         - name: postgresql
           image: {{ include "quickstart.image" .Values.postgresql.image }}
           imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          {{- if eq .Values.secretsProvider "openbao" }}
+          args: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+          {{- end }}
           env:
             - name: POSTGRES_PASSWORD_FILE
               value: /credentials/postgres-admin-password

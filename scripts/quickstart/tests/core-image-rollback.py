@@ -52,6 +52,16 @@ spec:
                                       "--set-string", "image=" + image], check=True, stdout=subprocess.DEVNULL)
             subprocess.run(kube + ["apply", "-f", "-"], input=policy, text=True, check=True)
             subprocess.run(helm + ["rollback", "permesi", "2", "--wait"], check=True)
+            # The Pod decision must reject a stale replica set independently of Deployment admission.
+            for image in [args.previous, args.legacy]:
+                pod = {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "probe", "namespace": namespace},
+                       "spec": {"containers": [{"name": "permesi", "image": image}]}}
+                admitted = subprocess.run(kube + ["create", "--dry-run=server", "-f", "-"],
+                                          input=json.dumps(pod), text=True, capture_output=True)
+                if image == args.previous and admitted.returncode != 0:
+                    raise RuntimeError("qualified Pod was denied")
+                if image == args.legacy and (admitted.returncode == 0 or "operator-qualified image digest" not in admitted.stderr):
+                    raise RuntimeError("legacy Pod was admitted")
             def live_image():
                 return json.loads(subprocess.check_output(kube + ["get", "deployment", "permesi", "-o", "json"]))[
                     "spec"]["template"]["spec"]["containers"][0]["image"]

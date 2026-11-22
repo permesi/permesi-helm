@@ -176,7 +176,7 @@ def main():
                         "binary rollback uses distinct revisions and immutable images")
                 policy = run(["python3", str(args.fixture / "scripts/ci/core-image-policy.py"), "--namespace", namespace,
                               "--deployment", "permesi", "--service-account", "permesi", "--image", current,
-                              "--image", args.previous_core])
+                              "--image", args.previous_core, "--companion-image", args.openbao_image])
                 run(k + ["apply", "-f", "-"], input=policy)
                 repo, digest = args.previous_core.split("@")
                 def verify_previous():

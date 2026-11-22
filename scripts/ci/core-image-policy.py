@@ -16,11 +16,12 @@ def main():
     parser.add_argument("--deployment", required=True)
     parser.add_argument("--service-account", required=True)
     parser.add_argument("--image", required=True, action="append")
+    parser.add_argument("--companion-image", action="append", default=[], help="qualified sidecar or init container digest")
     args = parser.parse_args()
     for name in [args.namespace, args.deployment, args.service_account]:
         if len(name) > 63 or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", name):
             parser.error("expected a Kubernetes DNS label")
-    if not all(re.fullmatch(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}", i) for i in args.image):
+    if not all(re.fullmatch(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}", i) for i in args.image + args.companion_image):
         parser.error("supply complete repository@sha256 references")
     resources = []
     for kind, group, spec in [("deployments", "apps", "object.spec.template.spec"),
@@ -32,13 +33,20 @@ def main():
         if group:
             target = f'(object.metadata.name == {json.dumps(args.deployment)} || {target})'
         approved = json.dumps(sorted(set(args.image)))
+        companions = json.dumps(sorted(set(args.companion_image)))
+        validations = [
+            f'{spec}.containers.exists(c, c.name == "permesi" && c.image in {approved})',
+            f'{spec}.containers.all(c, c.name == "permesi" || c.image in {companions})',
+            f'!has({spec}.initContainers) || {spec}.initContainers.all(c, c.image in {companions})',
+            f'!has({spec}.ephemeralContainers) || {spec}.ephemeralContainers.all(c, c.image in {companions})',
+        ]
         resources.append(dict(base, kind="ValidatingAdmissionPolicy", spec={
             "failurePolicy": "Fail",
             "matchConstraints": {"resourceRules": [{"apiGroups": [group], "apiVersions": ["v1"],
-                "resources": [kind], "operations": ["CREATE", "UPDATE"]}]},
+                "resources": [kind] if group else ["pods", "pods/ephemeralcontainers"], "operations": ["CREATE", "UPDATE"]}]},
             "matchConditions": [{"name": "core", "expression": target}],
-            "validations": [{"expression": f'{spec}.containers.exists(c, c.name == "permesi" && c.image in {approved})',
-                             "message": "Permesi requires an operator-qualified image digest."}]}))
+            "validations": [{"expression": expression,
+                             "message": "Permesi requires an operator-qualified image digest."} for expression in validations]}))
         resources.append(dict(base, kind="ValidatingAdmissionPolicyBinding", spec={
             "policyName": name, "validationActions": ["Deny"],
             "matchResources": {"namespaceSelector": {"matchLabels": {

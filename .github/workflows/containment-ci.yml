@@ -116,6 +116,7 @@ jobs:
         with:
           name: containment-${{ matrix.profile }}
           path: |
+            ${{ runner.temp }}/fixture/qualification.json
             ${{ runner.temp }}/qualification.log
             ${{ runner.temp }}/fixture/application-sql.tar.gz
             ${{ runner.temp }}/fixture/scripts/quickstart/lock.json

@@ -13,6 +13,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import tarfile
+import time
 
 import yaml
 
@@ -61,6 +62,13 @@ def main():
     require(not run(["git", "-C", str(args.app_source), "status", "--porcelain", "--", "db/sql"]),
             "packaged stack SQL checkout is clean")
     if args.openbao_image:
+        qualification = {key: lock[key] for key in ("appRevision", "chartRevision", "appArchiveSha256")}
+        qualification["profile"] = args.profile
+        qualification["images"] = {name: lock["images"][name]["repository"] + "@" + lock["images"][name]["digest"]
+                                   for name in ("permesi", "genesis", "web")}
+        qualification["images"].update(openbao=args.openbao_image, postgres=args.postgres_image)
+        qualification["previousCore"] = {"revision": args.previous_revision, "image": args.previous_core}
+        (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
         archive = args.fixture / "application-sql.tar.gz"
         require(run(["git", "-C", str(ROOT), "rev-parse", "HEAD"]) == lock["chartRevision"],
                 "chart checkout matches the qualification record")
@@ -165,9 +173,14 @@ def main():
             verify_profile()
             if args.openbao_image:
                 runpy.run_path(str(tests / "eviction.py"))["trial"](k, namespace, edge)
+            capacity_failure = None
             if args.capacity:
-                runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
-                    k, core, edge, args.admission_bin, lock)
+                try:
+                    runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
+                        k, core, edge, args.admission_bin, qualification)
+                except RuntimeError as error:
+                    capacity_failure = error
+                    print("Capacity gate failed; continuing independent checks", flush=True)
             if args.openbao_image and not isolated:
                 runpy.run_path(str(tests / "shared-dependency-outage.py"))["trial"](k, core)
                 verify_profile()
@@ -200,11 +213,41 @@ def main():
                 revision = json.loads(run(h + ["status", "permesi", "-o", "json"]))["version"]
                 run(install)
                 verify_profile()
+                # Hold the rollout with one ready Pod from each qualified build.
+                # minReadySeconds stops the controller from replacing the second
+                # current Pod before the test observes and pauses the mixed state.
+                patch = {"spec": {"minReadySeconds": 90, "strategy": {"type": "RollingUpdate",
+                         "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0}},
+                         "template": {"spec": {"containers": [{"name": "permesi", "image": args.previous_core}]}}}}
+                run(k + ["patch", "deploy/permesi", "--type=strategic", "-p", json.dumps(patch)])
+                selector = json.loads(run(k + ["get", "deploy/permesi", "-o", "json"]))["spec"]["selector"]["matchLabels"]
+                selector = ",".join(key + "=" + val for key, val in selector.items())
+                builds = {digest: args.previous_revision, identity["digest"]: lock["appRevision"]}
+                deadline = time.monotonic() + 120
+                while time.monotonic() < deadline:
+                    pods = json.loads(run(k + ["get", "pods", "-l", selector, "-o", "json"]))["items"]
+                    ready = {p["metadata"]["name"]: next(c["imageID"].split("@")[-1]
+                             for c in p["status"]["containerStatuses"] if c["name"] == "permesi")
+                             for p in pods if "deletionTimestamp" not in p["metadata"] and any(
+                             c["type"] == "Ready" and c["status"] == "True" for c in p["status"].get("conditions", []))}
+                    if len(ready) == 2 and set(ready.values()) == builds.keys():
+                        break
+                    time.sleep(1)
+                else:
+                    raise RuntimeError("interrupted rollout did not reach two ready binary revisions")
+                run(k + ["rollout", "pause", "deploy/permesi"])
+                for pod, manifest in ready.items():
+                    require(builds[manifest] in run(k + ["exec", pod, "-c", "permesi", "--", "/app/permesi", "--version"]),
+                            "interrupted rollout serves the expected core binary")
                 def rollback():
+                    run(k + ["patch", "deploy/permesi", "--type=merge", "-p",
+                             json.dumps({"spec": {"paused": False, "minReadySeconds": 0}})])
                     run(h + ["rollback", "permesi", str(revision), "--wait", "--timeout", "120s"])
                     verify_previous()
             if args.openbao_image:
                 runpy.run_path(str(tests / "admission-containment.py"))["trial"](k, core, edge, reader, rollback)
+            if capacity_failure:
+                raise capacity_failure
     finally:
         try:
             if policy:

@@ -1,10 +1,11 @@
 """Measure four legitimate core flows at a fixed offered load before and during a Genesis outage.
 
-Each flow is offered once every six seconds for fifteen minutes per phase.
+Each flow is offered once every eighteen seconds for fifteen minutes per phase.
 Requests use the trusted TLS roots and the public OPAQUE/OAuth APIs. The only
 database read is the newly registered fixture user's development mailbox.
 """
 import base64
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import hashlib
@@ -148,9 +149,10 @@ def measure(kube, core, edge, binary, record):
         renewal = first["refresh_token"]
         access = first["access_token"]
         def refresh():
-            nonlocal renewal
+            nonlocal renewal, access
             result = api("/token", "POST", form=dict(grant_type="refresh_token", client_id=client, refresh_token=renewal))
             renewal = result["refresh_token"]
+            access = result["access_token"]
         def authorize():
             nonlocal access
             access = code()["access_token"]
@@ -162,23 +164,28 @@ def measure(kube, core, edge, binary, record):
             call()
         def phase():
             start = time.monotonic()
-            duration, interval = 900, 6
+            # Code exchange and refresh both consume the default 100-per-600s
+            # token exchange budget for one source. Leave room for setup and
+            # measure successful legitimate traffic with all production limits on.
+            duration, interval = 900, 18
             def sample(call):
-                latencies, failures = [], 0
+                latencies, failures = [], Counter()
                 for offset in range(0, duration, interval):
                     due = start + offset
                     time.sleep(max(0, due - time.monotonic()))
                     if time.monotonic() - due >= interval:
-                        failures += 1
+                        failures["missed_deadline"] += 1
                         continue
                     try:
                         call()
                         latencies.append((time.monotonic() - due) * 1000)
-                    except (OSError, RuntimeError, ValueError, KeyError, http.client.HTTPException):
-                        failures += 1
+                    except (OSError, RuntimeError, ValueError, KeyError, http.client.HTTPException) as error:
+                        status = re.fullmatch(r"(GET|POST) (/[a-z/]+) returned ([0-9]{3})", str(error))
+                        reason = status.group(0) if status else type(error).__name__
+                        failures[reason] += 1
                 offered = duration // interval
                 return dict(offered=offered, successes=len(latencies), success_rate=len(latencies) / offered,
-                            throughput=len(latencies) / duration, failures=failures,
+                            throughput=len(latencies) / duration, failures=sum(failures.values()), failure_reasons=dict(failures),
                             p95_ms=sorted(latencies)[math.ceil(.95 * len(latencies)) - 1] if latencies else None)
             with ThreadPoolExecutor(max_workers=len(flows)) as pool:
                 jobs = {key: pool.submit(sample, call) for key, call in flows.items()}

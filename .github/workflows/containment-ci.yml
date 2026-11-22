@@ -1,0 +1,121 @@
+name: Candidate containment
+
+on:
+  push:
+    branches: [sandbox]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_SHA: 53e4e964b23acbc01ba24df5293c99bf961853bf
+  PREVIOUS_SHA: 2c4d3875eafa6e45c5bd72bdd99a4c24282c9261
+  OPENBAO_IMAGE: docker.io/openbao/openbao@sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b
+  POSTGRES_IMAGE: docker.io/library/postgres@sha256:d2c8a7d3d224a9c0335bf9f69ae6ad0b9aa7d88c4b64bab89f0f261332f6d4de
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: permesi/permesi
+          ref: ${{ env.APP_SHA }}
+          path: application
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: permesi/permesi
+          ref: ${{ env.PREVIOUS_SHA }}
+          path: previous
+          persist-credentials: false
+      - uses: ./application/.github/actions/rust-toolchain
+        with:
+          targets: x86_64-unknown-linux-musl wasm32-unknown-unknown
+      - uses: ./application/.github/actions/ensure-musl-toolchain
+      - name: Build immutable application archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/candidate-target"
+          mkdir archives
+          (cd application && ./scripts/install-trunk && cd apps/web && npm ci && npm run css:build && trunk build --release)
+          for checkout in previous application; do
+            revision="$(git -C "$checkout" rev-parse HEAD)"
+            services=(permesi)
+            if [[ "$checkout" == application ]]; then services+=(genesis web); fi
+            for svc in "${services[@]}"; do
+              file="services/$svc/Dockerfile"
+              if [[ "$svc" == web ]]; then
+                file=apps/web/Dockerfile
+              else
+                (cd "$checkout" && BUILD_GIT_COMMIT_HASH="$revision" cargo build --release --locked --target x86_64-unknown-linux-musl -p "$svc" --features telemetry)
+                mkdir -p "$checkout/dist-bin"
+                cp "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/$svc" "$checkout/dist-bin/"
+              fi
+              image="localhost/permesi-candidate/$svc:$revision"
+              podman build --format oci -f "$checkout/$file" -t "$image" "$checkout"
+              podman save --format oci-archive -o "archives/$checkout-$svc.tar" "$image"
+            done
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: candidate-archives
+          path: archives/*.tar
+          if-no-files-found: error
+          retention-days: 3
+
+  qualify:
+    runs-on: ubuntu-latest
+    needs: images
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [shared, isolated]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: permesi/permesi
+          ref: ${{ env.APP_SHA }}
+          path: application
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate-archives
+          path: archives
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: containment
+          node_image: kindest/node:v1.32.2
+      - name: Verify the current and previous manifests and build the admission client
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          cargo build --locked --release --manifest-path scripts/quickstart/admission/Cargo.toml --target-dir "$RUNNER_TEMP/admission"
+          python3 scripts/ci/load-candidate-archives.py
+      - name: Measure the packaged containment profile
+        env:
+          PROFILE: ${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/quickstart/tests/real-packaged-stack.py --capacity --profile "$PROFILE" --context kind-containment \
+            --app-source application --fixture "$RUNNER_TEMP/fixture" --admission-bin "$RUNNER_TEMP/admission/release/quickstart-admission" \
+            --previous-core "$PREVIOUS_IMAGE" --previous-revision "$PREVIOUS_SHA" --openbao-image "$OPENBAO_IMAGE" \
+            --postgres-image "$POSTGRES_IMAGE" | tee "$RUNNER_TEMP/qualification.log"
+          python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$(jq -r '.images.permesi|.repository+"@"+.digest' scripts/quickstart/lock.json)" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: containment-${{ matrix.profile }}
+          path: |
+            ${{ runner.temp }}/qualification.log
+            ${{ runner.temp }}/fixture/application-sql.tar.gz
+            ${{ runner.temp }}/fixture/scripts/quickstart/lock.json

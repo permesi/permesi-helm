@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  APP_SHA: 53e4e964b23acbc01ba24df5293c99bf961853bf
+  APP_SHA: 2805f0b745f56f92af4e02207c48993c60cd656b
   PREVIOUS_SHA: 2c4d3875eafa6e45c5bd72bdd99a4c24282c9261
   OPENBAO_IMAGE: docker.io/openbao/openbao@sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b
   POSTGRES_IMAGE: docker.io/library/postgres@sha256:d2c8a7d3d224a9c0335bf9f69ae6ad0b9aa7d88c4b64bab89f0f261332f6d4de

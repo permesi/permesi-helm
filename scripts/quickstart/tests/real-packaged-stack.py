@@ -175,7 +175,7 @@ def main():
                         raw = container["imageID"].split("@")[-1]
                         wanted = reference.split("@")[1]
                         if raw != wanted:
-                            index = json.loads(run(["skopeo", "inspect", "--raw", "docker://" + reference]))
+                            index = json.loads(run(["podman", "manifest", "inspect", reference]))
                             node = json.loads(run(k + ["get", "node", pod["spec"]["nodeName"], "-o", "json"]))
                             platform = node["status"]["nodeInfo"]
                             require(any(m["digest"] == raw and m.get("platform", {}).get("os") == platform["operatingSystem"]
@@ -290,6 +290,16 @@ def main():
             if args.openbao_image:
                 qualification["outcome"] = "passed"
     except BaseException:
+        # Keep current lifecycle and health reasons, without logging credentials,
+        # environment variables, application logs or private Kubernetes events.
+        listing = subprocess.run(k + ["get", "pods", "-o", "json"], text=True, capture_output=True)
+        if listing.returncode == 0:
+            for pod in json.loads(listing.stdout)["items"]:
+                statuses = pod["status"].get("initContainerStatuses", []) + pod["status"].get("containerStatuses", [])
+                reasons = {c["name"]: next(iter(c.get("state", {})), "unknown") + "/" +
+                           next(iter(c.get("state", {}).values()), {}).get("reason", "")
+                           for c in statuses}
+                print("POD " + json.dumps({"name": pod["metadata"]["name"], "states": reasons}), flush=True)
         if args.openbao_image:
             qualification["outcome"] = "failed"
         raise

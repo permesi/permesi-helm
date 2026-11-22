@@ -1368,18 +1368,19 @@ See [release procedures](operations.md#10-release-and-image-identity).
 Signing/provenance are independent of digest selection. The application workflow
 contains keyless signing/OCI-attestation steps, but local chart validation is not
 remote signing evidence and old `0.4.3` pins are not thereby claimed signed.
-For an authorized candidate, verify its actual digest with exact workflow
-identity and commit, never a permissive identity regex:
+For a release, verify its actual digest with exact workflow identity and commit,
+never a permissive identity regex. The release workflow runs on `develop`:
 
 ```bash
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity "https://github.com/permesi/permesi/.github/workflows/deploy.yml@refs/heads/${CANDIDATE_BRANCH}" \
-  --certificate-github-workflow-sha "${CANDIDATE_COMMIT}" \
+  --certificate-identity "https://github.com/permesi/permesi/.github/workflows/release.yml@refs/heads/develop" \
+  --certificate-github-workflow-sha "${RELEASE_COMMIT}" \
   "ghcr.io/permesi/${SERVICE}@${DIGEST}"
 ```
 
-Obtain branch/commit/digest from trusted release metadata. Validate OCI provenance
+Obtain the commit and digest from trusted release metadata (the release notes and the
+dispatch payload). Validate OCI provenance
 against the same subject digest and expected source/workflow using GitHub's
 attestation verifier. This guide did not execute remote Cosign/GitHub verification.
 

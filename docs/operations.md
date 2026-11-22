@@ -457,3 +457,12 @@ Initial manager-config creation and first root rotation are distinct steps.
 Treat an interruption between them as incomplete provisioning: require successful
 authorized manager rotation before enabling workloads. No automatic repair of
 that interruption is claimed here.
+
+### Sandbox qualification
+
+A sandbox push runs Charts CI. The packaged install verifies both backend replicas,
+their build commits and the running manifest digests, then repeats installation
+and checks the existing OPAQUE records. Release qualification pins the SQL source
+archive checksum and commit alongside all three application manifests in
+`scripts/quickstart/lock.json`. Refresh them together with
+`scripts/ci/refresh-release-fixture.py` and a clean checkout of the release.

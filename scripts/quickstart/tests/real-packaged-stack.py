@@ -38,9 +38,12 @@ def main():
     parser.add_argument("--app-source", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, default=ROOT)
     parser.add_argument("--admission-bin", default=os.environ.get("QS_ADMISSION_BIN"), required=False)
+    parser.add_argument("--profile", choices=("shared", "isolated"), default="shared")
     parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
     parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
     args = parser.parse_args()
+    if args.profile == "isolated" and not args.openbao_image:
+        parser.error("isolated qualification requires OpenBao")
     if bool(args.openbao_image) != bool(args.postgres_image):
         parser.error("supply both dependency images")
     require(bool(args.admission_bin) and Path(args.admission_bin).is_file(), "actual admission client is available")
@@ -63,7 +66,7 @@ def main():
         require(files == {str(p.relative_to(checkout)): p.read_bytes() for p in checkout.rglob("*.sql")}
                 and all("/" not in name for name in files),
                 "every SQL input matches the exact archive and can be mounted by the flat bootstrap")
-    namespace = "permesi-quickstart"
+    namespace = "permesi-isolated" if args.profile == "isolated" else "permesi-quickstart"
     k = ["kubectl", "--context", args.context, "-n", namespace]
     h = ["helm", "--kube-context", args.context, "-n", namespace]
     require(not run(k + ["get", "namespace", namespace, "--ignore-not-found", "-o", "name"]),
@@ -85,7 +88,8 @@ def main():
             directory = Path(directory)
             run(["helm", "package", str(charts / "permesi-stack"), "-d", str(directory)])
             package = next(directory.glob("permesi-stack-*.tgz"))
-            values = yaml.safe_load((charts / "permesi-stack/examples/quickstart.yaml").read_text())
+            profile_values = (charts / "permesi-stack/examples/quickstart.yaml").read_text()
+            values = yaml.safe_load(profile_values.replace(".permesi-quickstart.svc", "." + namespace + ".svc"))
             values["quickstart"]["bootstrap"]["schema"] = {
                 "sourceUrl": "", "sha256": "", "revision": lock["appRevision"],
                 "existingConfigMaps": configmaps}
@@ -105,6 +109,13 @@ def main():
                     values[svc]["vault"]["agent"]["image"] = pinned(args.openbao_image)
                 values["permesi"]["admission"]["paserkUrl"] = ""
                 values["permesi"]["vault"]["agent"]["paserkCa"]["enabled"] = False
+            isolated = args.profile == "isolated"
+            reader = None
+            core = edge = "permesi-quickstart"
+            if isolated:
+                isolated_checks = runpy.run_path(str(Path(__file__).with_name("isolated-dependencies.py")))
+                reader = isolated_checks["install_dependencies"](k, h, args.fixture, values, directory, namespace)
+                core, edge = "core-quickstart", "edge-quickstart"
             values_file = directory / "values.json"
             values_file.write_text(json.dumps(values))
             install = h + ["upgrade", "--install", "permesi", str(package), "-f", str(values_file),
@@ -114,31 +125,36 @@ def main():
                 "--helper-release", "permesi", "--helper-fullname", "permesi-quickstart"]
             environment = {**os.environ, "QS_ADMISSION_BIN": args.admission_bin}
             def records():
-                return run(k + ["exec", "permesi-quickstart-postgresql-0", "-c", "postgresql", "--",
+                return run(k + ["exec", core + "-postgresql-0", "-c", "postgresql", "--",
                     "psql", "-X", "-U", "postgres", "-d", "permesi", "-tAc",
                     "SELECT count(*)||':'||coalesce(md5(string_agg(id::text||email||coalesce(encode(opaque_registration_record,'hex'),'<null>'),',' ORDER BY id)),'empty') FROM users"])
             run(install)
             if args.openbao_image:
                 # Operator action outside the release. CAS zero protects an existing withdrawal floor.
-                operator = k + ["exec", "-i", "deploy/permesi-quickstart-vault", "-c", "vault", "--", "bao"]
-                metadata = json.loads(run(operator + ["read", "-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
+                operator = k + ["exec", "-i", "deploy/" + core + "-vault", "-c", "vault", "--", "bao"]
+                metadata = json.loads(run((reader or operator + ["read"]) + ["-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
                 require(metadata["type"] == "ed25519", "bootstrap signer is Ed25519")
                 payload = {"minimum_version": 1, "keys": {"1": metadata["keys"]["1"]["public_key"]}}
                 run(operator + ["kv", "put", "-mount=secret/permesi", "-cas=0", "admission-authority", "-"],
                     input=json.dumps(payload))
-            require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
-                    "packaged embedded stack passes real TLS/admission and dependency policy verification")
+            def verify_profile():
+                if isolated:
+                    isolated_checks["verify"](k, lock, args.admission_bin, namespace)
+                else:
+                    require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
+                            "packaged embedded stack passes real TLS/admission and dependency policy verification")
+            verify_profile()
             before = records()
             require(not before.startswith("0:"), "real signup created protected application records")
             run(install)
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
-            require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
-                    "reinstalled packaged embedded stack passes the common full verifier")
+            verify_profile()
             if args.openbao_image:
-                runpy.run_path(str(Path(__file__).with_name("admission-containment.py")))["trial"](k)
+                runpy.run_path(str(Path(__file__).with_name("admission-containment.py")))["trial"](k, core, edge, reader)
     finally:
         try:
-            run(h + ["uninstall", "permesi", "--ignore-not-found"])
+            for release in (["permesi", "core-quickstart", "edge-quickstart"] if args.profile == "isolated" else ["permesi"]):
+                run(h + ["uninstall", release, "--ignore-not-found"])
         finally:
             run(k + ["delete", "namespace", namespace, "--ignore-not-found", "--wait=true"])
 

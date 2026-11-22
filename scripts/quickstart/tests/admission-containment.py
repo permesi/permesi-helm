@@ -20,9 +20,14 @@ helpers = runpy.run_path(str(Path(__file__).resolve().parents[1] / "verify-runti
 PortForward, run, require = (helpers[k] for k in ("PortForward", "run", "require"))
 
 
-def trial(kube):
-    operator = kube + ["exec", "-i", "deploy/permesi-quickstart-vault", "-c", "vault", "--", "bao"]
-    tls = ssl.create_default_context(cadata=run(operator + ["read", "-field=certificate", "pki-root/cert/ca"]))
+def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=None):
+    def operator_for(prefix):
+        return kube + ["exec", "-i", "deploy/" + prefix + "-vault", "-c", "vault", "--", "bao"]
+    operator = operator_for(core)
+    signer = operator_for(edge)
+    reader = reader or signer + ["read"]
+    roots = [run(operator_for(prefix) + ["read", "-field=certificate", "pki-root/cert/ca"]) for prefix in sorted({core, edge})]
+    tls = ssl.create_default_context(cadata="\n".join(roots))
     deployment = json.loads(run(kube + ["get", "deploy", "permesi", "-o", "json"]))
     labels = deployment["spec"]["selector"]["matchLabels"]
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
@@ -89,8 +94,8 @@ def trial(kube):
         token, expiry = mint()
         for forward in forwards:
             require(signup(forward.port, token)[0] == 200, "fresh token accepted on the serving replica before withdrawal")
-        run(operator + ["write", "-force", "transit/genesis/keys/genesis-signing/rotate"])
-        keys = json.loads(run(operator + ["read", "-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
+        run(signer + ["write", "-force", "transit/genesis/keys/genesis-signing/rotate"])
+        keys = json.loads(run(reader + ["-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
         record = json.loads(run(operator + ["kv", "get", "-format=json", "-mount=secret/permesi", "admission-authority"]))["data"]
         require(record["data"]["minimum_version"] == 1 and keys["latest_version"] == 2,
                 "withdrawal begins with the original floor and a staged second key")

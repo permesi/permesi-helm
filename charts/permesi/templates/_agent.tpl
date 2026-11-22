@@ -105,7 +105,11 @@ template_config {
      ordered deduplicated list of CA certificates; .Data.CA is only the first). */}}
 {{- define "permesi.agentTlsTemplate" -}}
 {{ "{{- with pkiCert" }} {{ printf "%s/issue/%s" .Values.vault.agent.pki.mount .Values.vault.agent.pki.role | quote }} {{ printf "common_name=%s" .Values.vault.agent.pki.commonName | quote }} {{ printf "alt_names=%s" (join "," .Values.vault.agent.pki.dnsNames) | quote }} {{ printf "ttl=%s" .Values.vault.agent.pki.ttl | quote }} {{ "}}" }}
+{{- if eq .Values.secretsProvider "openbao" }}
+{{ "{{ .Data.Key }}{{ .Data.Cert }}{{ with secret" }} {{ printf "%s/cert/ca_chain" .Values.vault.agent.pki.mount | quote }} {{ "}}{{ .Data.certificate }}{{ end }}" }}
+{{- else }}
 {{ "{{ .Data.Key }}{{ .Data.Cert }}{{ range .Data.CAChain }}{{ . }}{{ end }}" }}
+{{- end }}
 {{ "{{- end" }} {{ "}}" }}
 {{- end -}}
 

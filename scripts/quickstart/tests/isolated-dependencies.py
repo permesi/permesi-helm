@@ -74,6 +74,7 @@ def verify(kube, lock, client, namespace):
     from contextlib import ExitStack
     import os
     import tempfile
+    import time
     with ExitStack() as stack:
         roots = []
         ports = {}
@@ -99,5 +100,16 @@ def verify(kube, lock, client, namespace):
         require(roots[0] != roots[1], "core and edge have independently generated TLS roots")
         ca = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "roots.pem"
         ca.write_text("\n".join(roots))
+        port = ports["permesi"]
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            status = run(["curl", "--noproxy", "*", "--silent", "--show-error", "--fail", "--max-time", "5",
+                          "--cacert", str(ca), "--resolve", f"api.localhost:{port}:127.0.0.1",
+                          f"https://api.localhost:{port}/health"])
+            if json.loads(status)["status"] == "ok":
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError("core admission authority never became healthy")
         out = run([client, str(ca)], env={**os.environ, "QS_API_PORT": ports["permesi"], "QS_GENESIS_PORT": ports["genesis"]})
         require("signup/finish 201" in out, "completed OPAQUE signup across the isolated dependencies")

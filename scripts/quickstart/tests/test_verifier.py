@@ -81,6 +81,7 @@ elif 'svc' not in args:
     def test_disabled_oidc_does_not_require_an_rsa_key(self):
         fixture = '''
 OIDC_ENABLED=false
+provider=vault
 vroot() {
   local field="${3#-field=}" path="${4:-}"
   [[ "$*" != *oidc-signing* ]] || return 2

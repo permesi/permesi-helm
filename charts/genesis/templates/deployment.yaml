@@ -10,9 +10,9 @@
 {{- $agentSocketDir := include "genesis.agentSocketDir" . -}}
 {{- $agentTlsDir := include "genesis.agentTlsDir" . -}}
 {{- $mountTls := or $tlsSecret $agentManagesTls -}}
----
 {{- $openbao := eq .Values.secretsProvider "openbao" -}}
 {{- $prefix := ternary "OPENBAO" "VAULT" $openbao -}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -16,9 +16,9 @@
 {{- $agentCaDir := include "permesi.agentAdmissionCaDir" . -}}
 {{- $mountTls := or $tlsSecret $agentManagesTls -}}
 {{- $mountCa := or $admissionCaSecret $agentManagesCa -}}
----
 {{- $openbao := eq .Values.secretsProvider "openbao" -}}
 {{- $prefix := ternary "OPENBAO" "VAULT" $openbao -}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

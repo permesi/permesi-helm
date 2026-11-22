@@ -164,7 +164,7 @@ false
 {{- fail "OpenBao workloads require pinned application and OpenBao Agent images" -}}
 {{- end -}}
 {{- range $e := .Values.extraEnv -}}
-{{- if or (hasPrefix "PERMESI_OPENBAO_" $e.name) (hasPrefix "GENESIS_OPENBAO_" $e.name) (hasPrefix "PERMESI_ADMISSION_PASERK_" $e.name) -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $e.name) (hasPrefix "GENESIS_OPENBAO_" $e.name) (eq $e.name "GENESIS_ADMISSION_SIGNING_VERSION") (hasPrefix "PERMESI_ADMISSION_PASERK_" $e.name) -}}
 {{- fail "Use managed values for OpenBao and admission trust" -}}
 {{- end -}}
 {{- end -}}

@@ -162,6 +162,8 @@ def main():
             run(install)
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
             verify_profile()
+            if args.openbao_image:
+                runpy.run_path(str(Path(__file__).with_name("eviction.py")))["trial"](k, namespace, edge)
             if args.capacity:
                 runpy.run_path(str(Path(__file__).with_name("containment-capacity.py")))["measure"](
                     k, core, edge, args.admission_bin, lock)

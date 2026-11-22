@@ -185,6 +185,10 @@ spec:
             - name: GENESIS_{{ $prefix }}_WRAPPED_TOKEN
               value: {{ .Values.vault.wrappedToken.value | quote }}
             {{- end }}
+            {{- if $openbao }}
+            - name: GENESIS_ADMISSION_SIGNING_VERSION
+              value: {{ .Values.admissionSigningVersion | int64 | quote }}
+            {{- end }}
             - name: GENESIS_TRANSIT_MOUNT
               value: {{ .Values.vault.transitMount | quote }}
             {{- with .Values.extraEnv }}

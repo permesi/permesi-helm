@@ -3,6 +3,8 @@
 //! Env: QS_API_PORT (8443), QS_GENESIS_PORT (9443), QS_ORIGIN
 //! (http://localhost:8080). curl performs TLS/hostname checking. Tokens and
 //! protocol transcripts stay in memory/stdin, never argv, files or diagnostics.
+mod login;
+
 use base64::{Engine, engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}};
 use opaque_ke::{CipherSuite, ClientRegistration, ClientRegistrationFinishParameters,
     Identifiers, RegistrationResponse, key_exchange::tripledh::TripleDh};
@@ -55,6 +57,10 @@ fn error_message(body: &str) -> String {
         .unwrap_or_else(|| body.to_owned())
 }
 fn run() -> Result<(), String> {
+    if env::args().nth(1).as_deref() == Some("--login-proof") {
+        let email = env::args().nth(2).ok_or("missing fixture email")?;
+        return login::proof(&email);
+    }
     let ca = env::args().nth(1).ok_or("Usage: quickstart-admission CA_FILE [--expect-rejected]")?;
     let http = Http { ca, origin: env::var("QS_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".into()),
         api_port: env::var("QS_API_PORT").unwrap_or_else(|_| "8443".into()),

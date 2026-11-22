@@ -38,12 +38,15 @@ def main():
     parser.add_argument("--app-source", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, default=ROOT)
     parser.add_argument("--admission-bin", default=os.environ.get("QS_ADMISSION_BIN"), required=False)
+    parser.add_argument("--capacity", action="store_true", help="run the two 15-minute fixed-load phases")
     parser.add_argument("--previous-core", help="previous qualified core repository@digest for native rollback")
     parser.add_argument("--previous-revision", help="full build commit embedded in the previous core")
     parser.add_argument("--profile", choices=("shared", "isolated"), default="shared")
     parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
     parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
     args = parser.parse_args()
+    if args.capacity and not args.openbao_image:
+        parser.error("capacity trials require a candidate OpenBao fixture")
     if bool(args.previous_core) != bool(args.previous_revision) or (args.previous_core and not args.openbao_image):
         parser.error("binary rollback requires both previous image and revision in a candidate profile")
     if args.profile == "isolated" and not args.openbao_image:
@@ -106,6 +109,10 @@ def main():
                 def pinned(reference):
                     repository, digest = reference.split("@")
                     return {"repository": repository, "digest": digest, "pullPolicy": "IfNotPresent"}
+                if args.capacity:
+                    values["permesi"]["extraEnv"].extend([
+                        {"name": "PERMESI_OIDC_ISSUER", "value": "https://api.localhost:8443"},
+                        {"name": "PERMESI_OAUTH_AUDIENCE", "value": "capacity-api"}])
                 quickstart = values["quickstart"]
                 quickstart.update(secretsProvider="openbao", vault={"image": pinned(args.openbao_image)},
                                   postgresql={"image": pinned(args.postgres_image)})
@@ -154,6 +161,9 @@ def main():
             run(install)
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
             verify_profile()
+            if args.capacity:
+                runpy.run_path(str(Path(__file__).with_name("containment-capacity.py")))["measure"](
+                    k, core, edge, args.admission_bin, lock)
             rollback = None
             if args.previous_core:
                 identity = lock["images"]["permesi"]

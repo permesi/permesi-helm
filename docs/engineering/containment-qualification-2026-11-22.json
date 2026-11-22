@@ -1,0 +1,528 @@
+{
+  "date": "2026-11-22",
+  "platform": "linux/amd64, Kubernetes v1.32.2, local Podman KinD",
+  "applicationSandbox": "eb80b88ba3ed16dcb556e9e6ed02cbc92ed3d0e8",
+  "testedBinaries": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+  "previousCoreRevision": "2c4d3875eafa6e45c5bd72bdd99a4c24282c9261",
+  "images": {
+    "localhost/permesi-candidate/permesi:53e4e96": "sha256:93dd0dcf0581d387e14886ca5b68c72c8e0c6e5faae8a814a5ee485e869a2bb7",
+    "localhost/permesi-candidate/genesis:53e4e96": "sha256:1b577ea3bcec2f435d61df5cb56ab24426cae01323daf6c7cc7ddcfa06115308",
+    "localhost/permesi-candidate/web:53e4e96": "sha256:b8bb9857e40e61c36ffe28d72f39eefc013fa04d071c67c0c0daf48c0f96d535",
+    "localhost/permesi-candidate/permesi:2c4d387": "sha256:72b70141d7fc49f0bcbcb45a28b8004fc5c54a9a2a6585637977ac66f5bd20ab",
+    "docker.io/openbao/openbao:2.7.3": "sha256:d0fcbd0a79046ea33ab481d2a244d2ebe57c38bc0d6e04294c25c956456a2820",
+    "docker.io/library/postgres:19.0": "sha256:cf5928c00b7cde974d4f115cbc08ccce12394085f50d9a8b13114866a0c48607"
+  },
+  "fault": "Genesis Deployment scaled to zero during each 900-second fault phase",
+  "capacityGates": {
+    "minimumBaselineAndFaultSuccess": 0.99,
+    "minimumRelativeSuccessfulThroughput": 0.95,
+    "maximumRelativeP95": 2
+  },
+  "environment": "Profiles use separate namespaces, service accounts, databases and OpenBao instances. Local trials overlapped on the same KinD node. A single-node result does not establish production or multi-node capacity.",
+  "workload": "One real login and OAuth client per trial. Each authorization-code sample performs interactive consent and PKCE exchange. At six-second spacing, up to 200 authorize/consent calls per 600 seconds exceed the configured limit of 100. Initial runs omitted failure categories, so individual failures cannot all be attributed to this limit.",
+  "capacityRuns": [
+    {
+      "profile": "shared",
+      "offeredIntervalSeconds": 6,
+      "identity": {
+        "appRevision": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+        "chartRevision": "d377ea2668654f1a6d713b1e92c6d63c945a807c",
+        "appArchiveSha256": "3dca23a19c61f181ab4fc67f15213fc88c29b00a24b1338c4dd2564abad9e739"
+      },
+      "phases": {
+        "baseline": {
+          "session": {
+            "offered": 150,
+            "successes": 132,
+            "success_rate": 0.88,
+            "throughput": 0.14666666666666667,
+            "failures": 18,
+            "p95_ms": 6.981653001275845
+          },
+          "authorization_code": {
+            "offered": 150,
+            "successes": 52,
+            "success_rate": 0.3466666666666667,
+            "throughput": 0.057777777777777775,
+            "failures": 98,
+            "p95_ms": 41.30851000081748
+          },
+          "refresh": {
+            "offered": 150,
+            "successes": 130,
+            "success_rate": 0.8666666666666667,
+            "throughput": 0.14444444444444443,
+            "failures": 20,
+            "p95_ms": 14.643306996731553
+          },
+          "userinfo": {
+            "offered": 150,
+            "successes": 123,
+            "success_rate": 0.82,
+            "throughput": 0.13666666666666666,
+            "failures": 27,
+            "p95_ms": 19.904038999811746
+          }
+        },
+        "genesis_offline": {
+          "session": {
+            "offered": 150,
+            "successes": 72,
+            "success_rate": 0.48,
+            "throughput": 0.08,
+            "failures": 78,
+            "p95_ms": 6.544822004798334
+          },
+          "authorization_code": {
+            "offered": 150,
+            "successes": 0,
+            "success_rate": 0.0,
+            "throughput": 0.0,
+            "failures": 150,
+            "p95_ms": null
+          },
+          "refresh": {
+            "offered": 150,
+            "successes": 86,
+            "success_rate": 0.5733333333333334,
+            "throughput": 0.09555555555555556,
+            "failures": 64,
+            "p95_ms": 12.945186004799325
+          },
+          "userinfo": {
+            "offered": 150,
+            "successes": 1,
+            "success_rate": 0.006666666666666667,
+            "throughput": 0.0011111111111111111,
+            "failures": 149,
+            "p95_ms": 17.117626004619524
+          }
+        }
+      },
+      "gatePassed": {
+        "session": false,
+        "authorization_code": false,
+        "refresh": false,
+        "userinfo": false
+      }
+    },
+    {
+      "profile": "isolated",
+      "offeredIntervalSeconds": 6,
+      "identity": {
+        "appRevision": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+        "chartRevision": "3cb91e069e353c97bb665b3c725d4fb75cf9930d",
+        "appArchiveSha256": "3dca23a19c61f181ab4fc67f15213fc88c29b00a24b1338c4dd2564abad9e739"
+      },
+      "phases": {
+        "baseline": {
+          "session": {
+            "offered": 150,
+            "successes": 150,
+            "success_rate": 1.0,
+            "throughput": 0.16666666666666666,
+            "failures": 0,
+            "p95_ms": 7.139791996451095
+          },
+          "authorization_code": {
+            "offered": 150,
+            "successes": 98,
+            "success_rate": 0.6533333333333333,
+            "throughput": 0.10888888888888888,
+            "failures": 52,
+            "p95_ms": 36.903180996887386
+          },
+          "refresh": {
+            "offered": 150,
+            "successes": 150,
+            "success_rate": 1.0,
+            "throughput": 0.16666666666666666,
+            "failures": 0,
+            "p95_ms": 13.510507000319194
+          },
+          "userinfo": {
+            "offered": 150,
+            "successes": 146,
+            "success_rate": 0.9733333333333334,
+            "throughput": 0.1622222222222222,
+            "failures": 4,
+            "p95_ms": 21.170841995626688
+          }
+        },
+        "genesis_offline": {
+          "session": {
+            "offered": 150,
+            "successes": 150,
+            "success_rate": 1.0,
+            "throughput": 0.16666666666666666,
+            "failures": 0,
+            "p95_ms": 6.666351000603754
+          },
+          "authorization_code": {
+            "offered": 150,
+            "successes": 50,
+            "success_rate": 0.3333333333333333,
+            "throughput": 0.05555555555555555,
+            "failures": 100,
+            "p95_ms": 32.643963997543324
+          },
+          "refresh": {
+            "offered": 150,
+            "successes": 150,
+            "success_rate": 1.0,
+            "throughput": 0.16666666666666666,
+            "failures": 0,
+            "p95_ms": 12.207867999677546
+          },
+          "userinfo": {
+            "offered": 150,
+            "successes": 147,
+            "success_rate": 0.98,
+            "throughput": 0.16333333333333333,
+            "failures": 3,
+            "p95_ms": 16.719708997698035
+          }
+        }
+      },
+      "gatePassed": {
+        "session": true,
+        "authorization_code": false,
+        "refresh": true,
+        "userinfo": false
+      }
+    },
+    {
+      "profile": "shared",
+      "offeredIntervalSeconds": 18,
+      "identity": {
+        "appRevision": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+        "chartRevision": "658cf8a6f5e9858fcb94eac3fb94420fef01b577",
+        "appArchiveSha256": "3dca23a19c61f181ab4fc67f15213fc88c29b00a24b1338c4dd2564abad9e739"
+      },
+      "phases": {
+        "baseline": {
+          "session": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 7.843603001674637
+          },
+          "authorization_code": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 40.416244002699386
+          },
+          "refresh": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 15.24339300522115
+          },
+          "userinfo": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 25.035912003659178
+          }
+        },
+        "genesis_offline": {
+          "session": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 8.596355000918265
+          },
+          "authorization_code": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 39.27742700034287
+          },
+          "refresh": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 19.044113003474195
+          },
+          "userinfo": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 22.689950004860293
+          }
+        }
+      },
+      "gatePassed": {
+        "session": true,
+        "authorization_code": true,
+        "refresh": true,
+        "userinfo": true
+      }
+    },
+    {
+      "profile": "isolated",
+      "offeredIntervalSeconds": 18,
+      "identity": {
+        "appRevision": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+        "chartRevision": "1f7d83e0791f317b55de3f076241e160c3c71803",
+        "appArchiveSha256": "3dca23a19c61f181ab4fc67f15213fc88c29b00a24b1338c4dd2564abad9e739"
+      },
+      "phases": {
+        "baseline": {
+          "session": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 8.32646299386397
+          },
+          "authorization_code": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 42.36246099753771
+          },
+          "refresh": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 18.426848997478373
+          },
+          "userinfo": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 22.146237999550067
+          }
+        },
+        "genesis_offline": {
+          "session": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 8.473155001411214
+          },
+          "authorization_code": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 37.79497100185836
+          },
+          "refresh": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 14.407542003027629
+          },
+          "userinfo": {
+            "offered": 50,
+            "successes": 50,
+            "success_rate": 1.0,
+            "throughput": 0.05555555555555555,
+            "failures": 0,
+            "failure_reasons": {},
+            "p95_ms": 20.621199000743218
+          }
+        }
+      },
+      "gatePassed": {
+        "session": true,
+        "authorization_code": true,
+        "refresh": true,
+        "userinfo": true
+      }
+    }
+  ],
+  "safetyChecks": [
+    {
+      "appRevision": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+      "appArchiveSha256": "3dca23a19c61f181ab4fc67f15213fc88c29b00a24b1338c4dd2564abad9e739",
+      "chartRevision": "3301da4be8d891e37b2d13f74b3fc5ac59f6a4fe",
+      "outcome": "passed",
+      "runningDependencies": {
+        "core-quickstart-postgresql-0": {
+          "dependency": "postgres",
+          "digest": "sha256:cf5928c00b7cde974d4f115cbc08ccce12394085f50d9a8b13114866a0c48607"
+        },
+        "core-quickstart-vault-64fb884ddf-f8xhg": {
+          "dependency": "openbao",
+          "digest": "sha256:d0fcbd0a79046ea33ab481d2a244d2ebe57c38bc0d6e04294c25c956456a2820"
+        },
+        "edge-quickstart-postgresql-0": {
+          "dependency": "postgres",
+          "digest": "sha256:cf5928c00b7cde974d4f115cbc08ccce12394085f50d9a8b13114866a0c48607"
+        },
+        "edge-quickstart-vault-bcb7878c5-tm92f": {
+          "dependency": "openbao",
+          "digest": "sha256:d0fcbd0a79046ea33ab481d2a244d2ebe57c38bc0d6e04294c25c956456a2820"
+        }
+      },
+      "profile": "isolated",
+      "entry": [
+        {
+          "accepted": 1,
+          "rejected": 15,
+          "lookup_calls": 1,
+          "receipt_calls": 1,
+          "signatures": 1,
+          "interval_seconds": 0.02070712199929403,
+          "cpu_observation_seconds": 0.48557616099424195,
+          "sampled_cpu_ms": 8.17
+        }
+      ],
+      "observed": [
+        "one occupied in-flight slot sheds work even after the rate token refills",
+        "the concurrency rejection produced zero additional lookups, receipts and signatures",
+        "revocation removed the login roles and terminated established SQL sessions",
+        "fenced Agent remained without an issued token across repeated login attempts",
+        "Kubernetes rejected the deleted pod-bound identity after 0.2s",
+        "both independently enrolled sibling replicas remain ready",
+        "interrupted rollout serves the expected core binary",
+        "interrupted rollout serves the expected core binary",
+        "no signing call occurred during offline admission-token reuse",
+        "both serving replicas accepted the token with zero authority reads during the sampled requests",
+        "same expired token rejected while Genesis remains offline",
+        "same expired token rejected while Genesis remains offline",
+        "partitioned replica suspended admission after its maximum snapshot age",
+        "healthy sibling continued admission and the partitioned core retained independent readiness",
+        "partitioned reader recovered and accepted the same still-valid token",
+        "both qualified binaries accept both signer versions before withdrawal",
+        "permesi-757d964667-66lkk rejected the unexpired token after 4.22s",
+        "permesi-5bc8bbf67b-86tcd rejected the unexpired token after 12.25s",
+        "every serving core replica observed withdrawal within 60 seconds",
+        "permesi-5bc8bbf67b-86tcd rejected the same unexpired token after binary rollback",
+        "permesi-5bc8bbf67b-jql54 rejected the same unexpired token after binary rollback"
+      ]
+    },
+    {
+      "appRevision": "53e4e964b23acbc01ba24df5293c99bf961853bf",
+      "appArchiveSha256": "3dca23a19c61f181ab4fc67f15213fc88c29b00a24b1338c4dd2564abad9e739",
+      "chartRevision": "7427702dc61ca476bddf845eaceb4bedb899cc0d",
+      "outcome": "passed",
+      "runningDependencies": {
+        "permesi-quickstart-postgresql-0": {
+          "dependency": "postgres",
+          "digest": "sha256:cf5928c00b7cde974d4f115cbc08ccce12394085f50d9a8b13114866a0c48607"
+        },
+        "permesi-quickstart-vault-848c85bb4d-xws5f": {
+          "dependency": "openbao",
+          "digest": "sha256:d0fcbd0a79046ea33ab481d2a244d2ebe57c38bc0d6e04294c25c956456a2820"
+        }
+      },
+      "profile": "shared",
+      "entry": [
+        {
+          "accepted": 1,
+          "rejected": 15,
+          "lookup_calls": 1,
+          "receipt_calls": 1,
+          "signatures": 1,
+          "interval_seconds": 0.017154797998955473,
+          "cpu_observation_seconds": 0.5903513570010546,
+          "sampled_cpu_ms": 7.576
+        }
+      ],
+      "observed": [
+        "one occupied in-flight slot sheds work even after the rate token refills",
+        "the concurrency rejection produced zero additional lookups, receipts and signatures",
+        "revocation removed the login roles and terminated established SQL sessions",
+        "fenced Agent remained without an issued token across repeated login attempts",
+        "Kubernetes rejected the deleted pod-bound identity after 0.1s",
+        "both independently enrolled sibling replicas remain ready",
+        "all replicas leave readiness while process liveness survives the complete shared outage",
+        "all replicas recovered after shared dependencies resumed",
+        "interrupted rollout serves the expected core binary",
+        "interrupted rollout serves the expected core binary",
+        "no signing call occurred during offline admission-token reuse",
+        "both serving replicas accepted the token with zero authority reads during the sampled requests",
+        "same expired token rejected while Genesis remains offline",
+        "same expired token rejected while Genesis remains offline",
+        "partitioned replica suspended admission after its maximum snapshot age",
+        "healthy sibling continued admission and the partitioned core retained independent readiness",
+        "partitioned reader recovered and accepted the same still-valid token",
+        "both qualified binaries accept both signer versions before withdrawal",
+        "permesi-7d59f5c4f6-sr4q4 rejected the unexpired token after 4.23s",
+        "permesi-9c67cf55-wxd5f rejected the unexpired token after 14.26s",
+        "every serving core replica observed withdrawal within 60 seconds",
+        "permesi-9c67cf55-g849w rejected the same unexpired token after binary rollback",
+        "permesi-9c67cf55-wxd5f rejected the same unexpired token after binary rollback"
+      ]
+    }
+  ],
+  "limits": [
+    "Credentials were verified through their legitimate use before fencing, administrative revocation, SQL sessions, Agent restart, and real Kubernetes TokenReview. Copy-and-replay from a separate client and node-root reenrollment were not exercised.",
+    "Local qualification uses real quickstart bootstrap policies. All six Terraform quotas were separately applied and verified on fresh single-node OpenBao. Multi-node enforcement and per-source scaling were not measured.",
+    "The local binaries precede the final Terraform quota additions, documentation and test-only assertions. The sandbox workflow independently pins the delivered application revision.",
+    "CPU is kubelet container CPU across its observation interval, including background work. It is not CPU per rejected request."
+  ],
+  "terraform": {
+    "freshOpenBao": "2.7.3",
+    "quotaResourceCount": 6,
+    "ratePerSecond": 30,
+    "checked": [
+      "signing",
+      "credentials",
+      "pki",
+      "bootstrap",
+      "cert",
+      "approle"
+    ],
+    "rootIssuerDependency": "the initially failing targeted apply passed after the root issuer became an explicit prerequisite"
+  },
+  "validationHistory": [
+    "An earlier socket-permission test did not interrupt an existing connection. The successful partition tests paused the selected Agent container, including existing connections, and held it for 67 seconds.",
+    "The first shared recovery fixture recovered readiness before Kubernetes controllers observed it. The successful run waited for the Deployment and StatefulSet rollouts and then verified the complete real signup flow.",
+    "HTTP errors were not categorized during the six-second runs. At 18-second spacing the UserInfo load also used access tokens returned by normal refresh to reduce coupling between the authorization and UserInfo measurements."
+  ],
+  "imagePolicy": {
+    "allowedPrevious": true,
+    "deniedLegacyDeploymentAndPod": true,
+    "deniedUnapprovedCompanionAndInit": true,
+    "deniedEphemeral": true
+  }
+}

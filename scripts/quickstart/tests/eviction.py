@@ -114,8 +114,21 @@ def trial(kube, namespace, edge):
         time.sleep(1)
     require(roles == sessions == "0", "revocation removed the login roles and terminated established SQL sessions")
     require(not accessors(), "evicted enrollment has no issued Agent token")
+    previous = next(c for c in obj("pod", label)["status"]["initContainerStatuses"] if c["name"] == "vault-agent")
+    run(kube + ["exec", label, "-c", "vault-agent", "--", "sh", "-c", "kill -TERM 1"])
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        state = next(c for c in obj("pod", label)["status"]["initContainerStatuses"] if c["name"] == "vault-agent")
+        if state["restartCount"] > previous["restartCount"] and "running" in state["state"]:
+            break
+        time.sleep(1)
+    require(state["restartCount"] > previous["restartCount"] and not state["ready"] and not accessors(),
+            "restarted Agent remains fenced and has no new token")
     run(kube + ["delete", "pod", label, "--wait=true"])
-    require(not token_review(), "Kubernetes rejected the deleted pod-bound identity")
+    start = time.monotonic()
+    while token_review() and time.monotonic() - start < 120:
+        time.sleep(2)
+    require(not token_review(), f"Kubernetes rejected the deleted pod-bound identity after {time.monotonic()-start:.1f}s")
     run(kube + ["delete", "serviceaccount", label])
     run(kube + ["delete", "configmap", label])
     deployment = obj("deploy", "permesi-genesis")

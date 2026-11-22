@@ -71,7 +71,7 @@ def trial(kube, namespace, edge):
     apply("Pod", spec=template)
     run(kube + ["wait", "--for=condition=Ready", "pod/" + label, "--timeout=180s"])
     identity = obj("pod", label)
-    runpy.run_path(str(Path(__file__).with_name("entry-limits.py")))["measure"](kube, identity, namespace, admin, edge)
+    measured = runpy.run_path(str(Path(__file__).with_name("entry-limits.py")))["measure"](kube, identity, namespace, admin, edge)
     ip = identity["status"]["podIP"]
     from ipaddress import ip_address
     ip_address(ip)
@@ -124,6 +124,8 @@ def trial(kube, namespace, edge):
         time.sleep(1)
     require(state["restartCount"] > previous["restartCount"] and not state["ready"] and not accessors(),
             "restarted Agent remains fenced and has no new token")
+    time.sleep(12)
+    require(not accessors(), "fenced Agent remained without an issued token across repeated login attempts")
     run(kube + ["delete", "pod", label, "--wait=true"])
     start = time.monotonic()
     while token_review() and time.monotonic() - start < 120:
@@ -133,3 +135,4 @@ def trial(kube, namespace, edge):
     run(kube + ["delete", "configmap", label])
     deployment = obj("deploy", "permesi-genesis")
     require(deployment["status"]["readyReplicas"] == 2, "both independently enrolled sibling replicas remain ready")
+    return measured

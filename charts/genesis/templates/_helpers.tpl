@@ -160,6 +160,9 @@ false
 {{- $vaultEsoActive := eq (include "genesis.vaultEsoActive" .) "true" -}}
 
 {{- if eq .Values.secretsProvider "openbao" -}}
+{{- if not .Values.admissionSigningVersion -}}
+{{- fail "Genesis OpenBao requires an explicit admissionSigningVersion published by the core operator" -}}
+{{- end -}}
 {{- if or (empty .Values.image.digest) (and .Values.vault.agent.enabled (or (empty .Values.vault.agent.image.digest) (not (hasSuffix "/openbao" .Values.vault.agent.image.repository)))) -}}
 {{- fail "OpenBao workloads require pinned application and OpenBao Agent images" -}}
 {{- end -}}

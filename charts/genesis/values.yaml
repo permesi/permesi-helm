@@ -63,7 +63,7 @@ tls:
 # Use openbao for 0.6 and later application images. Release 0.5 uses Vault.
 secretsProvider: vault
 # Explicit Transit version approved by the core operator for the OpenBao profile.
-admissionSigningVersion: 1
+# Set admissionSigningVersion to the published positive version when selecting OpenBao.
 vault:
   url: /var/run/secrets/vaultproject.io/agent.sock
   # Explicit native auth needs a newly built supporting app image (unreleased).

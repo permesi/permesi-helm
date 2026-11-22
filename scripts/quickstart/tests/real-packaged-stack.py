@@ -64,6 +64,7 @@ def main():
             "packaged stack SQL checkout is clean")
     if args.openbao_image:
         qualification = {key: lock[key] for key in ("appRevision", "chartRevision", "appArchiveSha256")}
+        qualification["outcome"] = "incomplete"
         qualification["profile"] = args.profile
         qualification["images"] = {name: lock["images"][name]["repository"] + "@" + lock["images"][name]["digest"]
                                    for name in ("permesi", "genesis", "web")}
@@ -124,6 +125,7 @@ def main():
                     values["permesi"]["extraEnv"].extend([
                         {"name": "PERMESI_OIDC_ISSUER", "value": "https://api.localhost:8443"},
                         {"name": "PERMESI_OAUTH_AUDIENCE", "value": "capacity-api"}])
+                values["genesis"]["admissionSigningVersion"] = 1
                 quickstart = values["quickstart"]
                 quickstart.update(secretsProvider="openbao", qualificationObservations=True, vault={"image": pinned(args.openbao_image)},
                                   postgresql={"image": pinned(args.postgres_image)})
@@ -198,7 +200,8 @@ def main():
             require(records() == before, "packaged umbrella reinstall preserves existing OPAQUE records")
             verify_profile()
             if args.openbao_image:
-                runpy.run_path(str(tests / "eviction.py"))["trial"](k, namespace, edge)
+                qualification["entry"] = runpy.run_path(str(tests / "eviction.py"))["trial"](k, namespace, edge)
+                (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
             capacity_failure = None
             if args.capacity:
                 try:
@@ -274,7 +277,15 @@ def main():
                 runpy.run_path(str(tests / "admission-containment.py"))["trial"](k, core, edge, reader, rollback)
             if capacity_failure:
                 raise capacity_failure
+            if args.openbao_image:
+                qualification["outcome"] = "passed"
+    except BaseException:
+        if args.openbao_image:
+            qualification["outcome"] = "failed"
+        raise
     finally:
+        if args.openbao_image:
+            (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
         try:
             if policy:
                 run(k + ["delete", "--ignore-not-found", "-f", "-"], input=policy)

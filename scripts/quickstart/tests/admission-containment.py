@@ -134,6 +134,23 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
         record = json.loads(run(operator + ["kv", "get", "-format=json", "-mount=secret/permesi", "admission-authority"]))["data"]
         require(record["data"]["minimum_version"] == 1 and keys["latest_version"] == 2,
                 "withdrawal begins with the original floor and a staged second key")
+        authority = "admission-authority"
+        all_keys = {v: keys["keys"][v]["public_key"] for v in ("1", "2")}
+        revision = str(record["metadata"]["version"])
+        run(operator + ["kv", "put", "-mount=secret/permesi", "-cas=" + revision, authority, "-"],
+            input=json.dumps({"minimum_version": 1, "keys": all_keys}))
+        run(kube + ["set", "env", "deploy/permesi-genesis", "GENESIS_ADMISSION_SIGNING_VERSION=2"])
+        run(kube + ["rollout", "status", "deploy/permesi-genesis", "--timeout=120s"])
+        control, control_expiry = mint()
+        for forward in forwards:
+            until = time.monotonic() + 30
+            while signup(forward.port, control)[0] != 200:
+                if time.monotonic() >= until:
+                    raise RuntimeError("replica could not accept the published replacement signer")
+                time.sleep(1)
+        require(all(signup(f.port, token)[0] == 200 for f in forwards),
+                "both qualified binaries accept both signer versions before withdrawal")
+        record = json.loads(run(operator + ["kv", "get", "-format=json", "-mount=secret/permesi", authority]))["data"]
         start = time.monotonic()
         run(operator + ["kv", "put", "-mount=secret/permesi", "-cas=" + str(record["metadata"]["version"]),
                         "admission-authority", "-"], input=json.dumps({"minimum_version": 2,
@@ -156,5 +173,11 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
             for node in replicas():
                 fresh = PortForward(kube, "pod/" + node)
                 stack.callback(fresh.close)
-                require(time.time() < expiry and rejected(signup(fresh.port, token)),
+                deadline = min(expiry, control_expiry)
+                while time.time() < deadline:
+                    code, health = request(fresh.port, "api.localhost", "/health")
+                    if code == 200 and json.loads(health)["status"] == "ok" and signup(fresh.port, control)[0] == 200:
+                        break
+                    time.sleep(1)
+                require(time.time() < deadline and rejected(signup(fresh.port, token)),
                         f"{node} rejected the same unexpired token after binary rollback")

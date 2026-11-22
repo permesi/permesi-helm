@@ -180,7 +180,7 @@ def measure(kube, core, edge, binary, record):
                         call()
                         latencies.append((time.monotonic() - due) * 1000)
                     except (OSError, RuntimeError, ValueError, KeyError, http.client.HTTPException) as error:
-                        status = re.fullmatch(r"(GET|POST) (/[a-z/]+) returned ([0-9]{3})", str(error))
+                        status = re.fullmatch(r"(GET|POST) (/[a-z0-9/_-]+) returned ([0-9]{3})", str(error))
                         reason = status.group(0) if status else type(error).__name__
                         failures[reason] += 1
                 offered = duration // interval
@@ -203,6 +203,7 @@ def measure(kube, core, edge, binary, record):
             run(kube + ["scale", "deploy/permesi-genesis", "--replicas=2"])
             run(kube + ["rollout", "status", "deploy/permesi-genesis", "--timeout=180s"])
         print("CAPACITY " + json.dumps({"identity": record, "baseline": baseline, "genesis_offline": fault}), flush=True)
+        record["capacity"] = {"baseline": baseline, "genesis_offline": fault}
         for key in flows:
             b, f = baseline[key], fault[key]
             require(b["success_rate"] >= .99 and f["success_rate"] >= .99 and f["throughput"] >= .95 * b["throughput"]

@@ -58,6 +58,7 @@ def measure(kube, pod, namespace, admin, edge):
                 if time.monotonic() >= deadline:
                     raise RuntimeError("missing kubelet CPU observation")
                 time.sleep(2)
+        cpu_start = time.monotonic()
         before = counts()
         signed = signatures()
         started = time.monotonic()
@@ -77,9 +78,10 @@ def measure(kube, pod, namespace, admin, edge):
             time.sleep(1)
             cpu_after = cpu()
         require(cpu_after > cpu_before, "kubelet observed CPU consumption across the burst interval")
-        print("ENTRY " + json.dumps(dict(accepted=accepted, rejected=statuses.count(429),
+        measured = dict(accepted=accepted, rejected=statuses.count(429),
               lookup_calls=after[0]-before[0], receipt_calls=after[1]-before[1], signatures=signatures_done,
-              interval_seconds=elapsed, sampled_cpu_ms=(cpu_after-cpu_before)/1e6)), flush=True)
+              interval_seconds=elapsed, cpu_observation_seconds=time.monotonic()-cpu_start, sampled_cpu_ms=(cpu_after-cpu_before)/1e6)
+        print("ENTRY " + json.dumps(measured), flush=True)
         # A test-owned maintenance transaction holds the first lookup so the rate
         # token can refill while the one in-flight slot is still occupied.
         time.sleep(1.1)
@@ -113,5 +115,7 @@ def measure(kube, pod, namespace, admin, edge):
         after = counts()
         require(tuple(a-b for a,b in zip(after, before)) == (1, 1) and signatures()-signed == 1,
                 "the concurrency rejection produced zero additional lookups, receipts and signatures")
+        measured["refilled_in_flight_rejections"] = 1
+        return measured
     finally:
         forward.close()

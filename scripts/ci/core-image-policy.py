@@ -38,7 +38,7 @@ def main():
             f'{spec}.containers.exists(c, c.name == "permesi" && c.image in {approved})',
             f'{spec}.containers.all(c, c.name == "permesi" || c.image in {companions})',
             f'!has({spec}.initContainers) || {spec}.initContainers.all(c, c.image in {companions})',
-            f'!has({spec}.ephemeralContainers) || {spec}.ephemeralContainers.all(c, c.image in {companions})',
+            f'!has({spec}.ephemeralContainers) || {spec}.ephemeralContainers.size() == 0',
         ]
         resources.append(dict(base, kind="ValidatingAdmissionPolicy", spec={
             "failurePolicy": "Fail",

@@ -7,6 +7,7 @@ from pathlib import Path
 import runpy
 import socket
 import ssl
+import subprocess
 import time
 
 helpers = runpy.run_path(str(Path(__file__).resolve().parents[1] / "verify-runtime.py"))
@@ -79,5 +80,38 @@ def measure(kube, pod, namespace, admin, edge):
         print("ENTRY " + json.dumps(dict(accepted=accepted, rejected=statuses.count(429),
               lookup_calls=after[0]-before[0], receipt_calls=after[1]-before[1], signatures=signatures_done,
               interval_seconds=elapsed, sampled_cpu_ms=(cpu_after-cpu_before)/1e6)), flush=True)
+        # A test-owned maintenance transaction holds the first lookup so the rate
+        # token can refill while the one in-flight slot is still occupied.
+        time.sleep(1.1)
+        before = counts()
+        signed = signatures()
+        psql = kube + ["exec", "-i", edge + "-postgresql-0", "-c", "postgresql", "--", "psql",
+                       "-XqAt", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "genesis"]
+        with subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as lock:
+            lock.stdin.write("BEGIN; SET LOCAL idle_in_transaction_session_timeout='8s'; "
+                             "LOCK TABLE clients IN ACCESS EXCLUSIVE MODE; SELECT 'locked';\n")
+            lock.stdin.flush()
+            require(lock.stdout.readline().strip() == "locked", "fixture acquired the bounded maintenance lock")
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pending = pool.submit(mint, None)
+                try:
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline:
+                        if run(sql + ["SELECT count(*) FROM pg_stat_activity WHERE datname='genesis' "
+                                      "AND wait_event_type='Lock' AND query LIKE 'SELECT id, is_reserved FROM clients%'"]) == "1":
+                            break
+                        time.sleep(.05)
+                    else:
+                        raise RuntimeError("could not observe the in-flight lookup")
+                    time.sleep(1.1)
+                    require(mint(None) == 429 and not pending.done(),
+                            "one occupied in-flight slot sheds work even after the rate token refills")
+                finally:
+                    lock.stdin.write("ROLLBACK;\n")
+                    lock.stdin.close()
+                require(pending.result(timeout=5) == 200, "admitted work completed when the maintenance lock released")
+        after = counts()
+        require(tuple(a-b for a,b in zip(after, before)) == (1, 1) and signatures()-signed == 1,
+                "the concurrency rejection produced zero additional lookups, receipts and signatures")
     finally:
         forward.close()

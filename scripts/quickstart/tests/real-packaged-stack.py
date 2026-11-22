@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import runpy
 from pathlib import Path
 import subprocess
@@ -23,6 +24,12 @@ ROOT = Path(__file__).resolve().parents[3]
 def run(command, **kwargs):
     result = subprocess.run(command, capture_output=True, text=True, **kwargs)
     if result.returncode:
+        if command[0] == "bash" and Path(command[1]).name == "verify.sh":
+            # Only the verifier's bounded check labels are public diagnostics.
+            failed = [line for line in result.stdout.splitlines()
+                      if re.fullmatch(r"FAIL: [A-Za-z0-9 /():,_-]{1,140}", line)]
+            if failed:
+                raise RuntimeError("packaged verification: " + " | ".join(failed))
         raise RuntimeError(f"{Path(command[0]).name} failed (exit {result.returncode}); private diagnostics withheld")
     return result.stdout.strip()
 
@@ -212,6 +219,9 @@ def main():
                     print("Capacity gate failed; continuing independent checks", flush=True)
             if args.openbao_image and not isolated:
                 runpy.run_path(str(tests / "shared-dependency-outage.py"))["trial"](k, core)
+                for name in ("permesi", "permesi-genesis", core + "-vault"):
+                    run(k + ["rollout", "status", "deploy/" + name, "--timeout=90s"])
+                run(k + ["rollout", "status", "statefulset/" + core + "-postgresql", "--timeout=90s"])
                 verify_profile()
             rollback = None
             if args.previous_core:

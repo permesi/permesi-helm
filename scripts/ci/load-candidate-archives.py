@@ -28,6 +28,17 @@ with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
                 if "sha256:" + hashlib.sha256(body).hexdigest() != digest:
                     raise ValueError("manifest checksum mismatch")
             subprocess.run(["kind", "load", "image-archive", "--name", "containment", str(archive)], check=True)
+            # CRI must resolve the repository@digest used by a Never-pull Pod.
+            # OCI archive import can leave only a tagged alias in containerd.
+            for node in subprocess.check_output(["kind", "get", "nodes", "--name", "containment"], text=True).split():
+                runtime = [os.environ.get("KIND_EXPERIMENTAL_PROVIDER", "docker"), "exec", node]
+                ctr = runtime + ["ctr", "-n", "k8s.io", "images"]
+                pinned = repo + "@" + digest
+                if pinned not in subprocess.check_output(ctr + ["ls", "-q"], text=True).splitlines():
+                    subprocess.run(ctr + ["tag", reference, pinned], check=True)
+                cri = json.loads(subprocess.check_output(runtime + ["crictl", "inspecti", pinned]))
+                if pinned not in cri["status"]["repoDigests"]:
+                    raise ValueError("candidate manifest unavailable through CRI")
             if checkout == "application":
                 prepare.extend(["--image", svc + "=" + reference + "@" + digest])
             if svc == "permesi":

@@ -42,6 +42,7 @@ def main():
     parser.add_argument("--capacity", action="store_true", help="run the two 15-minute fixed-load phases")
     parser.add_argument("--previous-core", help="previous qualified core repository@digest for native rollback")
     parser.add_argument("--previous-revision", help="full build commit embedded in the previous core")
+    parser.add_argument("--namespace", help="fresh test namespace for concurrent independent runs")
     parser.add_argument("--profile", choices=("shared", "isolated"), default="shared")
     parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
     parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
@@ -82,7 +83,7 @@ def main():
         require(files == {str(p.relative_to(checkout)): p.read_bytes() for p in checkout.rglob("*.sql")}
                 and all("/" not in name for name in files),
                 "every SQL input matches the exact archive and can be mounted by the flat bootstrap")
-    namespace = "permesi-isolated" if args.profile == "isolated" else "permesi-quickstart"
+    namespace = args.namespace or ("permesi-isolated" if args.profile == "isolated" else "permesi-quickstart")
     k = ["kubectl", "--context", args.context, "-n", namespace]
     h = ["helm", "--kube-context", args.context, "-n", namespace]
     require(not run(k + ["get", "namespace", namespace, "--ignore-not-found", "-o", "name"]),

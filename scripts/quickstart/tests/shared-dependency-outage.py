@@ -6,7 +6,6 @@ from pathlib import Path
 import runpy
 import socket
 import ssl
-import subprocess
 import time
 
 helpers = runpy.run_path(str(Path(__file__).resolve().parents[1] / "verify-runtime.py"))
@@ -39,14 +38,11 @@ def trial(kube, prefix):
                     response = conn.getresponse()
                     response.read()
                     return response.status
-        def pause(target, container, selection):
-            script = 'set -eu; pids=$(' + selection + '); test -n "$pids"; resume() { kill -CONT $pids 2>/dev/null || :; }; trap resume EXIT HUP INT TERM; kill -STOP $pids; echo paused; sleep 20'
-            return subprocess.Popen(kube + ["exec", target, "-c", container, "--", "sh", "-c", script],
-                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        jobs = [pause(prefix + "-postgresql-0", "postgresql", "pgrep -x postgres"),
-                pause("deploy/" + prefix + "-vault", "vault", "pidof bao || pidof vault")]
-        try:
-            require(all(j.stdout.readline().strip() == "paused" for j in jobs), "both dependency watchdogs started")
+        pause = runpy.run_path(str(Path(__file__).with_name("kind-pause.py")))["paused"]
+        selector = json.loads(run(kube + ["get", "deploy", prefix + "-vault", "-o", "json"]))["spec"]["selector"]["matchLabels"]
+        pods = json.loads(run(kube + ["get", "pods", "-l", ",".join(k + "=" + v for k, v in selector.items()), "-o", "json"]))
+        vault, = [p["metadata"]["name"] for p in pods["items"] if "deletionTimestamp" not in p["metadata"]]
+        with pause(kube, prefix + "-postgresql-0", "postgresql", 24), pause(kube, vault, "vault", 22):
             end = time.monotonic() + 16
             while time.monotonic() < end:
                 if all(status(e, "/ready") == 503 for e in endpoints):
@@ -54,11 +50,6 @@ def trial(kube, prefix):
                 time.sleep(.5)
             require(all(status(e, "/ready") == 503 and status(e, "/live") == 200 for e in endpoints),
                     "all replicas leave readiness while process liveness survives the complete shared outage")
-        finally:
-            for job in jobs:
-                job.wait(timeout=30)
-                job.stdout.close()
-        require(all(job.returncode == 0 for job in jobs), "both dependency watchdogs resumed their processes")
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             if all(status(e, "/ready") == 200 for e in endpoints):

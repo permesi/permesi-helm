@@ -13,7 +13,6 @@ from pathlib import Path
 import runpy
 import socket
 import ssl
-import subprocess
 import time
 import uuid
 
@@ -106,33 +105,19 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
         finally:
             run(kube + ["scale", "deploy/permesi-genesis", "--replicas=2"])
             run(kube + ["rollout", "status", "deploy/permesi-genesis", "--timeout=180s"])
-        # Isolate the Unix proxy for one serving core only. The Agent owns its
-        # socket. Its watchdog restores the original mode even on client loss.
+        # Pause the local proxy independently of the application and its SQL
+        # pool. This also interrupts reads on preexisting HTTP connections.
         partition_token, partition_expiry = mint()
         require(all(signup(f.port, partition_token)[0] == 200 for f in forwards),
                 "both replicas accept the legitimate token before the reader partition")
-        sock = "/var/run/secrets/vaultproject.io/agent.sock"
-        command = """set -eu
-test -S "$1"
-test "$(stat -c %a "$1")" = 600
-trap 'chmod 600 "$1"' EXIT HUP INT TERM
-chmod 000 "$1"
-echo partitioned
-sleep 66"""
-        partition = subprocess.Popen(kube + ["exec", nodes[0], "-c", "vault-agent", "--", "sh", "-c",
-            command, "sh", sock], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        try:
-            require(partition.stdout.readline().strip() == "partitioned", "one core replica lost access to its reader socket")
+        pause = runpy.run_path(str(Path(__file__).with_name("kind-pause.py")))["paused"]
+        with pause(kube, nodes[0], "vault-agent", 67):
             time.sleep(61)
             require(time.time() < partition_expiry and rejected(signup(forwards[0].port, partition_token)),
                     "partitioned replica suspended admission after its maximum snapshot age")
             require(signup(forwards[1].port, partition_token)[0] == 200 and
                     request(forwards[0].port, "api.localhost", "/ready")[0] == 200,
                     "healthy sibling continued admission and the partitioned core retained independent readiness")
-        finally:
-            partition.wait(timeout=75)
-            partition.stdout.close()
-        require(partition.returncode == 0, "reader socket restored")
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             _, health = request(forwards[0].port, "api.localhost", "/health")

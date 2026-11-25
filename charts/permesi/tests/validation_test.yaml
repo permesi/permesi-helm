@@ -5,13 +5,13 @@ release:
 templates:
   - deployment.yaml
 tests:
-  - it: fails when vault AppRole secrets diverge under Vault ESO
+  - it: fails when OpenBao AppRole secrets diverge under ESO
     set:
       externalSecret.enabled: true
-      externalSecret.store: vault-store
-      vault.externalSecret.remoteKey: vault-remote
-      vault.roleId.existingSecret: secret-a
-      vault.secretId.existingSecret: secret-b
+      externalSecret.store: openbao-store
+      openbao.externalSecret.remoteKey: openbao-remote
+      openbao.roleId.existingSecret: secret-a
+      openbao.secretId.existingSecret: secret-b
     asserts:
       - failedTemplate:
           errorPattern: "must reference the same Secret"
@@ -19,7 +19,7 @@ tests:
   - it: fails when a remote key is set without an externalSecret store
     set:
       externalSecret.enabled: true
-      vault.externalSecret.remoteKey: vault-remote
+      openbao.externalSecret.remoteKey: openbao-remote
     asserts:
       - failedTemplate:
           errorPattern: "externalSecret.store must be set"
@@ -32,3 +32,47 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "autoscaling.minReplicas must not exceed"
+
+  - it: rejects a stale vault values block
+    set:
+      vault.url: https://vault.example.com:8200
+    asserts:
+      - failedTemplate:
+          errorPattern: "vault values block was renamed to openbao"
+
+  - it: rejects the removed secretsProvider switch
+    set:
+      secretsProvider: openbao
+    asserts:
+      - failedTemplate:
+          errorPattern: "secretsProvider was removed"
+
+  - it: rejects the removed PASERK admission URL and CA settings
+    set:
+      admission.paserkUrl: https://genesis.example.com/paserk.json
+    asserts:
+      - failedTemplate:
+          errorPattern: "paserkUrl"
+
+  - it: rejects the removed Agent PASERK CA template
+    set:
+      openbao.agent.paserkCa.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "paserkCa"
+
+  - it: rejects OpenBao and admission settings passed through extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_ADMISSION_PASERK_URL
+          value: https://genesis.example.com/paserk.json
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+  - it: requires a pinned application image
+    set:
+      image.digest: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "require pinned application and OpenBao Agent images"

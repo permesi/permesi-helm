@@ -60,32 +60,23 @@ tls:
     remoteKey: ""
     remoteProperty: ""
 
+# Admission token claims. The approved Genesis signing keys and the minimum
+# accepted version come from the core OpenBao authority record
+# (secret/permesi/admission-authority), not from Genesis or a CA bundle.
 admission:
-  paserkUrl: https://genesis.permesi.svc.cluster.local:8080/paserk.json
   issuer: ""
   audience: ""
-  paserkCaPath: ""
-  paserkCa:
-    existingSecret: ""
-    secretKey: ca.pem
-    mountPath: /var/run/permesi/admission-ca
-    fileName: ca.pem
-    externalSecret:
-      remoteKey: ""
-      remoteProperty: ""
 
-# Use openbao for 0.6 and later application images. Release 0.5 uses Vault.
-secretsProvider: vault
-vault:
-  url: /var/run/secrets/vaultproject.io/agent.sock
-  # Explicit native auth needs a newly built supporting app image (unreleased).
-  # auto preserves socket -> Agent and TCP -> AppRole behavior.
+openbao:
+  url: /var/run/secrets/openbao/agent.sock
+  # auto: a Unix socket uses the OpenBao Agent, an http(s) URL uses AppRole.
+  # kubernetes: native Kubernetes auth with a projected service-account token.
   authMethod: auto
   kubernetes:
     authMount: kubernetes
     role: ""
-    tokenPath: /var/run/secrets/vault-native/token
-    audience: vault
+    tokenPath: /var/run/secrets/openbao-native/token
+    audience: openbao
     tokenExpirationSeconds: 3600
   externalSecret:
     remoteKey: ""
@@ -106,24 +97,23 @@ vault:
   kvMount: secret/permesi
   kvPath: config
   transitMount: transit/permesi
-  # Managed Vault Agent sidecar (native sidecar, Kubernetes >= 1.29).
-  # Off by default: existing renders are byte-identical with agent disabled.
+  # Managed OpenBao Agent sidecar (native sidecar, Kubernetes >= 1.29).
   agent:
     enabled: false
-    # HTTP(S) origin of Vault the agent authenticates against. Independent of
-    # vault.url (the Unix socket the application connects to).
+    # HTTP(S) origin of OpenBao the agent authenticates against. Independent of
+    # openbao.url (the Unix socket the application connects to).
     address: ""
     image:
-      repository: hashicorp/vault
-      tag: 1.20.4
-      # Optional sha256:<64 hex> digest. When set it replaces the tag in the
-      # image reference (repository@digest); clear it when changing the tag.
-      digest: ""
+      repository: docker.io/openbao/openbao
+      tag: "2.7.3"
+      # OpenBao workloads require a pinned sha256:<64 hex> digest; it replaces
+      # the tag in the image reference. Update both together.
+      digest: "sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b"
       pullPolicy: IfNotPresent
     auth:
       mount: kubernetes
       role: ""
-      audience: vault
+      audience: openbao
       tokenExpirationSeconds: 3600
     ca:
       existingConfigMap: ""
@@ -146,9 +136,6 @@ vault:
       periodSeconds: 5
       timeoutSeconds: 5
       failureThreshold: 120
-    paserkCa:
-      enabled: true
-      path: pki-int/cert/ca_chain
 
 auth:
   frontendBaseUrl: https://permesi.dev

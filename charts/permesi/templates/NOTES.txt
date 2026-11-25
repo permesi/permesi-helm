@@ -1,7 +1,7 @@
 Permesi has been deployed as {{ include "permesi.fullname" . }}.
 
 Runtime configuration is driven by .Values.config, .Values.database, .Values.tls,
-.Values.admission, .Values.vault, and .Values.auth.
+.Values.admission, .Values.openbao, and .Values.auth.
 
 Server mode: {{ if ne (default "" .Values.config.socketPath) "" -}}
   Unix socket {{ .Values.config.socketPath }} (no Service is created).
@@ -10,18 +10,10 @@ Server mode: {{ if ne (default "" .Values.config.socketPath) "" -}}
 secret-store and database inputs.
 {{- end }}
 
-{{ if eq .Values.secretsProvider "openbao" -}}
 Admission verification reads public authority from core OpenBao KV. Use the operator
 workflow to initialize, publish or withdraw a signing version.
-OpenBao connection: {{ .Values.vault.url }}
-{{- else }}
-Admission PASERK URL: {{ .Values.admission.paserkUrl }}
-  This URL must resolve to the Genesis Service over HTTPS. In the umbrella stack
-  chart a release named "R" creates the Genesis Service "R-genesis"; update
-  admission.paserkUrl when you change the release name, namespace, or port.
 
-Vault URL: {{ .Values.vault.url }}
+OpenBao URL: {{ .Values.openbao.url }}
   Direct AppRole requires the full login endpoint, for example
-  https://<vault>:8200/v1/auth/approle/login. When vault.url is a Unix-socket
-  path (Vault Agent auto-auth), it is passed through unchanged.
-{{ end }}
+  https://<openbao>:8200/v1/auth/approle/login. When it is a Unix-socket path
+  (OpenBao Agent auto-auth), it is passed through unchanged.

@@ -10,14 +10,13 @@ capabilities:
 values:
   - published-values.yaml
 tests:
-  - it: falls back to repository:tag when no digest is set
+  - it: rejects an application image without a digest
     set:
       image.digest: ""
       image.tag: 9.9.9
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: ghcr.io/permesi/permesi:9.9.9
+      - failedTemplate:
+          errorPattern: "require pinned application and OpenBao Agent images"
 
   - it: pins repository@digest when a digest is set, ignoring the tag
     set:
@@ -42,57 +41,68 @@ tests:
       - failedTemplate:
           errorPattern: "image\\.digest: Does not match pattern"
 
-  - it: pins the Vault Agent image by digest independently of the app image
+  - it: pins the OpenBao Agent image by digest independently of the app image
     set:
-      image.digest: ""
-      image.tag: 9.9.9
-      vault.agent.image.tag: 9.8.7
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: permesi
-      vault.agent.pki.role: permesi-runtime
-      vault.agent.pki.commonName: api.permesi.dev
-      vault.agent.pki.dnsNames[0]: api.permesi.dev
-      serviceAccount.automount: false
-      vault.agent.image.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-    asserts:
-      - equal:
-          path: spec.template.spec.initContainers[0].image
-          value: hashicorp/vault@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: ghcr.io/permesi/permesi:9.9.9
-
-  - it: falls back to the Vault Agent repository:tag without a digest
-    set:
-      vault.agent.image.digest: ""
-      vault.agent.image.tag: 9.8.7
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: permesi
-      vault.agent.pki.role: permesi-runtime
-      vault.agent.pki.commonName: api.permesi.dev
-      vault.agent.pki.dnsNames[0]: api.permesi.dev
-      serviceAccount.automount: false
       image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      image.tag: 9.9.9
+      openbao.agent.image.tag: 9.8.7
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
+      openbao.agent.pki.role: permesi-runtime
+      openbao.agent.pki.commonName: api.permesi.dev
+      openbao.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      openbao.agent.image.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     asserts:
       - equal:
           path: spec.template.spec.initContainers[0].image
-          value: hashicorp/vault:9.8.7
+          value: docker.io/openbao/openbao@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       - equal:
           path: spec.template.spec.containers[0].image
           value: ghcr.io/permesi/permesi@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-  - it: rejects a malformed Vault Agent digest via the schema
+  - it: rejects an OpenBao Agent image without a digest
     set:
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: permesi
-      vault.agent.pki.role: permesi-runtime
-      vault.agent.pki.commonName: api.permesi.dev
-      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      openbao.agent.image.digest: ""
+      openbao.agent.image.tag: 9.8.7
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
+      openbao.agent.pki.role: permesi-runtime
+      openbao.agent.pki.commonName: api.permesi.dev
+      openbao.agent.pki.dnsNames[0]: api.permesi.dev
       serviceAccount.automount: false
-      vault.agent.image.digest: "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+      image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - failedTemplate:
+          errorPattern: "require pinned application and OpenBao Agent images"
+
+  - it: rejects an Agent image that is not OpenBao
+    set:
+      openbao.agent.image.repository: hashicorp/vault
+      openbao.agent.image.digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
+      openbao.agent.pki.role: permesi-runtime
+      openbao.agent.pki.commonName: api.permesi.dev
+      openbao.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "require pinned application and OpenBao Agent images"
+
+  - it: rejects a malformed OpenBao Agent digest via the schema
+    set:
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
+      openbao.agent.pki.role: permesi-runtime
+      openbao.agent.pki.commonName: api.permesi.dev
+      openbao.agent.pki.dnsNames[0]: api.permesi.dev
+      serviceAccount.automount: false
+      openbao.agent.image.digest: "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
     asserts:
       - failedTemplate:
           errorPattern: "image\\.digest: Does not match pattern"

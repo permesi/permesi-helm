@@ -1,23 +1,13 @@
 {{- include "permesi.validateValues" . }}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
-{{- $vaultEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
-{{- $admissionCaSecret := include "permesi.admissionCaSecretName" . -}}
+{{- $openbaoEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
 {{- $tlsSecret := include "permesi.tlsSecretName" . -}}
-{{- $agentEnabled := .Values.vault.agent.enabled -}}
-{{- $nativeEnabled := eq .Values.vault.authMethod "kubernetes" -}}
+{{- $agentEnabled := .Values.openbao.agent.enabled -}}
+{{- $nativeEnabled := eq .Values.openbao.authMethod "kubernetes" -}}
 {{- $agentManagesTls := and $agentEnabled (not $socketMode) -}}
-{{- $agentManagesCa := and $agentEnabled .Values.vault.agent.paserkCa.enabled -}}
-{{- $admissionCaPath := default "" .Values.admission.paserkCaPath -}}
-{{- if and (eq $admissionCaPath "") (or (ne $admissionCaSecret "") $agentManagesCa) -}}
-{{- $admissionCaPath = printf "%s/%s" .Values.admission.paserkCa.mountPath .Values.admission.paserkCa.fileName -}}
-{{- end -}}
 {{- $agentSocketDir := include "permesi.agentSocketDir" . -}}
 {{- $agentTlsDir := include "permesi.agentTlsDir" . -}}
-{{- $agentCaDir := include "permesi.agentAdmissionCaDir" . -}}
 {{- $mountTls := or $tlsSecret $agentManagesTls -}}
-{{- $mountCa := or $admissionCaSecret $agentManagesCa -}}
-{{- $openbao := eq .Values.secretsProvider "openbao" -}}
-{{- $prefix := ternary "OPENBAO" "VAULT" $openbao -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -46,7 +36,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- if $agentEnabled }}
-        checksum/vault-agent-config: {{ include "permesi.agentConfigChecksum" . }}
+        checksum/openbao-agent-config: {{ include "permesi.agentConfigChecksum" . }}
         {{- end }}
       {{- end }}
     spec:
@@ -60,13 +50,13 @@ spec:
       {{- end }}
       {{- if $agentEnabled }}
       initContainers:
-        - name: vault-agent
-          image: {{ include "permesi.image" .Values.vault.agent.image | quote }}
-          imagePullPolicy: {{ .Values.vault.agent.image.pullPolicy }}
-          command: [{{ ternary "/usr/bin/bao" "/bin/vault" $openbao | quote }}]
+        - name: openbao-agent
+          image: {{ include "permesi.image" .Values.openbao.agent.image | quote }}
+          imagePullPolicy: {{ .Values.openbao.agent.image.pullPolicy }}
+          command: ["/usr/bin/bao"]
           args:
             - agent
-            - -config=/vault/config/agent.hcl
+            - -config=/openbao/config/agent.hcl
           restartPolicy: Always
           securityContext:
             runAsNonRoot: true
@@ -81,28 +71,24 @@ spec:
             - name: HOME
               value: /tmp
           volumeMounts:
-            - name: vault-agent-config
-              mountPath: /vault/config
+            - name: openbao-agent-config
+              mountPath: /openbao/config
               readOnly: true
-            {{- if .Values.vault.agent.ca.existingConfigMap }}
-            - name: vault-agent-ca
-              mountPath: /vault/ca
+            {{- if .Values.openbao.agent.ca.existingConfigMap }}
+            - name: openbao-agent-ca
+              mountPath: /openbao/ca
               readOnly: true
             {{- end }}
-            - name: vault-agent-token
-              mountPath: /var/run/secrets/vault-token
+            - name: openbao-agent-token
+              mountPath: /var/run/secrets/openbao-token
               readOnly: true
-            - name: vault-agent-socket
+            - name: openbao-agent-socket
               mountPath: {{ $agentSocketDir | quote }}
-            - name: vault-agent-scratch
+            - name: openbao-agent-scratch
               mountPath: /tmp
             {{- if $agentManagesTls }}
             - name: tls-bundle
               mountPath: {{ $agentTlsDir | quote }}
-            {{- end }}
-            {{- if $agentManagesCa }}
-            - name: admission-paserk-ca
-              mountPath: {{ $agentCaDir | quote }}
             {{- end }}
           startupProbe:
             exec:
@@ -110,11 +96,11 @@ spec:
                 - sh
                 - -c
                 - '{{ include "permesi.agentProbeCommand" . | trim }}'
-            periodSeconds: {{ .Values.vault.agent.startupProbe.periodSeconds }}
-            timeoutSeconds: {{ .Values.vault.agent.startupProbe.timeoutSeconds }}
-            failureThreshold: {{ .Values.vault.agent.startupProbe.failureThreshold }}
+            periodSeconds: {{ .Values.openbao.agent.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.openbao.agent.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.openbao.agent.startupProbe.failureThreshold }}
           resources:
-            {{- toYaml .Values.vault.agent.resources | nindent 12 }}
+            {{- toYaml .Values.openbao.agent.resources | nindent 12 }}
       {{- end }}
       containers:
         - name: permesi
@@ -151,10 +137,6 @@ spec:
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
 
-            {{- if not $openbao }}
-            - name: PERMESI_ADMISSION_PASERK_URL
-              value: {{ .Values.admission.paserkUrl | quote }}
-            {{- end }}
             {{- with .Values.admission.issuer }}
             - name: PERMESI_ADMISSION_ISS
               value: {{ . | quote }}
@@ -163,74 +145,70 @@ spec:
             - name: PERMESI_ADMISSION_AUD
               value: {{ . | quote }}
             {{- end }}
-            {{- if $admissionCaPath }}
-            - name: PERMESI_ADMISSION_PASERK_CA_PATH
-              value: {{ $admissionCaPath | quote }}
-            {{- end }}
 
-            - name: PERMESI_{{ $prefix }}_URL
-              value: {{ .Values.vault.url | quote }}
-            {{- if ne .Values.vault.authMethod "auto" }}
-            - name: PERMESI_{{ $prefix }}_AUTH_METHOD
-              value: {{ .Values.vault.authMethod | quote }}
+            - name: PERMESI_OPENBAO_URL
+              value: {{ .Values.openbao.url | quote }}
+            {{- if ne .Values.openbao.authMethod "auto" }}
+            - name: PERMESI_OPENBAO_AUTH_METHOD
+              value: {{ .Values.openbao.authMethod | quote }}
             {{- if $nativeEnabled }}
-            - name: PERMESI_{{ $prefix }}_KUBERNETES_AUTH_MOUNT
-              value: {{ .Values.vault.kubernetes.authMount | quote }}
-            - name: PERMESI_{{ $prefix }}_KUBERNETES_ROLE
-              value: {{ .Values.vault.kubernetes.role | quote }}
-            - name: PERMESI_{{ $prefix }}_KUBERNETES_TOKEN_PATH
-              value: {{ .Values.vault.kubernetes.tokenPath | quote }}
+            - name: PERMESI_OPENBAO_KUBERNETES_AUTH_MOUNT
+              value: {{ .Values.openbao.kubernetes.authMount | quote }}
+            - name: PERMESI_OPENBAO_KUBERNETES_ROLE
+              value: {{ .Values.openbao.kubernetes.role | quote }}
+            - name: PERMESI_OPENBAO_KUBERNETES_TOKEN_PATH
+              value: {{ .Values.openbao.kubernetes.tokenPath | quote }}
             {{- end }}
             {{- end }}
-            {{- if $vaultEso }}
-            - name: PERMESI_{{ $prefix }}_ROLE_ID
+            {{- if $openbaoEso }}
+            - name: PERMESI_OPENBAO_ROLE_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "permesi.vaultSecretName" . | quote }}
-                  key: {{ .Values.vault.roleId.secretKey | quote }}
-            - name: PERMESI_{{ $prefix }}_SECRET_ID
+                  name: {{ include "permesi.openbaoSecretName" . | quote }}
+                  key: {{ .Values.openbao.roleId.secretKey | quote }}
+            - name: PERMESI_OPENBAO_SECRET_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "permesi.vaultSecretName" . | quote }}
-                  key: {{ .Values.vault.secretId.secretKey | quote }}
+                  name: {{ include "permesi.openbaoSecretName" . | quote }}
+                  key: {{ .Values.openbao.secretId.secretKey | quote }}
             {{- else }}
-            {{- if .Values.vault.roleId.existingSecret }}
-            - name: PERMESI_{{ $prefix }}_ROLE_ID
+            {{- if .Values.openbao.roleId.existingSecret }}
+            - name: PERMESI_OPENBAO_ROLE_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.vault.roleId.existingSecret | quote }}
-                  key: {{ .Values.vault.roleId.secretKey | quote }}
-            {{- else if .Values.vault.roleId.value }}
-            - name: PERMESI_{{ $prefix }}_ROLE_ID
-              value: {{ .Values.vault.roleId.value | quote }}
+                  name: {{ .Values.openbao.roleId.existingSecret | quote }}
+                  key: {{ .Values.openbao.roleId.secretKey | quote }}
+            {{- else if .Values.openbao.roleId.value }}
+            - name: PERMESI_OPENBAO_ROLE_ID
+              value: {{ .Values.openbao.roleId.value | quote }}
             {{- end }}
-            {{- if .Values.vault.secretId.existingSecret }}
-            - name: PERMESI_{{ $prefix }}_SECRET_ID
+            {{- if .Values.openbao.secretId.existingSecret }}
+            - name: PERMESI_OPENBAO_SECRET_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.vault.secretId.existingSecret | quote }}
-                  key: {{ .Values.vault.secretId.secretKey | quote }}
-            {{- else if .Values.vault.secretId.value }}
-            - name: PERMESI_{{ $prefix }}_SECRET_ID
-              value: {{ .Values.vault.secretId.value | quote }}
+                  name: {{ .Values.openbao.secretId.existingSecret | quote }}
+                  key: {{ .Values.openbao.secretId.secretKey | quote }}
+            {{- else if .Values.openbao.secretId.value }}
+            - name: PERMESI_OPENBAO_SECRET_ID
+              value: {{ .Values.openbao.secretId.value | quote }}
             {{- end }}
             {{- end }}
-            {{- if .Values.vault.wrappedToken.existingSecret }}
-            - name: PERMESI_{{ $prefix }}_WRAPPED_TOKEN
+            {{- if .Values.openbao.wrappedToken.existingSecret }}
+            - name: PERMESI_OPENBAO_WRAPPED_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.vault.wrappedToken.existingSecret | quote }}
-                  key: {{ .Values.vault.wrappedToken.secretKey | quote }}
-            {{- else if .Values.vault.wrappedToken.value }}
-            - name: PERMESI_{{ $prefix }}_WRAPPED_TOKEN
-              value: {{ .Values.vault.wrappedToken.value | quote }}
+                  name: {{ .Values.openbao.wrappedToken.existingSecret | quote }}
+                  key: {{ .Values.openbao.wrappedToken.secretKey | quote }}
+            {{- else if .Values.openbao.wrappedToken.value }}
+            - name: PERMESI_OPENBAO_WRAPPED_TOKEN
+              value: {{ .Values.openbao.wrappedToken.value | quote }}
             {{- end }}
-            - name: PERMESI_{{ $prefix }}_KV_MOUNT
-              value: {{ .Values.vault.kvMount | quote }}
-            - name: PERMESI_{{ $prefix }}_KV_PATH
-              value: {{ .Values.vault.kvPath | quote }}
-            - name: PERMESI_{{ $prefix }}_TRANSIT_MOUNT
-              value: {{ .Values.vault.transitMount | quote }}
+            - name: PERMESI_OPENBAO_KV_MOUNT
+              value: {{ .Values.openbao.kvMount | quote }}
+            - name: PERMESI_OPENBAO_KV_PATH
+              value: {{ .Values.openbao.kvPath | quote }}
+            - name: PERMESI_OPENBAO_TRANSIT_MOUNT
+              value: {{ .Values.openbao.transitMount | quote }}
 
             - name: PERMESI_FRONTEND_BASE_URL
               value: {{ .Values.auth.frontendBaseUrl | quote }}
@@ -269,26 +247,21 @@ spec:
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or $mountTls $mountCa $agentEnabled $nativeEnabled .Values.extraVolumeMounts }}
+          {{- if or $mountTls $agentEnabled $nativeEnabled .Values.extraVolumeMounts }}
           volumeMounts:
             {{- if $mountTls }}
             - name: tls-bundle
               mountPath: {{ $agentTlsDir | quote }}
               readOnly: true
             {{- end }}
-            {{- if $mountCa }}
-            - name: admission-paserk-ca
-              mountPath: {{ if $agentManagesCa }}{{ $agentCaDir | quote }}{{ else }}{{ .Values.admission.paserkCa.mountPath | quote }}{{ end }}
-              readOnly: true
-            {{- end }}
             {{- if $agentEnabled }}
-            - name: vault-agent-socket
+            - name: openbao-agent-socket
               mountPath: {{ $agentSocketDir | quote }}
               readOnly: true
             {{- end }}
             {{- if $nativeEnabled }}
-            - name: vault-native-token
-              mountPath: {{ include "permesi.pathDir" .Values.vault.kubernetes.tokenPath | quote }}
+            - name: openbao-native-token
+              mountPath: {{ include "permesi.pathDir" .Values.openbao.kubernetes.tokenPath | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -328,7 +301,7 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or $mountTls $mountCa $agentEnabled $nativeEnabled .Values.extraVolumes }}
+      {{- if or $mountTls $agentEnabled $nativeEnabled .Values.extraVolumes }}
       volumes:
         {{- if $mountTls }}
         - name: tls-bundle
@@ -343,51 +316,38 @@ spec:
                 path: {{ include "permesi.pathBase" .Values.tls.pemBundlePath | quote }}
           {{- end }}
         {{- end }}
-        {{- if $mountCa }}
-        - name: admission-paserk-ca
-          {{- if $agentManagesCa }}
-          emptyDir:
-            medium: Memory
-          {{- else }}
-          secret:
-            secretName: {{ $admissionCaSecret | quote }}
-            items:
-              - key: {{ .Values.admission.paserkCa.secretKey | quote }}
-                path: {{ .Values.admission.paserkCa.fileName | quote }}
-          {{- end }}
-        {{- end }}
         {{- if $agentEnabled }}
-        - name: vault-agent-socket
+        - name: openbao-agent-socket
           emptyDir:
             medium: Memory
-        - name: vault-agent-config
+        - name: openbao-agent-config
           configMap:
             name: {{ include "permesi.agentConfigName" . | quote }}
-        - name: vault-agent-token
+        - name: openbao-agent-token
           projected:
             sources:
               - serviceAccountToken:
                   path: token
-                  audience: {{ .Values.vault.agent.auth.audience | quote }}
-                  expirationSeconds: {{ .Values.vault.agent.auth.tokenExpirationSeconds }}
+                  audience: {{ .Values.openbao.agent.auth.audience | quote }}
+                  expirationSeconds: {{ .Values.openbao.agent.auth.tokenExpirationSeconds }}
             defaultMode: 0400
-        {{- if .Values.vault.agent.ca.existingConfigMap }}
-        - name: vault-agent-ca
+        {{- if .Values.openbao.agent.ca.existingConfigMap }}
+        - name: openbao-agent-ca
           configMap:
-            name: {{ .Values.vault.agent.ca.existingConfigMap | quote }}
+            name: {{ .Values.openbao.agent.ca.existingConfigMap | quote }}
         {{- end }}
-        - name: vault-agent-scratch
+        - name: openbao-agent-scratch
           emptyDir:
             medium: Memory
         {{- end }}
         {{- if $nativeEnabled }}
-        - name: vault-native-token
+        - name: openbao-native-token
           projected:
             sources:
               - serviceAccountToken:
-                  path: {{ include "permesi.pathBase" .Values.vault.kubernetes.tokenPath | quote }}
-                  audience: {{ .Values.vault.kubernetes.audience | quote }}
-                  expirationSeconds: {{ .Values.vault.kubernetes.tokenExpirationSeconds }}
+                  path: {{ include "permesi.pathBase" .Values.openbao.kubernetes.tokenPath | quote }}
+                  audience: {{ .Values.openbao.kubernetes.audience | quote }}
+                  expirationSeconds: {{ .Values.openbao.kubernetes.tokenExpirationSeconds }}
             defaultMode: 0400
         {{- end }}
         {{- with .Values.extraVolumes }}

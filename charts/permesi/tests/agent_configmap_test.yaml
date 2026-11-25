@@ -1,9 +1,9 @@
-suite: permesi vault agent configmap
+suite: permesi OpenBao Agent configmap
 release:
   name: permesi
   namespace: permesi
 templates:
-  - configmap-vault-agent.yaml
+  - configmap-openbao-agent.yaml
 capabilities:
   majorVersion: 1
   minorVersion: 29
@@ -12,12 +12,12 @@ values:
 tests:
   - it: renders the agent HCL with proxy auth token, no force, no cache
     set:
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: permesi
-      vault.agent.pki.role: permesi-runtime
-      vault.agent.pki.commonName: api.permesi.dev
-      vault.agent.pki.dnsNames[0]: api.permesi.dev
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
+      openbao.agent.pki.role: permesi-runtime
+      openbao.agent.pki.commonName: api.permesi.dev
+      openbao.agent.pki.dnsNames[0]: api.permesi.dev
     asserts:
       - matchRegex:
           path: data["agent.hcl"]
@@ -33,7 +33,7 @@ tests:
           pattern: 'mount_path = "auth/kubernetes"'
       - matchRegex:
           path: data["agent.hcl"]
-          pattern: 'token_path = "/var/run/secrets/vault-token/token"'
+          pattern: 'token_path = "/var/run/secrets/openbao-token/token"'
       - matchRegex:
           path: data["agent.hcl"]
           pattern: 'socket_mode  = "0600"'
@@ -51,38 +51,40 @@ tests:
           pattern: 'lease_renewal_threshold = 0.8'
       - matchRegex:
           path: data["tls-bundle.tpl"]
-          pattern: '\{\{ \.Data\.Key \}\}\{\{ \.Data\.Cert \}\}\{\{ range \.Data\.CAChain \}\}\{\{ \. \}\}\{\{ end \}\}'
+          pattern: '\{\{ \.Data\.Key \}\}\{\{ \.Data\.Cert \}\}\{\{ with secret "pki-int/cert/ca_chain" \}\}\{\{ \.Data\.certificate \}\}\{\{ end \}\}'
       - notMatchRegex:
           path: data["tls-bundle.tpl"]
           pattern: '\{\{ \.Data\.CA \}\}'
       - matchRegex:
           path: data["tls-bundle.tpl"]
           pattern: '"pki-int/issue/permesi-runtime"'
-      - matchRegex:
+      - notExists:
           path: data["paserk-ca.tpl"]
-          pattern: 'secret "pki-int/cert/ca_chain"'
+      - matchRegex:
+          path: data["agent.hcl"]
+          pattern: 'pid_file = "/tmp/openbao-agent.pid"'
 
-  - it: omits the inbound PKI template in socket mode but keeps the PASERK CA
+  - it: omits the inbound PKI template in socket mode
     set:
       config.socketPath: /var/run/permesi/permesi.sock
       service.enabled: false
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: permesi
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
     asserts:
       - notMatchRegex:
           path: data["agent.hcl"]
           pattern: 'tls-bundle.tpl'
-      - matchRegex:
+      - notMatchRegex:
           path: data["agent.hcl"]
-          pattern: 'paserk-ca.tpl'
+          pattern: 'paserk'
 
   - it: renders an explicit fractional renewal threshold
     set:
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: permesi
-      vault.agent.pki.renewalThreshold: 0.8
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: permesi
+      openbao.agent.pki.renewalThreshold: 0.8
     asserts:
       - matchRegex:
           path: data["agent.hcl"]

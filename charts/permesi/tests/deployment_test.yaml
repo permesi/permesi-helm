@@ -43,9 +43,8 @@ tests:
     set:
       database.dsn.existingSecret: permesi-db
       tls.existingSecret: permesi-tls
-      vault.roleId.existingSecret: permesi-vault
-      vault.secretId.existingSecret: permesi-vault
-      admission.paserkCa.existingSecret: permesi-admission-ca
+      openbao.roleId.existingSecret: permesi-openbao
+      openbao.secretId.existingSecret: permesi-openbao
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -59,43 +58,38 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: PERMESI_VAULT_ROLE_ID
+            name: PERMESI_OPENBAO_ROLE_ID
             valueFrom:
               secretKeyRef:
-                name: permesi-vault
+                name: permesi-openbao
                 key: role_id
           any: true
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: PERMESI_VAULT_SECRET_ID
+            name: PERMESI_OPENBAO_SECRET_ID
             valueFrom:
               secretKeyRef:
-                name: permesi-vault
+                name: permesi-openbao
                 key: secret_id
-          any: true
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: PERMESI_ADMISSION_PASERK_CA_PATH
-            value: /var/run/permesi/admission-ca/ca.pem
           any: true
       - equal:
           path: spec.template.spec.volumes[0].secret.secretName
           value: permesi-tls
-      - equal:
-          path: spec.template.spec.volumes[1].secret.secretName
-          value: permesi-admission-ca
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: admission-paserk-ca
+          any: true
 
   - it: consumes ESO-generated names when remote keys are set
     set:
       externalSecret.enabled: true
-      externalSecret.store: vault-store
+      externalSecret.store: openbao-store
       database.dsn.value: ""
       database.dsn.externalSecret.remoteKey: db-remote
       tls.externalSecret.remoteKey: tls-remote
-      vault.externalSecret.remoteKey: vault-remote
-      admission.paserkCa.externalSecret.remoteKey: ca-remote
+      openbao.externalSecret.remoteKey: openbao-remote
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -109,33 +103,29 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: PERMESI_VAULT_ROLE_ID
+            name: PERMESI_OPENBAO_ROLE_ID
             valueFrom:
               secretKeyRef:
-                name: permesi-vault
+                name: permesi-openbao
                 key: role_id
           any: true
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: PERMESI_VAULT_SECRET_ID
+            name: PERMESI_OPENBAO_SECRET_ID
             valueFrom:
               secretKeyRef:
-                name: permesi-vault
+                name: permesi-openbao
                 key: secret_id
-          any: true
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: PERMESI_ADMISSION_PASERK_CA_PATH
-            value: /var/run/permesi/admission-ca/ca.pem
           any: true
       - equal:
           path: spec.template.spec.volumes[0].secret.secretName
           value: permesi-tls
-      - equal:
-          path: spec.template.spec.volumes[1].secret.secretName
-          value: permesi-admission-ca
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: admission-paserk-ca
+          any: true
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
@@ -143,37 +133,30 @@ tests:
             mountPath: /var/run/permesi/tls
             readOnly: true
           any: true
-      - contains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: admission-paserk-ca
-            mountPath: /var/run/permesi/admission-ca
-            readOnly: true
-          any: true
 
-  - it: uses the lone secretId existingSecret for both vault env vars
+  - it: uses the lone secretId existingSecret for both OpenBao env vars
     set:
       externalSecret.enabled: true
-      externalSecret.store: vault-store
-      vault.externalSecret.remoteKey: vault-remote
-      vault.secretId.existingSecret: custom-vault
+      externalSecret.store: openbao-store
+      openbao.externalSecret.remoteKey: openbao-remote
+      openbao.secretId.existingSecret: custom-openbao
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: PERMESI_VAULT_ROLE_ID
+            name: PERMESI_OPENBAO_ROLE_ID
             valueFrom:
               secretKeyRef:
-                name: custom-vault
+                name: custom-openbao
                 key: role_id
           any: true
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: PERMESI_VAULT_SECRET_ID
+            name: PERMESI_OPENBAO_SECRET_ID
             valueFrom:
               secretKeyRef:
-                name: custom-vault
+                name: custom-openbao
                 key: secret_id
           any: true
 

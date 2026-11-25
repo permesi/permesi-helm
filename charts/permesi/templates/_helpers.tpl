@@ -74,8 +74,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if $bad -}}true{{- else -}}false{{- end -}}
 {{- end -}}
 
-{{- define "permesi.vaultIsTcp" -}}
-{{- $url := default "" .Values.vault.url -}}
+{{- define "permesi.openbaoIsTcp" -}}
+{{- $url := default "" .Values.openbao.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
 true
 {{- else -}}
@@ -102,40 +102,38 @@ false
 {{- end -}}
 {{- end -}}
 
-{{/* Effective secret name for Vault AppRole credentials. When Vault ESO is active both
+{{/* Effective secret name for OpenBao AppRole credentials. When OpenBao ESO is active both
      role_id and secret_id are written to one Secret; this returns that single name. */}}
-{{- define "permesi.vaultSecretName" -}}
-{{- if .Values.vault.roleId.existingSecret -}}
-{{- .Values.vault.roleId.existingSecret -}}
-{{- else if .Values.vault.secretId.existingSecret -}}
-{{- .Values.vault.secretId.existingSecret -}}
-{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
-{{- printf "%s-vault" (include "permesi.fullname" .) -}}
-{{- end -}}
-{{- end -}}
-
-{{/* Effective secret name for the admission PASERK CA bundle. */}}
-{{- define "permesi.admissionCaSecretName" -}}
-{{- if .Values.admission.paserkCa.existingSecret -}}
-{{- .Values.admission.paserkCa.existingSecret -}}
-{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa) "") -}}
-{{- printf "%s-admission-ca" (include "permesi.fullname" .) -}}
+{{- define "permesi.openbaoSecretName" -}}
+{{- if .Values.openbao.roleId.existingSecret -}}
+{{- .Values.openbao.roleId.existingSecret -}}
+{{- else if .Values.openbao.secretId.existingSecret -}}
+{{- .Values.openbao.secretId.existingSecret -}}
+{{- else if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
+{{- printf "%s-openbao" (include "permesi.fullname" .) -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "permesi.validateValues" -}}
-{{- include "permesi.validateVaultAuth" . -}}
+{{- /* Chart 0.6 dropped HashiCorp Vault; stale keys would otherwise be ignored silently. */ -}}
+{{- if hasKey .Values "vault" -}}
+{{- fail "permesi: the vault values block was renamed to openbao; HashiCorp Vault is no longer supported" -}}
+{{- end -}}
+{{- if hasKey .Values "secretsProvider" -}}
+{{- fail "permesi: secretsProvider was removed; the chart always uses OpenBao" -}}
+{{- end -}}
+{{- include "permesi.validateOpenbaoAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
-{{- $vaultEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- $openbaoEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
 {{- $dsnEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") -}}
 {{- if .Values.externalSecret.enabled -}}
-{{- $anyRemoteKey := or (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") (ne (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa) "") -}}
+{{- $anyRemoteKey := or (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
 {{- if and $anyRemoteKey (eq (default "" .Values.externalSecret.store) "") -}}
 {{- fail "permesi: externalSecret.store must be set when externalSecret.enabled and any externalSecret.remoteKey is configured" -}}
 {{- end -}}
 {{- end -}}
-{{- if and $vaultEso (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne .Values.vault.roleId.existingSecret .Values.vault.secretId.existingSecret) -}}
-{{- fail "permesi: vault.roleId.existingSecret and vault.secretId.existingSecret must reference the same Secret when vault.externalSecret.remoteKey is set" -}}
+{{- if and $openbaoEso (ne (default "" .Values.openbao.roleId.existingSecret) "") (ne (default "" .Values.openbao.secretId.existingSecret) "") (ne .Values.openbao.roleId.existingSecret .Values.openbao.secretId.existingSecret) -}}
+{{- fail "permesi: openbao.roleId.existingSecret and openbao.secretId.existingSecret must reference the same Secret when openbao.externalSecret.remoteKey is set" -}}
 {{- end -}}
 {{- if and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) (int .Values.autoscaling.maxReplicas)) -}}
 {{- fail "permesi: autoscaling.minReplicas must not exceed autoscaling.maxReplicas" -}}
@@ -145,14 +143,13 @@ false
 {{- fail "permesi: service.enabled must be false when config.socketPath is set" -}}
 {{- end -}}
 
-{{- if eq .Values.secretsProvider "openbao" -}}
-{{- if or (empty .Values.image.digest) (and .Values.vault.agent.enabled (or (empty .Values.vault.agent.image.digest) (not (hasSuffix "/openbao" .Values.vault.agent.image.repository)))) -}}
+{{- if or (empty .Values.image.digest) (and .Values.openbao.agent.enabled (or (empty .Values.openbao.agent.image.digest) (not (hasSuffix "/openbao" .Values.openbao.agent.image.repository)))) -}}
 {{- fail "OpenBao workloads require pinned application and OpenBao Agent images" -}}
 {{- end -}}
 {{- range $e := .Values.extraEnv -}}
-{{- if or (hasPrefix "PERMESI_OPENBAO_" $e.name) (hasPrefix "GENESIS_OPENBAO_" $e.name) (hasPrefix "PERMESI_ADMISSION_PASERK_" $e.name) -}}
+{{- $name := toString $e.name -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (hasPrefix "PERMESI_ADMISSION_" $name) -}}
 {{- fail "Use managed values for OpenBao and admission trust" -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dsnEso -}}
@@ -160,104 +157,90 @@ false
 {{- fail "permesi: set database.dsn.value or database.dsn.existingSecret" -}}
 {{- end -}}
 
-{{- if and (eq .Values.secretsProvider "openbao") (or .Values.admission.paserkUrl .Values.vault.agent.paserkCa.enabled .Values.admission.paserkCaPath .Values.admission.paserkCa.existingSecret (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa)) -}}
-{{- fail "OpenBao admission trust requires core KV and forbids a PASERK URL or CA override" -}}
-{{- end -}}
-{{- if and (ne .Values.secretsProvider "openbao") (eq (default "" .Values.admission.paserkUrl) "") -}}
-{{- fail "permesi: admission.paserkUrl must be set" -}}
-{{- end -}}
-
-{{- if eq (default "" .Values.vault.url) "" -}}
-{{- fail "permesi: vault.url must be set" -}}
+{{- if eq (default "" .Values.openbao.url) "" -}}
+{{- fail "permesi: openbao.url must be set" -}}
 {{- end -}}
 
 {{- if and (not $socketMode) (eq (default "" .Values.tls.pemBundlePath) "") -}}
 {{- fail "permesi: tls.pemBundlePath must be set when not running in socket mode" -}}
 {{- end -}}
 
-{{- $secretIdSet := or (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") $vaultEso -}}
-{{- $wrappedTokenSet := or (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- $secretIdSet := or (ne (default "" .Values.openbao.secretId.value) "") (ne (default "" .Values.openbao.secretId.existingSecret) "") $openbaoEso -}}
+{{- $wrappedTokenSet := or (ne (default "" .Values.openbao.wrappedToken.value) "") (ne (default "" .Values.openbao.wrappedToken.existingSecret) "") -}}
 {{- if and $secretIdSet $wrappedTokenSet -}}
-{{- fail "permesi: vault.secretId and vault.wrappedToken are mutually exclusive" -}}
+{{- fail "permesi: openbao.secretId and openbao.wrappedToken are mutually exclusive" -}}
 {{- end -}}
 
-{{- $vaultIsTcp := eq (include "permesi.vaultIsTcp" .) "true" -}}
-{{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEso -}}
-{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not $roleSet) -}}
-{{- fail "permesi: vault.roleId must be set when vault.url uses http:// or https://" -}}
+{{- $openbaoIsTcp := eq (include "permesi.openbaoIsTcp" .) "true" -}}
+{{- $roleSet := or (ne (default "" .Values.openbao.roleId.value) "") (ne (default "" .Values.openbao.roleId.existingSecret) "") $openbaoEso -}}
+{{- if and (not .Values.openbao.agent.enabled) (ne .Values.openbao.authMethod "kubernetes") $openbaoIsTcp (not $roleSet) -}}
+{{- fail "permesi: openbao.roleId must be set when openbao.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
-{{- fail "permesi: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
+{{- if and (not .Values.openbao.agent.enabled) (ne .Values.openbao.authMethod "kubernetes") $openbaoIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- fail "permesi: set openbao.secretId or openbao.wrappedToken when openbao.url uses http:// or https://" -}}
 {{- end -}}
 
-{{- if .Values.vault.agent.enabled -}}
-{{- $agent := .Values.vault.agent -}}
+{{- if .Values.openbao.agent.enabled -}}
+{{- $agent := .Values.openbao.agent -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 
 {{- /* Kubernetes >= 1.29 (native sidecars). */ -}}
 {{- $minor := trimSuffix "+" (toString .Capabilities.KubeVersion.Minor) -}}
 {{- if or (not (regexMatch "^[0-9]+$" $minor)) (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt ($minor | int) 29)) -}}
-{{- fail "permesi: vault.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
+{{- fail "permesi: openbao.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
 {{- end -}}
 
 {{- /* Unix target. */ -}}
-{{- $url := default "" .Values.vault.url -}}
+{{- $url := default "" .Values.openbao.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
-{{- fail "permesi: vault.url must be a Unix socket path when vault.agent.enabled" -}}
+{{- fail "permesi: openbao.url must be a Unix socket path when openbao.agent.enabled" -}}
 {{- end -}}
 {{- $urlNoScheme := $url -}}
 {{- if hasPrefix "unix://" $url -}}
 {{- $urlNoScheme = trimPrefix "unix://" $url -}}
 {{- end -}}
 {{- if not (hasPrefix "/" $urlNoScheme) -}}
-{{- fail "permesi: vault.url must be an absolute socket path when vault.agent.enabled" -}}
+{{- fail "permesi: openbao.url must be an absolute socket path when openbao.agent.enabled" -}}
 {{- end -}}
 
-{{- /* Vault origin address. */ -}}
+{{- /* OpenBao origin address. */ -}}
 {{- if not (or (hasPrefix "http://" (default "" $agent.address)) (hasPrefix "https://" (default "" $agent.address))) -}}
-{{- fail "permesi: vault.agent.address must be an http(s) URL when vault.agent.enabled" -}}
+{{- fail "permesi: openbao.agent.address must be an http(s) URL when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Kubernetes auth role. */ -}}
 {{- if eq (default "" $agent.auth.role) "" -}}
-{{- fail "permesi: vault.agent.auth.role must be set when vault.agent.enabled" -}}
+{{- fail "permesi: openbao.agent.auth.role must be set when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Reject AppRole credentials / wrapped tokens. */ -}}
-{{- $approleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- $approleSet := or (ne (default "" .Values.openbao.roleId.value) "") (ne (default "" .Values.openbao.roleId.existingSecret) "") (ne (default "" .Values.openbao.secretId.value) "") (ne (default "" .Values.openbao.secretId.existingSecret) "") (ne (default "" .Values.openbao.wrappedToken.value) "") (ne (default "" .Values.openbao.wrappedToken.existingSecret) "") -}}
 {{- if $approleSet -}}
-{{- fail "permesi: vault.roleId/secretId/wrappedToken must not be set when vault.agent.enabled" -}}
+{{- fail "permesi: openbao.roleId/secretId/wrappedToken must not be set when openbao.agent.enabled" -}}
 {{- end -}}
 
-{{- /* Reject Vault ESO credentials. */ -}}
-{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
-{{- fail "permesi: vault.externalSecret.remoteKey must not be set when vault.agent.enabled" -}}
+{{- /* Reject OpenBao ESO credentials. */ -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
+{{- fail "permesi: openbao.externalSecret.remoteKey must not be set when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* TLS managed by the agent in TCP mode. */ -}}
 {{- if not $socketMode -}}
 {{- if or (ne (default "" .Values.tls.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "")) -}}
-{{- fail "permesi: tls Secret/ESO must not be set when vault.agent.enabled manages TLS" -}}
+{{- fail "permesi: tls Secret/ESO must not be set when openbao.agent.enabled manages TLS" -}}
 {{- end -}}
 {{- if eq (default "" $agent.pki.role) "" -}}
-{{- fail "permesi: vault.agent.pki.role must be set when vault.agent.enabled serves TLS" -}}
+{{- fail "permesi: openbao.agent.pki.role must be set when openbao.agent.enabled serves TLS" -}}
 {{- end -}}
 {{- if eq (default "" $agent.pki.commonName) "" -}}
-{{- fail "permesi: vault.agent.pki.commonName must be set when vault.agent.enabled serves TLS" -}}
+{{- fail "permesi: openbao.agent.pki.commonName must be set when openbao.agent.enabled serves TLS" -}}
 {{- end -}}
 {{- $dnsOk := false -}}
 {{- range $agent.pki.dnsNames -}}
 {{- if ne (toString .) "" -}}{{- $dnsOk = true -}}{{- end -}}
 {{- end -}}
 {{- if not $dnsOk -}}
-{{- fail "permesi: vault.agent.pki.dnsNames must contain at least one SAN when vault.agent.enabled serves TLS" -}}
-{{- end -}}
-{{- end -}}
-
-{{- /* PASERK CA managed by the agent. */ -}}
-{{- if $agent.paserkCa.enabled -}}
-{{- if or (ne (default "" .Values.admission.paserkCa.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.admission.paserkCa) "")) -}}
-{{- fail "permesi: admission.paserkCa Secret/ESO must not be set when vault.agent.paserkCa.enabled" -}}
+{{- fail "permesi: openbao.agent.pki.dnsNames must contain at least one SAN when openbao.agent.enabled serves TLS" -}}
 {{- end -}}
 {{- end -}}
 
@@ -267,25 +250,25 @@ false
 {{- if hasPrefix "vault.hashicorp.com/agent" $k -}}{{- $hasInjector = true -}}{{- end -}}
 {{- end -}}
 {{- if $hasInjector -}}
-{{- fail "permesi: vault.hashicorp.com/agent-* injector annotations must not be used when vault.agent.enabled" -}}
+{{- fail "permesi: vault.hashicorp.com/agent-* injector annotations must not be used when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Duplicate chart-owned env entries. */ -}}
 {{- $dupEnv := false -}}
 {{- range $e := .Values.extraEnv -}}
-{{- if or (eq (toString $e.name) "PERMESI_VAULT_URL") (eq (toString $e.name) "PERMESI_TLS_PEM_BUNDLE") (eq (toString $e.name) "PERMESI_ADMISSION_PASERK_CA_PATH") (eq (toString $e.name) "PERMESI_VAULT_ROLE_ID") (eq (toString $e.name) "PERMESI_VAULT_SECRET_ID") (eq (toString $e.name) "PERMESI_VAULT_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
+{{- if or (eq (toString $e.name) "PERMESI_OPENBAO_URL") (eq (toString $e.name) "PERMESI_TLS_PEM_BUNDLE") (eq (toString $e.name) "PERMESI_OPENBAO_ROLE_ID") (eq (toString $e.name) "PERMESI_OPENBAO_SECRET_ID") (eq (toString $e.name) "PERMESI_OPENBAO_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
 {{- end -}}
 {{- if $dupEnv -}}
-{{- fail "permesi: extraEnv must not redefine chart-managed Vault/TLS/CA env entries when vault.agent.enabled" -}}
+{{- fail "permesi: extraEnv must not redefine chart-managed OpenBao/TLS/CA env entries when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Reserved mount collisions. */ -}}
 {{- $reservedVol := false -}}
 {{- range $v := .Values.extraVolumes -}}
-{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "admission-paserk-ca") (eq (toString $v.name) "vault-agent-socket") (eq (toString $v.name) "vault-agent-config") (eq (toString $v.name) "vault-agent-token") (eq (toString $v.name) "vault-agent-ca") (eq (toString $v.name) "vault-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
+{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "openbao-agent-socket") (eq (toString $v.name) "openbao-agent-config") (eq (toString $v.name) "openbao-agent-token") (eq (toString $v.name) "openbao-agent-ca") (eq (toString $v.name) "openbao-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
 {{- end -}}
 {{- if $reservedVol -}}
-{{- fail "permesi: extraVolumes must not use reserved volume names when vault.agent.enabled" -}}
+{{- fail "permesi: extraVolumes must not use reserved volume names when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Nonroot UID/GID + fsGroup. */ -}}
@@ -293,71 +276,54 @@ false
 {{- $rg := int (default 0 .Values.securityContext.runAsGroup) -}}
 {{- $fsg := int (default 0 .Values.podSecurityContext.fsGroup) -}}
 {{- if or (le $ru 0) (le $rg 0) (le $fsg 0) -}}
-{{- fail "permesi: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when vault.agent.enabled" -}}
+{{- fail "permesi: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* automount must be false. */ -}}
 {{- if .Values.serviceAccount.automount -}}
-{{- fail "permesi: serviceAccount.automount must be false when vault.agent.enabled" -}}
+{{- fail "permesi: serviceAccount.automount must be false when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* renewalThreshold strictly between 0 and 1 (no truthiness default). */ -}}
 {{- $rt := float64 $agent.pki.renewalThreshold -}}
 {{- if or (le $rt 0.0) (ge $rt 1.0) -}}
-{{- fail "permesi: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
+{{- fail "permesi: openbao.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}
 
 {{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
-     (TCP mode) or a legacy TLS Secret is requested; the admission CA when the
-     agent manages it or a legacy CA Secret is requested. */ -}}
+     (TCP mode) or a legacy TLS Secret is requested. */ -}}
 {{- $agentManagesTls := not $socketMode -}}
-{{- $agentManagesCa := $agent.paserkCa.enabled -}}
 {{- $mountTls := or $agentManagesTls (ne (include "permesi.tlsSecretName" .) "") -}}
-{{- $mountCa := or $agentManagesCa (ne (include "permesi.admissionCaSecretName" .) "") -}}
 
 {{- /* Absolute writable artifact destinations. */ -}}
 {{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
-{{- fail "permesi: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
-{{- end -}}
-{{- if and $agentManagesCa (not (hasPrefix "/" (include "permesi.agentAdmissionCaPath" .))) -}}
-{{- fail "permesi: admission PASERK CA destination must be an absolute path when vault.agent.enabled" -}}
+{{- fail "permesi: tls.pemBundlePath must be an absolute path when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Each managed artifact needs its own mount directory: a file directly in
      / would yield an empty mountPath (or mount over the root filesystem). */ -}}
 {{- $socketDir := clean (include "permesi.agentSocketDir" .) -}}
 {{- if or (eq $socketDir ".") (eq $socketDir "/") -}}
-{{- fail "permesi: vault.url socket must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- fail "permesi: openbao.url socket must be inside a dedicated directory, not directly in / when openbao.agent.enabled" -}}
 {{- end -}}
 {{- if $mountTls -}}
 {{- $tlsDir := clean (include "permesi.agentTlsDir" .) -}}
 {{- if or (eq $tlsDir ".") (eq $tlsDir "/") -}}
-{{- fail "permesi: tls.pemBundlePath must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
-{{- end -}}
-{{- end -}}
-{{- if $agentManagesCa -}}
-{{- $caDir := clean (include "permesi.agentAdmissionCaDir" .) -}}
-{{- if or (eq $caDir ".") (eq $caDir "/") -}}
-{{- fail "permesi: admission PASERK CA destination must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- fail "permesi: tls.pemBundlePath must be inside a dedicated directory, not directly in / when openbao.agent.enabled" -}}
 {{- end -}}
 {{- end -}}
 
 {{- /* Normalized chart-owned mount directories: fixed agent locations, the
      socket and each active artifact. */ -}}
-{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir -}}
+{{- $chartDirs := list "/openbao/config" "/var/run/secrets/openbao-token" "/tmp" $socketDir -}}
 {{- if $mountTls -}}
 {{- $chartDirs = append $chartDirs (clean (include "permesi.agentTlsDir" .)) -}}
 {{- end -}}
-{{- if $agentManagesCa -}}
-{{- $chartDirs = append $chartDirs (clean (include "permesi.agentAdmissionCaDir" .)) -}}
-{{- else if $mountCa -}}
-{{- $chartDirs = append $chartDirs (clean (toString .Values.admission.paserkCa.mountPath)) -}}
-{{- end -}}
-{{- if .Values.vault.agent.ca.existingConfigMap -}}
-{{- $chartDirs = append $chartDirs "/vault/ca" -}}
+{{- if .Values.openbao.agent.ca.existingConfigMap -}}
+{{- $chartDirs = append $chartDirs "/openbao/ca" -}}
 {{- end -}}
 {{- if eq (include "permesi.dirsOverlap" $chartDirs) "true" -}}
-{{- fail (printf "permesi: vault agent destination mount directories must not overlap (got: %s) when vault.agent.enabled" (join ", " $chartDirs)) -}}
+{{- fail (printf "permesi: OpenBao Agent destination mount directories must not overlap (got: %s) when openbao.agent.enabled" (join ", " $chartDirs)) -}}
 {{- end -}}
 
 {{- /* extraVolumeMounts must not collide with chart-owned mount directories. */ -}}
@@ -371,7 +337,7 @@ false
 {{- end -}}
 {{- end -}}
 {{- if $extraCollision -}}
-{{- fail "permesi: extraVolumeMounts must not overlap chart-managed mount directories when vault.agent.enabled" -}}
+{{- fail "permesi: extraVolumeMounts must not overlap chart-managed mount directories when openbao.agent.enabled" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -1,4 +1,4 @@
-{{- if .Values.vault.agent.enabled }}
+{{- if .Values.openbao.agent.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,6 +10,4 @@ data:
     {{- include "permesi.agentHCL" . | nindent 4 }}
   tls-bundle.tpl: |
     {{- include "permesi.agentTlsTemplate" . | nindent 4 }}
-  paserk-ca.tpl: |
-    {{- include "permesi.agentCaTemplate" . | nindent 4 }}
 {{- end }}

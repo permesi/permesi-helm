@@ -3,7 +3,6 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
-    "secretsProvider": {"type": "string", "enum": ["openbao", "vault"]},
     "replicaCount": {
       "type": "integer",
       "minimum": 0
@@ -101,45 +100,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "paserkUrl": {
-          "type": "string"
-        },
         "issuer": {
           "type": "string"
         },
         "audience": {
           "type": "string"
-        },
-        "paserkCaPath": {
-          "type": "string"
-        },
-        "paserkCa": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "existingSecret": {
-              "type": "string"
-            },
-            "secretKey": {
-              "type": "string",
-              "minLength": 1
-            },
-            "mountPath": {
-              "type": "string",
-              "minLength": 1
-            },
-            "fileName": {
-              "type": "string",
-              "minLength": 1
-            },
-            "externalSecret": {
-              "$ref": "#/definitions/externalSecretRef"
-            }
-          }
         }
       }
     },
-    "vault": {
+    "openbao": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -178,7 +147,7 @@
           }
         },
         "externalSecret": {
-          "$ref": "#/definitions/vaultExternalSecretRef"
+          "$ref": "#/definitions/openbaoExternalSecretRef"
         },
         "roleId": {
           "$ref": "#/definitions/envSource"
@@ -315,19 +284,6 @@
                 "failureThreshold": {
                   "type": "integer",
                   "minimum": 1
-                }
-              }
-            },
-            "paserkCa": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "path": {
-                  "type": "string",
-                  "minLength": 1
                 }
               }
             }
@@ -554,7 +510,7 @@
         }
       }
     },
-    "vaultExternalSecretRef": {
+    "openbaoExternalSecretRef": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

@@ -251,7 +251,9 @@ The chart enforces these invariants at render time:
   the same Secret when OpenBao ESO is active.
 - The application image (and, when enabled, the OpenBao Agent image) must be
   pinned by digest.
-- `extraEnv` must not set `PERMESI_OPENBAO_*`, `GENESIS_OPENBAO_*` or
-  `PERMESI_ADMISSION_*`; use the chart values instead.
+- `extraEnv` must not set `PERMESI_OPENBAO_*`, `GENESIS_OPENBAO_*`,
+  `PERMESI_ADMISSION_ISS`, `PERMESI_ADMISSION_AUD` or `PERMESI_ADMISSION_PASERK_*`;
+  use the chart values instead. `PERMESI_ADMISSION_REFRESH_SECONDS` and
+  `PERMESI_ADMISSION_MAX_AGE_SECONDS` may be tuned there.
 - The removed `vault:` block, `secretsProvider` and PASERK admission settings are
   rejected rather than ignored.

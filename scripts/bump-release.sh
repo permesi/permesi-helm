@@ -2,7 +2,6 @@
 # Bump chart versions, appVersion and managed image identities for a release.
 #
 # Usage:
-#   bump-release.sh [--chart-version X.Y.Z] [--tag-only] <version>
 #   bump-release.sh [--chart-version X.Y.Z] --digest permesi=sha256:<64 hex> \
 #       --digest genesis=sha256:<64 hex> --digest web=sha256:<64 hex> <version>
 #   bump-release.sh --chart-only <chart-version>
@@ -153,7 +152,7 @@ else
     if [[ ${#digests[@]} -gt 0 ]]; then
         [[ ${tag_only_flag} -eq 0 ]] || die "--tag-only cannot be combined with --digest"
         for svc in "${services[@]}"; do
-            [[ -n "${digests[${svc}]+set}" ]] || die "missing --digest for '${svc}': provide all of ${services[*]} or none (tag-only)"
+            [[ -n "${digests[${svc}]+set}" ]] || die "missing --digest for '${svc}': provide all of ${services[*]}"
         done
     fi
     # The permesi and genesis charts render OpenBao workloads only and refuse
@@ -277,8 +276,6 @@ done
 
 if [[ "${mode}" == "chart" ]]; then
     echo "Bumped chart versions to ${chart_version} (images unchanged)"
-elif [[ ${#digests[@]} -gt 0 ]]; then
-    echo "Bumped charts to ${chart_version}, app ${version} pinned by digest"
 else
-    echo "Bumped charts to ${chart_version}, app ${version} (tag-only, digests cleared)"
+    echo "Bumped charts to ${chart_version}, app ${version} pinned by digest"
 fi

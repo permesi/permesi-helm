@@ -23,13 +23,15 @@ class ReleaseTransaction(unittest.TestCase):
             for name in ("charts", "scripts"):
                 shutil.copytree(ROOT / name, tree / name, ignore=shutil.ignore_patterns("__pycache__", "*.tgz", "target"))
             shutil.copyfile(ROOT / "README.md", tree / "README.md")
-            # Start from a stale dependency pin so the release must promote the lock.
-            lock_path = tree / "scripts/quickstart/lock.json"
-            stale = json.loads(lock_path.read_text())
-            stale["images"]["openbao"] = {**stale["images"]["openbao"], "tag": "2.7.2", "digest": "sha256:" + "e" * 64}
-            lock_path.write_text(json.dumps(stale, indent=2) + "\n")
             pins = json.loads((tree / "scripts/quickstart/openbao-images.json").read_text())
             base = validate(ROOT)["images"]["permesi"]["tag"]
+            if tuple(map(int, base.split("."))) < (0, 6, 0):
+                # A pre-0.6 lock is not held to the pins, so the first 0.6 release must
+                # promote them; from 0.6 the fixture check keeps both files in lockstep.
+                lock_path = tree / "scripts/quickstart/lock.json"
+                stale = json.loads(lock_path.read_text())
+                stale["images"]["openbao"] = {**stale["images"]["openbao"], "tag": "2.7.2", "digest": "sha256:" + "e" * 64}
+                lock_path.write_text(json.dumps(stale, indent=2) + "\n")
             major, minor, patch = map(int, base.split("."))
             version = "0.6.0" if (major, minor, patch) < (0, 6, 0) else f"{major}.{minor}.{patch+1}"
             app = tree / "source"

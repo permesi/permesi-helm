@@ -233,5 +233,5 @@ The chart enforces these invariants at render time:
 - The application image (and, when enabled, the OpenBao Agent image) must be
   pinned by digest.
 - `extraEnv` must not set `PERMESI_OPENBAO_*`, `GENESIS_OPENBAO_*`,
-  `GENESIS_ADMISSION_SIGNING_VERSION` or `PERMESI_ADMISSION_*`; use the chart values.
+  `GENESIS_ADMISSION_SIGNING_VERSION` or `GENESIS_TRANSIT_MOUNT`; use the chart values.
 - The removed `vault:` block and `secretsProvider` are rejected rather than ignored.

@@ -504,10 +504,11 @@ the release tags to immutable digests. Identical replays preserve the chart
 version. A chart version can advance independently of the application version.
 
 Every 0.6+ bump writes the OpenBao and PostgreSQL pins from
-`scripts/quickstart/openbao-images.json` into `scripts/quickstart/lock.json`,
-replacing the 0.5 fixture's HashiCorp Vault and PostgreSQL 18 entries on the first
-one and carrying later pin bumps afterwards; the charts and the quickstart are
-already OpenBao-only in source. Until that first bump, chart CI skips the
+`scripts/quickstart/openbao-images.json` into `scripts/quickstart/lock.json`; the
+first one replaces the 0.5 fixture's HashiCorp Vault and PostgreSQL 18 entries.
+From 0.6 the fixture check requires both files to agree, so change a dependency pin
+in both in the same commit. The charts and the quickstart are already OpenBao-only
+in source. Until that first bump, chart CI skips the
 real-dependency job, because the locked 0.5 application cannot run on these charts. The release
 gate installs the package with its pinned source archive, initializes public
 authority once with CAS zero, completes OPAQUE login, and verifies a full session.

@@ -280,7 +280,9 @@ class BumpTests(unittest.TestCase):
         path = self.worktree / "charts/permesi-stack/values.yaml"
         path.write_text(path.read_text().replace("    digest:", "    not-a-digest:"))
         baseline = self.snapshot()
-        self.bump("0.4.5", succeeds=False)
+        args = [item for svc in SERVICES for item in ("--digest", svc + "=" + DIGESTS[svc])]
+        result = self.bump(*args, "0.4.5", succeeds=False)
+        self.assertIn("expected one managed tag and digest line per service", result.stderr)
         self.assertEqual(self.snapshot(), baseline)
 
 

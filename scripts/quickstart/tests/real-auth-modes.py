@@ -53,7 +53,7 @@ def main():
     names = {"permesi": runtime.fullname(args.release, "permesi"),
              "genesis": runtime.fullname(args.release + "-genesis", "genesis")}
     releases = {"permesi": args.release, "genesis": args.release + "-genesis"}
-    root = k + ["exec", "-i", "deploy/" + helper + "-vault", "-c", "vault", "--", "vault"]
+    root = k + ["exec", "-i", "deploy/" + helper + "-openbao", "-c", "openbao", "--", "bao"]
     secrets = []
     originals = {}
 
@@ -128,13 +128,11 @@ def main():
             secret(name + "-qualification-tls", {"bundle.pem": bundle, "ca.pem": ca})
             del certificate, bundle
             values = json.loads(json.dumps(original))
-            values["vault"]["agent"]["enabled"] = False
-            values["vault"]["url"] = f"http://{helper}-vault.{args.namespace}.svc:8200"
-            values["vault"]["authMethod"] = "kubernetes"
-            values["vault"]["kubernetes"]["role"] = service
+            values["openbao"]["agent"]["enabled"] = False
+            values["openbao"]["url"] = f"http://{helper}-openbao.{args.namespace}.svc:8200"
+            values["openbao"]["authMethod"] = "kubernetes"
+            values["openbao"]["kubernetes"]["role"] = service
             values["tls"]["existingSecret"] = name + "-qualification-tls"
-            if service == "permesi":
-                values["admission"]["paserkCa"]["existingSecret"] = name + "-qualification-tls"
             upgrade(service, values)
             native[service] = values
             current = pods(service)
@@ -216,10 +214,10 @@ def main():
             credential_name = names[service] + "-qualification-approle"
             secret(credential_name, {"role_id": role_id, "secret_id": secret_id})
             del role_id, secret_id
-            values["vault"]["authMethod"] = "approle"
-            values["vault"]["kubernetes"]["role"] = ""
+            values["openbao"]["authMethod"] = "approle"
+            values["openbao"]["kubernetes"]["role"] = ""
             for field in ("roleId", "secretId"):
-                values["vault"][field]["existingSecret"] = credential_name
+                values["openbao"][field]["existingSecret"] = credential_name
             upgrade(service, values)
         https_and_admission("Direct AppRole base URL", ca)
 

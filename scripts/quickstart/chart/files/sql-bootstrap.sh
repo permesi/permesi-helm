@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Permesi quickstart PostgreSQL bootstrap (development only).
-# Pre-creates the vault_* owner roles with generated strong passwords, runs the
+# Pre-creates the openbao_* owner roles with generated strong passwords, runs the
 # canonical include tree (00_init.sql), then an explicit owner-authenticated
-# verify_permesi.sql. Records the existing Permesi user count for the Vault
-# container's retained-database / lost-Vault guard.
+# verify_permesi.sql. Records the existing Permesi user count for the OpenBao
+# container's retained-database / lost-OpenBao guard.
 set -euo pipefail
 
 PG_HOST="${PG_HOST:?PG_HOST required}"
@@ -22,11 +22,9 @@ read_password() {
   esac
   printf '%s' "$value"
 }
-provider="${SECRETS_PROVIDER:-vault}"
-case "$provider" in vault|openbao) ;; *) exit 1 ;; esac
 ADMIN_PW="$(read_password postgres-admin-password)"
-PERMESI_PW="$(read_password vault-permesi-password)"
-GENESIS_PW="$(read_password vault-genesis-password)"
+PERMESI_PW="$(read_password openbao-permesi-password)"
+GENESIS_PW="$(read_password openbao-genesis-password)"
 
 # Bounded wait for PostgreSQL.
 for _ in $(seq 1 90); do
@@ -47,23 +45,23 @@ pgpass_escape() {
 }
 {
   printf '%s:%s:*:postgres:%s\n' "$PG_HOST" "$PG_PORT" "$(pgpass_escape "$ADMIN_PW")"
-  printf '%s:%s:genesis:%s:%s\n' "$PG_HOST" "$PG_PORT" "${provider}_genesis" "$(pgpass_escape "$GENESIS_PW")"
-  printf '%s:%s:permesi:%s:%s\n' "$PG_HOST" "$PG_PORT" "${provider}_permesi" "$(pgpass_escape "$PERMESI_PW")"
+  printf '%s:%s:genesis:%s:%s\n' "$PG_HOST" "$PG_PORT" "openbao_genesis" "$(pgpass_escape "$GENESIS_PW")"
+  printf '%s:%s:permesi:%s:%s\n' "$PG_HOST" "$PG_PORT" "openbao_permesi" "$(pgpass_escape "$PERMESI_PW")"
 } > "$PGPASSFILE"
 
 admin_psql() { psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U postgres -v ON_ERROR_STOP=1 "$@"; }
 
-# Conservatively couple ALL retained application databases to their Vault
+# Conservatively couple ALL retained application databases to their OpenBao
 # identity, even before any user exists. Partial bootstrap requires explicit
-# dev reset if it created databases but never persisted the Vault seed.
+# dev reset if it created databases but never persisted the OpenBao seed.
 retained="$(admin_psql -d postgres -tA -c "SELECT count(*) FROM pg_database WHERE datname IN ('permesi','genesis')")"
 printf '%s\n' "$retained" > "${STATE_DIR}/retained-database-count"
 chmod 0644 "${STATE_DIR}/retained-database-count"
 
 # Pre-create canonical owners with strong passwords, never resetting them.
-# Vault uses separate managers below; root rotation must not change these
+# OpenBao uses separate managers below; root rotation must not change these
 # owner-authenticated schema bootstrap credentials.
-admin_psql -d postgres -q -v perm_owner="${provider}_permesi" -v gen_owner="${provider}_genesis" -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
+admin_psql -d postgres -q -v perm_owner=openbao_permesi -v gen_owner=openbao_genesis -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
 SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', :'perm_owner', :'perm_pw')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'perm_owner')\gexec
 SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', :'gen_owner', :'gen_pw')
@@ -75,29 +73,27 @@ admin_psql -d postgres -f 00_init.sql
 echo "sql-bootstrap: 00_init.sql complete"
 
 # Credential managers have no schema ownership or inherited runtime access.
-# Bootstrap with the corresponding owner password once; Vault immediately
+# Bootstrap with the corresponding owner password once; OpenBao immediately
 # rotates it and owns the steady-state credential. Never reset existing roles.
 admin_psql -d postgres -q -v perm_pw="${PERMESI_PW}" -v gen_pw="${GENESIS_PW}" <<'SQL'
-SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_permesi_manager', :'perm_pw')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_permesi_manager')\gexec
-SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'vault_genesis_manager', :'gen_pw')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault_genesis_manager')\gexec
-GRANT permesi_runtime TO vault_permesi_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
-GRANT genesis_runtime TO vault_genesis_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
-GRANT CONNECT ON DATABASE permesi TO vault_permesi_manager;
-GRANT CONNECT ON DATABASE genesis TO vault_genesis_manager;
-GRANT pg_signal_backend TO vault_permesi_manager, vault_genesis_manager;
+SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'openbao_permesi_manager', :'perm_pw')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openbao_permesi_manager')\gexec
+SELECT pg_catalog.format('CREATE ROLE %I WITH LOGIN PASSWORD %L CREATEROLE', 'openbao_genesis_manager', :'gen_pw')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openbao_genesis_manager')\gexec
+GRANT permesi_runtime TO openbao_permesi_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT genesis_runtime TO openbao_genesis_manager WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;
+GRANT CONNECT ON DATABASE permesi TO openbao_permesi_manager;
+GRANT CONNECT ON DATABASE genesis TO openbao_genesis_manager;
+GRANT pg_signal_backend TO openbao_permesi_manager, openbao_genesis_manager;
+-- The Genesis connection manages credentials from the maintenance database.
+GRANT CONNECT ON DATABASE postgres TO openbao_genesis_manager;
 SQL
 
-if [[ "$provider" == openbao ]]; then
-  admin_psql -d postgres -c 'GRANT CONNECT ON DATABASE postgres TO vault_genesis_manager'
-fi
-
 # Explicit owner-authenticated verification (transactional, rolls back).
-psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U "${provider}_permesi" -d permesi -v ON_ERROR_STOP=1 -f verify_permesi.sql
-echo "sql-bootstrap: verify_permesi.sql (as vault_permesi) complete"
+psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U openbao_permesi -d permesi -v ON_ERROR_STOP=1 -f verify_permesi.sql
+echo "sql-bootstrap: verify_permesi.sql (as openbao_permesi) complete"
 
 users="$(admin_psql -d permesi -tA -c 'SELECT count(*) FROM public.users')"
 printf '%s\n' "${users}" > "${STATE_DIR}/permesi-user-count"
-chmod 0644 "${STATE_DIR}/permesi-user-count"  # nonsecret; read by the Vault container
+chmod 0644 "${STATE_DIR}/permesi-user-count"  # nonsecret; read by the OpenBao container
 echo "sql-bootstrap: complete (existing permesi users: ${users})"

@@ -20,7 +20,7 @@ qs="${RELEASE}-quickstart"
 helper_settings="$(helm --kube-context "$CONTEXT" -n "$NAMESPACE" get values "$qs" --all -o json \
   | python3 "$(dirname "${BASH_SOURCE[0]}")/settings.py" --fullname "$qs" --namespace "$NAMESPACE" --lines)"
 mapfile -t helper_fields <<< "$helper_settings"
-"${K[@]}" exec "deploy/${helper_fields[3]}" -c vault -- vault read -field=certificate pki-root/cert/ca > "$CA_OUT"
+"${K[@]}" exec "deploy/${helper_fields[3]}" -c openbao -- bao read -field=certificate pki-root/cert/ca > "$CA_OUT"
 [[ -s "$CA_OUT" ]] || { echo 'Failed to export public root CA' >&2; exit 1; }
 echo "Public root CA: $CA_OUT (import explicitly into a disposable browser profile; no host trust changes)"
 pids=()

@@ -1,6 +1,6 @@
 # Production umbrella values for release "permesi" in namespace "permesi".
-# Legacy Secret/AppRole/ESO-compatible alternative, not the recommended
-# all-in-Vault path. For Agent-rendered PKI use vault-agent-stack.yaml.
+# Secret/AppRole/ESO alternative to the recommended OpenBao Agent profile
+# (openbao-shared.yaml), which renders TLS and authenticates via Kubernetes.
 #
 # Install:
 #   helm dependency build charts/permesi-stack
@@ -30,7 +30,7 @@ permesi:
       # The DSN must include sslmode=verify-full and point sslrootcert at the
       # CA volume mounted below, e.g.:
       #   postgres://permesi@postgres.example.com:5432/permesi?sslmode=verify-full&sslrootcert=/var/run/permesi/db-ca/ca.crt
-      # The username/password in the DSN are replaced at startup with Vault
+      # The username/password in the DSN are replaced at startup with OpenBao
       # dynamic credentials (see docs/operations.md).
       existingSecret: permesi-db
       secretKey: dsn
@@ -41,24 +41,19 @@ permesi:
     secretKey: bundle.pem
 
   admission:
-    paserkUrl: https://permesi-genesis.permesi.svc.cluster.local:8080/paserk.json
     issuer: https://genesis.permesi.example.com
     audience: permesi
-    paserkCa:
-      # Separate outbound trust for the Genesis PASERK HTTPS endpoint. This is
-      # not the inbound TLS bundle; see docs/operations.md.
-      existingSecret: permesi-admission-ca
-      secretKey: ca.pem
+    # Approved signing keys come from the core OpenBao authority record.
 
-  vault:
-    # Permesi does NOT normalize the Vault URL: it POSTs to this value exactly
-    # for AppRole login, so use the full login endpoint (F-01).
-    url: https://vault.example.com:8200/v1/auth/approle/login
+  openbao:
+    # Permesi POSTs to this value exactly for AppRole login, so use the full
+    # login endpoint (F-01).
+    url: https://openbao.example.com:8200/v1/auth/approle/login
     roleId:
-      existingSecret: permesi-vault
+      existingSecret: permesi-openbao
       secretKey: role_id
     secretId:
-      existingSecret: permesi-vault
+      existingSecret: permesi-openbao
       secretKey: secret_id
 
   auth:
@@ -89,7 +84,7 @@ permesi:
     - name: PERMESI_SMTP_TLS
       value: "implicit"
     # OIDC authority (issuer/audience are paired; use a separate OIDC signing
-    # key in Vault, never the Genesis admission key).
+    # key in OpenBao, never the Genesis admission key).
     - name: PERMESI_OIDC_ISSUER
       value: "https://api.permesi.example.com"
     - name: PERMESI_OAUTH_AUDIENCE
@@ -181,21 +176,12 @@ permesi:
         ports:
           - port: 5432
             protocol: TCP
-      # External Vault (replace with your Vault network)
+      # External OpenBao (replace with your OpenBao network)
       - to:
           - ipBlock:
               cidr: 10.30.0.0/16
         ports:
           - port: 8200
-            protocol: TCP
-      # Genesis PASERK fetch (Permesi -> Genesis)
-      - to:
-          - podSelector:
-              matchLabels:
-                app.kubernetes.io/name: genesis
-                app.kubernetes.io/instance: permesi
-        ports:
-          - port: 8080
             protocol: TCP
       # External SMTP relay (replace with your mail network)
       - to:
@@ -207,6 +193,8 @@ permesi:
 
 genesis:
   enabled: true
+  # Transit version Genesis signs with; publish it in the core authority first.
+  admissionSigningVersion: 1
 
   replicaCount: 2
   terminationGracePeriodSeconds: 60
@@ -220,15 +208,15 @@ genesis:
     existingSecret: genesis-tls
     secretKey: bundle.pem
 
-  vault:
+  openbao:
     # Genesis accepts a base URL or a full AppRole login endpoint; it
     # normalizes the base URL to /v1/auth/approle/login (F-01).
-    url: https://vault.example.com:8200
+    url: https://openbao.example.com:8200
     roleId:
-      existingSecret: genesis-vault
+      existingSecret: genesis-openbao
       secretKey: role_id
     secretId:
-      existingSecret: genesis-vault
+      existingSecret: genesis-openbao
       secretKey: secret_id
 
   extraEnv:
@@ -301,14 +289,6 @@ genesis:
         ports:
           - port: 8080
             protocol: TCP
-      - from:
-          - podSelector:
-              matchLabels:
-                app.kubernetes.io/name: permesi
-                app.kubernetes.io/instance: permesi
-        ports:
-          - port: 8080
-            protocol: TCP
     egress:
       # DNS
       - to:
@@ -327,7 +307,7 @@ genesis:
         ports:
           - port: 5432
             protocol: TCP
-      # External Vault (replace with your Vault network)
+      # External OpenBao (replace with your OpenBao network)
       - to:
           - ipBlock:
               cidr: 10.30.0.0/16

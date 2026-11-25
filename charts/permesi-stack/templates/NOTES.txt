@@ -8,50 +8,25 @@
 {{- else -}}
 {{- $genesisFullname = printf "%s-%s" .Release.Name $genesisName | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
-{{- $genesisHost := printf "%s.%s.svc.cluster.local" $genesisFullname .Release.Namespace -}}
-{{- $genesisPort := default 8080 .Values.genesis.service.port | toString -}}
-{{- $genesisUrl := printf "https://%s:%s/paserk.json" $genesisHost $genesisPort -}}
 Genesis is deployed as {{ $genesisFullname }}.
-{{ if eq .Values.genesis.secretsProvider "openbao" -}}
-Use the operator-owned core OpenBao admission authority. Initialize it once
-before the first admission request, then publish each new key before switching Genesis.
-{{- else }}
-Admission public keys are published by the Genesis Service at:
-  {{ $genesisUrl }}
-
-{{- if .Values.permesi.enabled }}
-{{- $paserkUrl := default "" .Values.permesi.admission.paserkUrl -}}
-{{- if not (contains $genesisHost $paserkUrl) }}
-WARNING: permesi.admission.paserkUrl does not point at this release's Genesis
-Service. It is set to:
-  {{ $paserkUrl }}
-while the Genesis Service in this release is:
-  {{ $genesisHost }}:{{ $genesisPort }}
-If Permesi should fetch admission keys from the Genesis instance installed by
-this chart, set:
-  permesi:
-    admission:
-      paserkUrl: {{ $genesisUrl }}
-External or separately-managed Genesis URLs are also valid; this warning can be
-ignored in that case.
-{{- end }}
-{{- end }}
-{{- end }}
+Admission verification uses the operator-owned core OpenBao admission authority.
+Initialize it once before the first admission request, then publish each new key
+before switching Genesis to it (genesis.admissionSigningVersion).
 
 {{ end }}
 
 {{ if .Values.quickstart.enabled }}
 !!!!!!!!!!!!!!!!!!! DEVELOPMENT ONLY — NOT FOR PRODUCTION !!!!!!!!!!!!!!!!!!!
-Vault runs in-memory in dev mode. PostgreSQL is ephemeral. No persistence,
-backups, HA, or scheduler/data-loss guarantees. Losing Vault with retained
+OpenBao runs in-memory in dev mode. PostgreSQL is ephemeral. No persistence,
+backups, HA, or scheduler/data-loss guarantees. Losing OpenBao with retained
 PostgreSQL is NOT recoverable by generating a new OPAQUE seed; reset the entire
-disposable namespace instead. Do not change the dev Vault image in place.
+disposable namespace instead. Do not change the dev OpenBao image in place.
 
 Bootstrap-only credential EXCEPTION: the helper creates a random administrator/
 owner/root-token Secret (or consumes your bootstrap.credentialsSecret). It is
 not an application Secret. Generated credentials survive Helm uninstall.
-Never expose Vault/PostgreSQL, reuse these credentials, or use this profile for
-production. Use externally managed Vault/PostgreSQL with the component charts.
+Never expose OpenBao/PostgreSQL, reuse these credentials, or use this profile for
+production. Use externally managed OpenBao/PostgreSQL with the component charts.
 Requires Kubernetes >=1.29 and permission to create cluster-scoped TokenReview
 RBAC. Prefer a namespace enforcing Restricted Pod Security.
 
@@ -64,7 +39,7 @@ Browser endpoints (loopback port-forwards only):
   http://localhost:8080           -> Service/{{ include "web.fullname" (dict "Values" .Values.web "Chart" (dict "Name" "web") "Release" .Release) }}:{{ .Values.web.service.port }}
 Run kubectl -n {{ .Release.Namespace }} port-forward --address 127.0.0.1
 for each Service with the corresponding local:Service port above.
-Export the PUBLIC root CA from the dev Vault pki-root/cert/ca endpoint; explicitly
+Export the PUBLIC root CA from the dev OpenBao pki-root/cert/ca endpoint; explicitly
 trust it only for this disposable environment (curl --cacert <root-ca.pem>).
 Never bypass HTTPS verification. Browser trust is a separate operator action;
 remove the imported development root when finished. Outbox-only signup does NOT

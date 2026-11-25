@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Permesi quickstart installer (DEVELOPMENT ONLY).
 #
-# Installs disposable PostgreSQL + dev Vault, waits for ordered bootstrap, then
-# installs Genesis, Permesi and web. Backend pods use native Vault Agents:
+# Installs disposable PostgreSQL + dev OpenBao, waits for ordered bootstrap, then
+# installs Genesis, Permesi and web. Backend pods use native OpenBao Agents:
 # Kubernetes auth, Unix proxy sockets and in-memory TLS files; no app Secrets.
 #
 # Every kubectl/helm call is pinned to the explicit --context; the kubeconfig
@@ -155,7 +155,7 @@ rbac_manifest="$("${H[@]}" template "${QS_RELEASE}" "${QS_CHART}" -n "${NAMESPAC
 if [[ "$rbac_manifest" == *$'\nkind: ClusterRoleBinding\n'* ]]; then
   for resource in clusterroles.rbac.authorization.k8s.io clusterrolebindings.rbac.authorization.k8s.io; do
     [[ "$("${K[@]}" auth can-i create "$resource")" == yes ]] \
-      || die "cannot create ${resource}; ask a cluster administrator to pregrant tokenreviews.create to system:serviceaccount:${NAMESPACE}:${QS_FULLNAME}-vault ONLY, then set rbac.createTokenReviewBinding=false in --quickstart-values"
+      || die "cannot create ${resource}; ask a cluster administrator to pregrant tokenreviews.create to system:serviceaccount:${NAMESPACE}:${QS_FULLNAME}-openbao ONLY, then set rbac.createTokenReviewBinding=false in --quickstart-values"
   done
 fi
 
@@ -173,9 +173,10 @@ else
 fi
 
 # --- Schema source -----------------------------------------------------------
-provider="$(python3 -c 'import json,sys; print("openbao" if "openbao" in json.load(open(sys.argv[1]))["images"] else "vault")' "${SCRIPT_DIR}/lock.json")"
-QS_ARGS=(--set-string "postgresql.image.digest=$(lock postgresql digest)"
-         --set-string "vault.image.digest=$(lock "$provider" digest)")
+QS_ARGS=(--set-string "postgresql.image.tag=$(lock postgresql tag)"
+         --set-string "postgresql.image.digest=$(lock postgresql digest)"
+         --set-string "openbao.image.tag=$(lock openbao tag)"
+         --set-string "openbao.image.digest=$(lock openbao digest)")
 if [[ -n "${APP_SOURCE}" ]]; then
   sql_dir="${APP_SOURCE%/}/db/sql"
   [[ -f "${sql_dir}/00_init.sql" ]] || die "${sql_dir}/00_init.sql not found"
@@ -233,7 +234,7 @@ diagnose_bootstrap() {
   [[ -n "${job}" ]] && "${K[@]}" -n "${NAMESPACE}" logs "${job}" --all-containers --tail=40 || true
 }
 
-log "installing dependency chart ${QS_RELEASE} (PostgreSQL + dev ${provider} + bootstrap)"
+log "installing dependency chart ${QS_RELEASE} (PostgreSQL + dev OpenBao + bootstrap)"
 if ! "${H[@]}" upgrade --install "${QS_RELEASE}" "${QS_CHART}" -n "${NAMESPACE}" \
     --set acknowledgeDevelopment=true \
     --set-string "fullnameOverride=${QS_FULLNAME}" \
@@ -260,15 +261,13 @@ if [[ "${DEPS_ONLY}" != true ]]; then
   mapfile -t helper_fields <<< "$helper_settings"
   pg_host="${helper_fields[1]}"
   pg_port="${helper_fields[2]}"
-  vault_address="${helper_fields[4]}"
-  if [[ "$provider" == openbao ]]; then
-    # Operator action for this disposable installation. CAS zero cannot replace a withdrawn authority.
-    bao=("${K[@]}" -n "$NAMESPACE" exec -i "deploy/${helper_fields[3]}" -c vault -- bao)
-    if ! "${bao[@]}" kv metadata get -mount=secret/permesi admission-authority >/dev/null 2>&1; then
-      "${bao[@]}" read -format=json transit/genesis/keys/genesis-signing |
-        python3 -c 'import json,sys; key=json.load(sys.stdin)["data"]; assert key["type"]=="ed25519"; print(json.dumps({"minimum_version":1,"keys":{"1":key["keys"]["1"]["public_key"]}}))' |
-        "${bao[@]}" kv put -mount=secret/permesi -cas=0 admission-authority - >/dev/null
-    fi
+  openbao_address="${helper_fields[4]}"
+  # Operator action for this disposable installation. CAS zero cannot replace a withdrawn authority.
+  bao=("${K[@]}" -n "$NAMESPACE" exec -i "deploy/${helper_fields[3]}" -c openbao -- bao)
+  if ! "${bao[@]}" kv metadata get -mount=secret/permesi admission-authority >/dev/null 2>&1; then
+    "${bao[@]}" read -format=json transit/genesis/keys/genesis-signing |
+      python3 -c 'import json,sys; key=json.load(sys.stdin)["data"]; assert key["type"]=="ed25519"; print(json.dumps({"minimum_version":1,"keys":{"1":key["keys"]["1"]["public_key"]}}))' |
+      "${bao[@]}" kv put -mount=secret/permesi -cas=0 admission-authority - >/dev/null
   fi
   for svc in genesis permesi; do
     if [[ "$svc" == genesis ]]; then app_release="$GENESIS_RELEASE"; app_name="$GENESIS_NAME"; else app_release="$PERMESI_RELEASE"; app_name="$PERMESI_NAME"; fi
@@ -280,13 +279,14 @@ serviceAccount:
 database:
   dsn:
     value: "postgres://placeholder@${pg_host}:${pg_port}/${svc}?sslmode=disable"
-vault:
+openbao:
   agent:
     enabled: true
     image:
-      repository: "$(lock "$provider" repository)"
-      digest: "$(lock "$provider" digest)"
-    address: "${vault_address}"
+      repository: "$(lock openbao repository)"
+      tag: "$(lock openbao tag)"
+      digest: "$(lock openbao digest)"
+    address: "${openbao_address}"
     auth:
       role: "${svc}"
     pki:
@@ -297,6 +297,7 @@ vault:
 EOF
     if [[ "$svc" == genesis ]]; then
       cat >> "${VALUES_TMP}/${svc}.yaml" <<'EOF'
+admissionSigningVersion: 1
 extraEnv:
   - {name: GENESIS_ADMISSION_ISS, value: "https://genesis.localhost:9443"}
   - {name: GENESIS_ADMISSION_AUD, value: "permesi"}
@@ -304,7 +305,6 @@ EOF
     else
       cat >> "${VALUES_TMP}/${svc}.yaml" <<EOF
 admission:
-  paserkUrl: "https://${GENESIS_NAME}.${NAMESPACE}.svc.cluster.local:8080/paserk.json"
   issuer: "https://genesis.localhost:9443"
   audience: "permesi"
 auth:
@@ -317,9 +317,6 @@ extraEnv:
   - {name: PERMESI_SIGNUP_ALLOWED_DOMAINS, value: "example.test"}
   - {name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS, value: "example.test"}
 EOF
-    fi
-    if [[ "$provider" == openbao && "$svc" == permesi ]]; then
-      sed -i '/^  paserkUrl:/d' "${VALUES_TMP}/${svc}.yaml"
     fi
     log "installing ${svc} (${app_release}, two replicas, native Agent)"
     "${H[@]}" upgrade --install "$app_release" "${CHARTS_DIR}/${svc}" -n "$NAMESPACE" \

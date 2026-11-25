@@ -74,8 +74,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if $bad -}}true{{- else -}}false{{- end -}}
 {{- end -}}
 
-{{- define "genesis.vaultIsTcp" -}}
-{{- $url := default "" .Values.vault.url -}}
+{{- define "genesis.openbaoIsTcp" -}}
+{{- $url := default "" .Values.openbao.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
 true
 {{- else -}}
@@ -99,8 +99,8 @@ false
 {{- end -}}
 {{- end -}}
 
-{{- define "genesis.vaultEsoActive" -}}
-{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- define "genesis.openbaoEsoActive" -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
 true
 {{- else -}}
 false
@@ -123,53 +123,59 @@ false
 {{- end -}}
 {{- end -}}
 
-{{- define "genesis.vaultEsoTarget" -}}
-{{- if .Values.vault.roleId.existingSecret -}}
-{{- .Values.vault.roleId.existingSecret -}}
-{{- else if .Values.vault.secretId.existingSecret -}}
-{{- .Values.vault.secretId.existingSecret -}}
+{{- define "genesis.openbaoEsoTarget" -}}
+{{- if .Values.openbao.roleId.existingSecret -}}
+{{- .Values.openbao.roleId.existingSecret -}}
+{{- else if .Values.openbao.secretId.existingSecret -}}
+{{- .Values.openbao.secretId.existingSecret -}}
 {{- else -}}
-{{- printf "%s-vault" (include "genesis.fullname" .) -}}
+{{- printf "%s-openbao" (include "genesis.fullname" .) -}}
 {{- end -}}
 {{- end -}}
 
-{{- define "genesis.vaultRoleIdSecretName" -}}
-{{- if .Values.vault.roleId.existingSecret -}}
-{{- .Values.vault.roleId.existingSecret -}}
-{{- else if eq (include "genesis.vaultEsoActive" .) "true" -}}
-{{- include "genesis.vaultEsoTarget" . -}}
+{{- define "genesis.openbaoRoleIdSecretName" -}}
+{{- if .Values.openbao.roleId.existingSecret -}}
+{{- .Values.openbao.roleId.existingSecret -}}
+{{- else if eq (include "genesis.openbaoEsoActive" .) "true" -}}
+{{- include "genesis.openbaoEsoTarget" . -}}
 {{- end -}}
 {{- end -}}
 
-{{- define "genesis.vaultSecretIdSecretName" -}}
-{{- if .Values.vault.secretId.existingSecret -}}
-{{- .Values.vault.secretId.existingSecret -}}
-{{- else if eq (include "genesis.vaultEsoActive" .) "true" -}}
-{{- include "genesis.vaultEsoTarget" . -}}
+{{- define "genesis.openbaoSecretIdSecretName" -}}
+{{- if .Values.openbao.secretId.existingSecret -}}
+{{- .Values.openbao.secretId.existingSecret -}}
+{{- else if eq (include "genesis.openbaoEsoActive" .) "true" -}}
+{{- include "genesis.openbaoEsoTarget" . -}}
 {{- end -}}
 {{- end -}}
 
 {{- define "genesis.validateValues" -}}
-{{- include "genesis.validateVaultAuth" . -}}
+{{- /* Chart 0.6 dropped HashiCorp Vault; stale keys would otherwise be ignored silently. */ -}}
+{{- if hasKey .Values "vault" -}}
+{{- fail "genesis: the vault values block was renamed to openbao; HashiCorp Vault is no longer supported" -}}
+{{- end -}}
+{{- if hasKey .Values "secretsProvider" -}}
+{{- fail "genesis: secretsProvider was removed; the chart always uses OpenBao" -}}
+{{- end -}}
+{{- include "genesis.validateOpenbaoAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- if and $socketMode .Values.service.enabled -}}
 {{- fail "genesis: service.enabled must be false when config.socketPath is set" -}}
 {{- end -}}
 
 {{- $dbEsoActive := eq (include "genesis.dbEsoActive" .) "true" -}}
-{{- $vaultEsoActive := eq (include "genesis.vaultEsoActive" .) "true" -}}
+{{- $openbaoEsoActive := eq (include "genesis.openbaoEsoActive" .) "true" -}}
 
-{{- if eq .Values.secretsProvider "openbao" -}}
 {{- if not .Values.admissionSigningVersion -}}
 {{- fail "Genesis OpenBao requires an explicit admissionSigningVersion published by the core operator" -}}
 {{- end -}}
-{{- if or (empty .Values.image.digest) (and .Values.vault.agent.enabled (or (empty .Values.vault.agent.image.digest) (not (hasSuffix "/openbao" .Values.vault.agent.image.repository)))) -}}
+{{- if or (empty .Values.image.digest) (and .Values.openbao.agent.enabled (or (empty .Values.openbao.agent.image.digest) (not (hasSuffix "/openbao" .Values.openbao.agent.image.repository)))) -}}
 {{- fail "OpenBao workloads require pinned application and OpenBao Agent images" -}}
 {{- end -}}
 {{- range $e := .Values.extraEnv -}}
-{{- if or (hasPrefix "PERMESI_OPENBAO_" $e.name) (hasPrefix "GENESIS_OPENBAO_" $e.name) (eq $e.name "GENESIS_ADMISSION_SIGNING_VERSION") (hasPrefix "PERMESI_ADMISSION_PASERK_" $e.name) -}}
+{{- $name := toString $e.name -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (eq $name "GENESIS_ADMISSION_SIGNING_VERSION") (hasPrefix "PERMESI_ADMISSION_" $name) -}}
 {{- fail "Use managed values for OpenBao and admission trust" -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dbEsoActive -}}
@@ -177,8 +183,8 @@ false
 {{- fail "genesis: set database.dsn.value, database.dsn.existingSecret, or database.dsn.externalSecret.remoteKey" -}}
 {{- end -}}
 
-{{- if eq (default "" .Values.vault.url) "" -}}
-{{- fail "genesis: vault.url must be set" -}}
+{{- if eq (default "" .Values.openbao.url) "" -}}
+{{- fail "genesis: openbao.url must be set" -}}
 {{- end -}}
 
 {{- if and (not $socketMode) (eq (default "" .Values.tls.pemBundlePath) "") -}}
@@ -190,96 +196,96 @@ false
 {{- end -}}
 
 {{- if .Values.externalSecret.enabled -}}
-{{- $esoRemoteSet := or (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
+{{- $esoRemoteSet := or (ne (dig "externalSecret" "remoteKey" "" .Values.database.dsn) "") (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "") (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
 {{- if and $esoRemoteSet (eq (default "" .Values.externalSecret.store) "") -}}
 {{- fail "genesis: externalSecret.store must be set when any externalSecret.remoteKey is set" -}}
 {{- end -}}
 {{- end -}}
 
-{{- if $vaultEsoActive -}}
-{{- $rid := default "" .Values.vault.roleId.existingSecret -}}
-{{- $sid := default "" .Values.vault.secretId.existingSecret -}}
+{{- if $openbaoEsoActive -}}
+{{- $rid := default "" .Values.openbao.roleId.existingSecret -}}
+{{- $sid := default "" .Values.openbao.secretId.existingSecret -}}
 {{- if and (ne $rid "") (ne $sid "") (ne $rid $sid) -}}
-{{- fail "genesis: when vault ESO is enabled, vault.roleId.existingSecret and vault.secretId.existingSecret must reference the same Secret" -}}
+{{- fail "genesis: when OpenBao ESO is enabled, openbao.roleId.existingSecret and openbao.secretId.existingSecret must reference the same Secret" -}}
 {{- end -}}
 {{- end -}}
 
-{{- $secretIdSet := or (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") $vaultEsoActive -}}
-{{- $wrappedTokenSet := or (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- $secretIdSet := or (ne (default "" .Values.openbao.secretId.value) "") (ne (default "" .Values.openbao.secretId.existingSecret) "") $openbaoEsoActive -}}
+{{- $wrappedTokenSet := or (ne (default "" .Values.openbao.wrappedToken.value) "") (ne (default "" .Values.openbao.wrappedToken.existingSecret) "") -}}
 {{- if and $secretIdSet $wrappedTokenSet -}}
-{{- fail "genesis: vault.secretId and vault.wrappedToken are mutually exclusive" -}}
+{{- fail "genesis: openbao.secretId and openbao.wrappedToken are mutually exclusive" -}}
 {{- end -}}
 
-{{- $vaultIsTcp := eq (include "genesis.vaultIsTcp" .) "true" -}}
-{{- $roleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") $vaultEsoActive -}}
-{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not $roleSet) -}}
-{{- fail "genesis: vault.roleId must be set when vault.url uses http:// or https://" -}}
+{{- $openbaoIsTcp := eq (include "genesis.openbaoIsTcp" .) "true" -}}
+{{- $roleSet := or (ne (default "" .Values.openbao.roleId.value) "") (ne (default "" .Values.openbao.roleId.existingSecret) "") $openbaoEsoActive -}}
+{{- if and (not .Values.openbao.agent.enabled) (ne .Values.openbao.authMethod "kubernetes") $openbaoIsTcp (not $roleSet) -}}
+{{- fail "genesis: openbao.roleId must be set when openbao.url uses http:// or https://" -}}
 {{- end -}}
-{{- if and (not .Values.vault.agent.enabled) (ne .Values.vault.authMethod "kubernetes") $vaultIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
-{{- fail "genesis: set vault.secretId or vault.wrappedToken when vault.url uses http:// or https://" -}}
+{{- if and (not .Values.openbao.agent.enabled) (ne .Values.openbao.authMethod "kubernetes") $openbaoIsTcp (not (or $secretIdSet $wrappedTokenSet)) -}}
+{{- fail "genesis: set openbao.secretId or openbao.wrappedToken when openbao.url uses http:// or https://" -}}
 {{- end -}}
 
-{{- if .Values.vault.agent.enabled -}}
-{{- $agent := .Values.vault.agent -}}
+{{- if .Values.openbao.agent.enabled -}}
+{{- $agent := .Values.openbao.agent -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 
 {{- /* Kubernetes >= 1.29 (native sidecars). */ -}}
 {{- $minor := trimSuffix "+" (toString .Capabilities.KubeVersion.Minor) -}}
 {{- if or (not (regexMatch "^[0-9]+$" $minor)) (lt (.Capabilities.KubeVersion.Major | int) 1) (and (eq (.Capabilities.KubeVersion.Major | int) 1) (lt ($minor | int) 29)) -}}
-{{- fail "genesis: vault.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
+{{- fail "genesis: openbao.agent.enabled requires Kubernetes >= 1.29 (native sidecars)" -}}
 {{- end -}}
 
 {{- /* Unix target. */ -}}
-{{- $url := default "" .Values.vault.url -}}
+{{- $url := default "" .Values.openbao.url -}}
 {{- if or (hasPrefix "http://" $url) (hasPrefix "https://" $url) -}}
-{{- fail "genesis: vault.url must be a Unix socket path when vault.agent.enabled" -}}
+{{- fail "genesis: openbao.url must be a Unix socket path when openbao.agent.enabled" -}}
 {{- end -}}
 {{- $urlNoScheme := $url -}}
 {{- if hasPrefix "unix://" $url -}}
 {{- $urlNoScheme = trimPrefix "unix://" $url -}}
 {{- end -}}
 {{- if not (hasPrefix "/" $urlNoScheme) -}}
-{{- fail "genesis: vault.url must be an absolute socket path when vault.agent.enabled" -}}
+{{- fail "genesis: openbao.url must be an absolute socket path when openbao.agent.enabled" -}}
 {{- end -}}
 
-{{- /* Vault origin address. */ -}}
+{{- /* OpenBao origin address. */ -}}
 {{- if not (or (hasPrefix "http://" (default "" $agent.address)) (hasPrefix "https://" (default "" $agent.address))) -}}
-{{- fail "genesis: vault.agent.address must be an http(s) URL when vault.agent.enabled" -}}
+{{- fail "genesis: openbao.agent.address must be an http(s) URL when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Kubernetes auth role. */ -}}
 {{- if eq (default "" $agent.auth.role) "" -}}
-{{- fail "genesis: vault.agent.auth.role must be set when vault.agent.enabled" -}}
+{{- fail "genesis: openbao.agent.auth.role must be set when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Reject AppRole credentials / wrapped tokens. */ -}}
-{{- $approleSet := or (ne (default "" .Values.vault.roleId.value) "") (ne (default "" .Values.vault.roleId.existingSecret) "") (ne (default "" .Values.vault.secretId.value) "") (ne (default "" .Values.vault.secretId.existingSecret) "") (ne (default "" .Values.vault.wrappedToken.value) "") (ne (default "" .Values.vault.wrappedToken.existingSecret) "") -}}
+{{- $approleSet := or (ne (default "" .Values.openbao.roleId.value) "") (ne (default "" .Values.openbao.roleId.existingSecret) "") (ne (default "" .Values.openbao.secretId.value) "") (ne (default "" .Values.openbao.secretId.existingSecret) "") (ne (default "" .Values.openbao.wrappedToken.value) "") (ne (default "" .Values.openbao.wrappedToken.existingSecret) "") -}}
 {{- if $approleSet -}}
-{{- fail "genesis: vault.roleId/secretId/wrappedToken must not be set when vault.agent.enabled" -}}
+{{- fail "genesis: openbao.roleId/secretId/wrappedToken must not be set when openbao.agent.enabled" -}}
 {{- end -}}
 
-{{- /* Reject Vault ESO credentials. */ -}}
-{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.vault) "") -}}
-{{- fail "genesis: vault.externalSecret.remoteKey must not be set when vault.agent.enabled" -}}
+{{- /* Reject OpenBao ESO credentials. */ -}}
+{{- if and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
+{{- fail "genesis: openbao.externalSecret.remoteKey must not be set when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* TLS managed by the agent in TCP mode. */ -}}
 {{- if not $socketMode -}}
 {{- if or (ne (default "" .Values.tls.existingSecret) "") (and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.tls) "")) -}}
-{{- fail "genesis: tls Secret/ESO must not be set when vault.agent.enabled manages TLS" -}}
+{{- fail "genesis: tls Secret/ESO must not be set when openbao.agent.enabled manages TLS" -}}
 {{- end -}}
 {{- if eq (default "" $agent.pki.role) "" -}}
-{{- fail "genesis: vault.agent.pki.role must be set when vault.agent.enabled serves TLS" -}}
+{{- fail "genesis: openbao.agent.pki.role must be set when openbao.agent.enabled serves TLS" -}}
 {{- end -}}
 {{- if eq (default "" $agent.pki.commonName) "" -}}
-{{- fail "genesis: vault.agent.pki.commonName must be set when vault.agent.enabled serves TLS" -}}
+{{- fail "genesis: openbao.agent.pki.commonName must be set when openbao.agent.enabled serves TLS" -}}
 {{- end -}}
 {{- $dnsOk := false -}}
 {{- range $agent.pki.dnsNames -}}
 {{- if ne (toString .) "" -}}{{- $dnsOk = true -}}{{- end -}}
 {{- end -}}
 {{- if not $dnsOk -}}
-{{- fail "genesis: vault.agent.pki.dnsNames must contain at least one SAN when vault.agent.enabled serves TLS" -}}
+{{- fail "genesis: openbao.agent.pki.dnsNames must contain at least one SAN when openbao.agent.enabled serves TLS" -}}
 {{- end -}}
 {{- end -}}
 
@@ -289,25 +295,25 @@ false
 {{- if hasPrefix "vault.hashicorp.com/agent" $k -}}{{- $hasInjector = true -}}{{- end -}}
 {{- end -}}
 {{- if $hasInjector -}}
-{{- fail "genesis: vault.hashicorp.com/agent-* injector annotations must not be used when vault.agent.enabled" -}}
+{{- fail "genesis: vault.hashicorp.com/agent-* injector annotations must not be used when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Duplicate chart-owned env entries. */ -}}
 {{- $dupEnv := false -}}
 {{- range $e := .Values.extraEnv -}}
-{{- if or (eq (toString $e.name) "GENESIS_VAULT_URL") (eq (toString $e.name) "GENESIS_TLS_PEM_BUNDLE") (eq (toString $e.name) "GENESIS_VAULT_ROLE_ID") (eq (toString $e.name) "GENESIS_VAULT_SECRET_ID") (eq (toString $e.name) "GENESIS_VAULT_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
+{{- if or (eq (toString $e.name) "GENESIS_OPENBAO_URL") (eq (toString $e.name) "GENESIS_TLS_PEM_BUNDLE") (eq (toString $e.name) "GENESIS_OPENBAO_ROLE_ID") (eq (toString $e.name) "GENESIS_OPENBAO_SECRET_ID") (eq (toString $e.name) "GENESIS_OPENBAO_WRAPPED_TOKEN") -}}{{- $dupEnv = true -}}{{- end -}}
 {{- end -}}
 {{- if $dupEnv -}}
-{{- fail "genesis: extraEnv must not redefine chart-managed Vault/TLS env entries when vault.agent.enabled" -}}
+{{- fail "genesis: extraEnv must not redefine chart-managed OpenBao/TLS env entries when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Reserved mount collisions. */ -}}
 {{- $reservedVol := false -}}
 {{- range $v := .Values.extraVolumes -}}
-{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "vault-agent-socket") (eq (toString $v.name) "vault-agent-config") (eq (toString $v.name) "vault-agent-token") (eq (toString $v.name) "vault-agent-ca") (eq (toString $v.name) "vault-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
+{{- if or (eq (toString $v.name) "tls-bundle") (eq (toString $v.name) "openbao-agent-socket") (eq (toString $v.name) "openbao-agent-config") (eq (toString $v.name) "openbao-agent-token") (eq (toString $v.name) "openbao-agent-ca") (eq (toString $v.name) "openbao-agent-scratch") -}}{{- $reservedVol = true -}}{{- end -}}
 {{- end -}}
 {{- if $reservedVol -}}
-{{- fail "genesis: extraVolumes must not use reserved volume names when vault.agent.enabled" -}}
+{{- fail "genesis: extraVolumes must not use reserved volume names when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Nonroot UID/GID + fsGroup. */ -}}
@@ -315,18 +321,18 @@ false
 {{- $rg := int (default 0 .Values.securityContext.runAsGroup) -}}
 {{- $fsg := int (default 0 .Values.podSecurityContext.fsGroup) -}}
 {{- if or (le $ru 0) (le $rg 0) (le $fsg 0) -}}
-{{- fail "genesis: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when vault.agent.enabled" -}}
+{{- fail "genesis: securityContext.runAsUser/runAsGroup and podSecurityContext.fsGroup must be positive integers when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* automount must be false. */ -}}
 {{- if .Values.serviceAccount.automount -}}
-{{- fail "genesis: serviceAccount.automount must be false when vault.agent.enabled" -}}
+{{- fail "genesis: serviceAccount.automount must be false when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* renewalThreshold strictly between 0 and 1 (no truthiness default). */ -}}
 {{- $rt := float64 $agent.pki.renewalThreshold -}}
 {{- if or (le $rt 0.0) (ge $rt 1.0) -}}
-{{- fail "genesis: vault.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
+{{- fail "genesis: openbao.agent.pki.renewalThreshold must be strictly between 0 and 1" -}}
 {{- end -}}
 
 {{- /* Active artifacts only: inbound TLS is mounted when the agent manages it
@@ -335,33 +341,33 @@ false
 
 {{- /* Absolute writable artifact destinations. */ -}}
 {{- if and $mountTls (not (hasPrefix "/" (clean (default "" .Values.tls.pemBundlePath)))) -}}
-{{- fail "genesis: tls.pemBundlePath must be an absolute path when vault.agent.enabled" -}}
+{{- fail "genesis: tls.pemBundlePath must be an absolute path when openbao.agent.enabled" -}}
 {{- end -}}
 
 {{- /* Each managed artifact needs its own mount directory: a file directly in
      / would yield an empty mountPath (or mount over the root filesystem). */ -}}
 {{- $socketDir := clean (include "genesis.agentSocketDir" .) -}}
 {{- if or (eq $socketDir ".") (eq $socketDir "/") -}}
-{{- fail "genesis: vault.url socket must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- fail "genesis: openbao.url socket must be inside a dedicated directory, not directly in / when openbao.agent.enabled" -}}
 {{- end -}}
 {{- if $mountTls -}}
 {{- $tlsDir := clean (include "genesis.agentTlsDir" .) -}}
 {{- if or (eq $tlsDir ".") (eq $tlsDir "/") -}}
-{{- fail "genesis: tls.pemBundlePath must be inside a dedicated directory, not directly in / when vault.agent.enabled" -}}
+{{- fail "genesis: tls.pemBundlePath must be inside a dedicated directory, not directly in / when openbao.agent.enabled" -}}
 {{- end -}}
 {{- end -}}
 
 {{- /* Normalized chart-owned mount directories: fixed agent locations, the
      socket and each active artifact. */ -}}
-{{- $chartDirs := list "/vault/config" "/var/run/secrets/vault-token" "/tmp" $socketDir -}}
+{{- $chartDirs := list "/openbao/config" "/var/run/secrets/openbao-token" "/tmp" $socketDir -}}
 {{- if $mountTls -}}
 {{- $chartDirs = append $chartDirs (clean (include "genesis.agentTlsDir" .)) -}}
 {{- end -}}
-{{- if .Values.vault.agent.ca.existingConfigMap -}}
-{{- $chartDirs = append $chartDirs "/vault/ca" -}}
+{{- if .Values.openbao.agent.ca.existingConfigMap -}}
+{{- $chartDirs = append $chartDirs "/openbao/ca" -}}
 {{- end -}}
 {{- if eq (include "genesis.dirsOverlap" $chartDirs) "true" -}}
-{{- fail (printf "genesis: vault agent destination mount directories must not overlap (got: %s) when vault.agent.enabled" (join ", " $chartDirs)) -}}
+{{- fail (printf "genesis: OpenBao Agent destination mount directories must not overlap (got: %s) when openbao.agent.enabled" (join ", " $chartDirs)) -}}
 {{- end -}}
 
 {{- /* extraVolumeMounts must not collide with chart-owned mount directories. */ -}}
@@ -375,7 +381,7 @@ false
 {{- end -}}
 {{- end -}}
 {{- if $extraCollision -}}
-{{- fail "genesis: extraVolumeMounts must not overlap chart-managed mount directories when vault.agent.enabled" -}}
+{{- fail "genesis: extraVolumeMounts must not overlap chart-managed mount directories when openbao.agent.enabled" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

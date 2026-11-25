@@ -6,13 +6,13 @@ templates:
 values:
   - published-values.yaml
 tests:
-  - it: consumes explicit existing secrets for DSN, TLS, and Vault
+  - it: consumes explicit existing secrets for DSN, TLS, and OpenBao
     set:
       database.dsn.existingSecret: db-secret
       tls.existingSecret: tls-secret
-      vault.url: https://vault.example.com:8200
-      vault.roleId.existingSecret: vault-creds
-      vault.secretId.existingSecret: vault-creds
+      openbao.url: https://openbao.example.com:8200
+      openbao.roleId.existingSecret: openbao-creds
+      openbao.secretId.existingSecret: openbao-creds
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -25,54 +25,54 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GENESIS_VAULT_ROLE_ID
+            name: GENESIS_OPENBAO_ROLE_ID
             valueFrom:
               secretKeyRef:
-                name: vault-creds
+                name: openbao-creds
                 key: role_id
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GENESIS_VAULT_SECRET_ID
+            name: GENESIS_OPENBAO_SECRET_ID
             valueFrom:
               secretKeyRef:
-                name: vault-creds
+                name: openbao-creds
                 key: secret_id
       - equal:
           path: spec.template.spec.volumes[0].secret.secretName
           value: tls-secret
 
-  - it: uses the lone secretId existingSecret for both vault env vars
+  - it: uses the lone secretId existingSecret for both OpenBao env vars
     set:
       externalSecret.enabled: true
-      externalSecret.store: vault-store
-      vault.externalSecret.remoteKey: vault/approle
-      vault.secretId.existingSecret: custom-vault
+      externalSecret.store: openbao-store
+      openbao.externalSecret.remoteKey: openbao/approle
+      openbao.secretId.existingSecret: custom-openbao
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GENESIS_VAULT_ROLE_ID
+            name: GENESIS_OPENBAO_ROLE_ID
             valueFrom:
               secretKeyRef:
-                name: custom-vault
+                name: custom-openbao
                 key: role_id
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GENESIS_VAULT_SECRET_ID
+            name: GENESIS_OPENBAO_SECRET_ID
             valueFrom:
               secretKeyRef:
-                name: custom-vault
+                name: custom-openbao
                 key: secret_id
 
   - it: consumes ESO-generated secret names when only remoteKeys are set
     set:
       externalSecret.enabled: true
-      externalSecret.store: vault-store
+      externalSecret.store: openbao-store
       database.dsn.externalSecret.remoteKey: db/creds
       tls.externalSecret.remoteKey: tls/cert
-      vault.externalSecret.remoteKey: vault/approle
+      openbao.externalSecret.remoteKey: openbao/approle
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -85,18 +85,18 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GENESIS_VAULT_ROLE_ID
+            name: GENESIS_OPENBAO_ROLE_ID
             valueFrom:
               secretKeyRef:
-                name: my-release-genesis-vault
+                name: my-release-genesis-openbao
                 key: role_id
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GENESIS_VAULT_SECRET_ID
+            name: GENESIS_OPENBAO_SECRET_ID
             valueFrom:
               secretKeyRef:
-                name: my-release-genesis-vault
+                name: my-release-genesis-openbao
                 key: secret_id
       - equal:
           path: spec.template.spec.volumes[0].secret.secretName

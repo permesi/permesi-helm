@@ -50,17 +50,17 @@ def validate(root, lock=None, schema=None):
     if tuple(map(int, next(iter(tags)).split("."))) >= (0, 6, 0):
         pins = json.loads((root / "scripts/quickstart/openbao-images.json").read_text())
         helper = yaml.safe_load((root / "scripts/quickstart/chart/values.yaml").read_text())
-        if "vault" in lock["images"] or helper["secretsProvider"] != "openbao":
+        if "vault" in lock["images"] or "vault" in helper or "secretsProvider" in helper:
             raise ValueError("0.6 requires the OpenBao fixture")
-        for key, name in (("openbao", "vault"), ("postgresql", "postgresql")):
+        for key in ("openbao", "postgresql"):
             image = pins[key]
-            if (not re.fullmatch(DIGEST, image["digest"]) or lock["images"][key] != image or
-                    any(helper[name]["image"][k] != v for k, v in image.items())):
+            if (not re.fullmatch(DIGEST, image["digest"]) or lock["images"].get(key) != image or
+                    any(helper[key]["image"][k] != v for k, v in image.items())):
                 raise ValueError("dependency image and release fixture disagree")
         for service in ("permesi", "genesis"):
             values = yaml.safe_load((root / "charts" / service / "values.yaml").read_text())
-            if (values["secretsProvider"] != "openbao" or
-                    any(values["vault"]["agent"]["image"][k] != v for k, v in pins["openbao"].items())):
+            if ("vault" in values or "secretsProvider" in values or
+                    any(values["openbao"]["agent"]["image"][k] != v for k, v in pins["openbao"].items())):
                 raise ValueError("release Agent and OpenBao fixture disagree")
     if schema is None:
         schema = yaml.safe_load((root / "scripts/quickstart/chart/values.yaml").read_text())["bootstrap"]["schema"]

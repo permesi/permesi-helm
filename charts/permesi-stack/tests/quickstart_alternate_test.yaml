@@ -43,7 +43,11 @@ tests:
           value: false
       - contains:
           path: spec.template.spec.containers[0].env
-          content: {name: PERMESI_ADMISSION_PASERK_URL, value: "https://token-backend.uq-alt.svc.cluster.local:8080/paserk.json"}
+          content: {name: PERMESI_OPENBAO_URL, value: /var/run/secrets/openbao/agent.sock}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: PERMESI_ADMISSION_PASERK_URL}
+          any: true
       - equal:
           path: spec.template.spec.initContainers[0].restartPolicy
           value: Always
@@ -65,3 +69,6 @@ tests:
       - equal:
           path: spec.template.spec.initContainers[0].restartPolicy
           value: Always
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: GENESIS_ADMISSION_SIGNING_VERSION, value: "1"}

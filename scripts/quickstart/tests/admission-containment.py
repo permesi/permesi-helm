@@ -22,7 +22,7 @@ PortForward, run, require = (helpers[k] for k in ("PortForward", "run", "require
 
 def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=None, rollback=None):
     def operator_for(prefix):
-        return kube + ["exec", "-i", "deploy/" + prefix + "-vault", "-c", "vault", "--", "bao"]
+        return kube + ["exec", "-i", "deploy/" + prefix + "-openbao", "-c", "openbao", "--", "bao"]
     operator = operator_for(core)
     signer = operator_for(edge)
     reader = reader or signer + ["read"]
@@ -85,7 +85,7 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
             run(kube + ["wait", "--for=delete", "pod", "-l", "app.kubernetes.io/name=genesis", "--timeout=60s"])
             def audit_count(prefix, path):
                 awk = '/"type":"request"/ && index($0, needle) { n++ } END { print n+0 }'
-                return int(run(kube + ["exec", "deploy/" + prefix + "-vault", "-c", "vault", "--", "awk",
+                return int(run(kube + ["exec", "deploy/" + prefix + "-openbao", "-c", "openbao", "--", "awk",
                     "-v", 'needle="path":"' + path + '"', awk, "/audit/entry-audit.json"]))
             for attempt in range(3):
                 reads = audit_count(core, "secret/permesi/data/admission-authority")
@@ -111,7 +111,7 @@ def trial(kube, core="permesi-quickstart", edge="permesi-quickstart", reader=Non
         require(all(signup(f.port, partition_token)[0] == 200 for f in forwards),
                 "both replicas accept the legitimate token before the reader partition")
         pause = runpy.run_path(str(Path(__file__).with_name("kind-pause.py")))["paused"]
-        with pause(kube, nodes[0], "vault-agent", 67):
+        with pause(kube, nodes[0], "openbao-agent", 67):
             time.sleep(61)
             require(time.time() < partition_expiry and rejected(signup(forwards[0].port, partition_token)),
                     "partitioned replica suspended admission after its maximum snapshot age")

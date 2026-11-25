@@ -44,7 +44,7 @@ def revoke_approle(admin):
 
 
 def trial(kube, namespace, edge):
-    admin = kube + ["exec", "-i", "deploy/" + edge + "-vault", "-c", "vault", "--", "bao"]
+    admin = kube + ["exec", "-i", "deploy/" + edge + "-openbao", "-c", "openbao", "--", "bao"]
     revoke_approle(admin)
     label = "eviction-genesis"
     def obj(kind, name):
@@ -54,11 +54,11 @@ def trial(kube, namespace, edge):
             metadata={"name": label, "namespace": namespace}, **fields)))
     apply("ServiceAccount", automountServiceAccountToken=False)
     run(admin + ["write", "auth/kubernetes/role/" + label, "bound_service_account_names=" + label,
-                 "bound_service_account_namespaces=" + namespace, "audience=vault",
+                 "bound_service_account_namespaces=" + namespace, "audience=openbao",
                  "token_policies=genesis,genesis-pki", "token_no_default_policy=true", "token_ttl=10m"])
     template = obj("deploy", "permesi-genesis")["spec"]["template"]["spec"]
     template["serviceAccountName"] = label
-    volume = next(v["configMap"] for v in template["volumes"] if v["name"] == "vault-agent-config")
+    volume = next(v["configMap"] for v in template["volumes"] if v["name"] == "openbao-agent-config")
     cfg = obj("configmap", volume["name"])["data"]
     import re
     cfg["agent.hcl"], count = re.subn(r'(\brole\s*=\s*)"genesis"', r'\1"' + label + '"', cfg["agent.hcl"])
@@ -82,11 +82,11 @@ def trial(kube, namespace, edge):
     quoted = ",".join("'" + user.replace("'", "''") + "'" for user in users)
     # Ask Kubernetes to issue a diagnostic token bound to exactly this pod/UID.
     # It is only submitted to the Kubernetes TokenReview API.
-    bound = run(kube + ["create", "token", label, "--audience=vault", "--duration=10m", "--bound-object-kind=Pod",
+    bound = run(kube + ["create", "token", label, "--audience=openbao", "--duration=10m", "--bound-object-kind=Pod",
                         "--bound-object-name=" + label, "--bound-object-uid=" + identity["metadata"]["uid"]])
     def token_review():
         body = {"apiVersion": "authentication.k8s.io/v1", "kind": "TokenReview",
-                "spec": {"token": bound, "audiences": ["vault"]}}
+                "spec": {"token": bound, "audiences": ["openbao"]}}
         status = json.loads(run(kube + ["create", "-f", "-", "-o", "json"], input=json.dumps(body)))["status"]
         return status.get("authenticated", False) and status["user"]["username"] == f"system:serviceaccount:{namespace}:{label}"
     require(token_review(), "Kubernetes authenticated the live pod-bound diagnostic identity")
@@ -114,11 +114,11 @@ def trial(kube, namespace, edge):
         time.sleep(1)
     require(roles == sessions == "0", "revocation removed the login roles and terminated established SQL sessions")
     require(not accessors(), "evicted enrollment has no issued Agent token")
-    previous = next(c for c in obj("pod", label)["status"]["initContainerStatuses"] if c["name"] == "vault-agent")
-    run(kube + ["exec", label, "-c", "vault-agent", "--", "sh", "-c", "kill -TERM 1"])
+    previous = next(c for c in obj("pod", label)["status"]["initContainerStatuses"] if c["name"] == "openbao-agent")
+    run(kube + ["exec", label, "-c", "openbao-agent", "--", "sh", "-c", "kill -TERM 1"])
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        state = next(c for c in obj("pod", label)["status"]["initContainerStatuses"] if c["name"] == "vault-agent")
+        state = next(c for c in obj("pod", label)["status"]["initContainerStatuses"] if c["name"] == "openbao-agent")
         if state["restartCount"] > previous["restartCount"] and "running" in state["state"]:
             break
         time.sleep(1)

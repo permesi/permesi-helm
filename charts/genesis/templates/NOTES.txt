@@ -1,17 +1,15 @@
 Genesis has been deployed as {{ include "genesis.fullname" . }}.
 
 Key runtime values are controlled through .Values.config, .Values.database,
-.Values.tls, and .Values.vault.
+.Values.tls, and .Values.openbao.
 
 If you deployed with config.socketPath, no Service is created.
 If you deployed over TCP/TLS, verify your TLS bundle path and secret-store and database inputs.
 
-{{ if eq .Values.secretsProvider "openbao" -}}
 Genesis uses OpenBao Transit signing version {{ .Values.admissionSigningVersion }}.
 Publish this public version to core authority before activating the signer.
-{{- else }}
-Vault URL: Genesis accepts a base URL or the full AppRole login endpoint
-(https://<vault>:8200/v1/auth/approle/login); an agent socket path also works.
 
-{{ end }}
+OpenBao URL: Genesis accepts a base URL or the full AppRole login endpoint
+(https://<openbao>:8200/v1/auth/approle/login); an Agent socket path also works.
+
 Shared one-use SecretIDs or wrapped tokens are bootstrap-only, not HA-safe.

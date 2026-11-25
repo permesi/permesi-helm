@@ -1,6 +1,6 @@
-vault:
+openbao:
   authMethod: kubernetes
-  url: https://vault.example.com:8200
+  url: https://openbao.example.com:8200
   kubernetes:
     role: genesis-runtime
 serviceAccount:

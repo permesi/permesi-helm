@@ -13,7 +13,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "settings.py"
 class SettingsTests(unittest.TestCase):
     def values(self):
         return {"postgresql": {"service": {"name": "", "port": 5432}},
-                "vault": {"service": {"name": "", "port": 8200}},
+                "openbao": {"service": {"name": "", "port": 8200}},
                 "bootstrap": {"oidcSigning": {"enabled": True},
                               "credentialsSecret": "fixture-secret-not-for-output"}}
 
@@ -32,13 +32,14 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn("fixture-secret-not-for-output", standalone.stdout)
         result = json.loads(standalone.stdout)
         self.assertEqual(result["postgres_host"], "fixture-postgresql.qv-settings.svc")
-        self.assertEqual(result["vault_address"], "http://fixture-vault.qv-settings.svc:8200")
+        self.assertEqual(result["openbao_address"], "http://fixture-openbao.qv-settings.svc:8200")
+        self.assertNotIn("secrets_provider", result)
 
     def test_missing_ambiguous_and_malformed_settings_fail_closed(self):
         cases = [{}, {"quickstart": self.values(), **self.values()}]
         for path, value in ((("bootstrap", "oidcSigning", "enabled"), "false"),
-                            (("vault", "service", "port"), True),
-                            (("vault", "service", "name"), False),
+                            (("openbao", "service", "port"), True),
+                            (("openbao", "service", "name"), False),
                             (("postgresql", "service", "port"), 65536),
                             (("postgresql", "service", "name"), "name/with?injection")):
             values = copy.deepcopy(self.values())
@@ -47,6 +48,8 @@ class SettingsTests(unittest.TestCase):
                 target = target[key]
             target[path[-1]] = value
             cases.append(values)
+        for stale in ({"vault": {"service": {"name": "", "port": 8200}}}, {"secretsProvider": "openbao"}):
+            cases.append({**self.values(), **stale})
         for values in cases:
             with self.subTest(values=values):
                 result = self.run_settings(values)

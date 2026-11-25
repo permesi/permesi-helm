@@ -1,5 +1,12 @@
 # Helm improvement plan
 
+> **Historical record.** This plan predates the OpenBao-only charts (chart 0.6):
+> where it names HashiCorp Vault, `vault/contrib/terraform`, the `vault:` values
+> block or PASERK admission settings, read OpenBao, the application's
+> `openbao/contrib/opentofu` module, `openbao:` and the core admission authority.
+> Current procedures are in [the install guide](../install-guide.md) and
+> [operations guide](../operations.md).
+
 ## Decision
 
 Keep the existing four-chart structure and values interfaces. Fix demonstrated wiring defects, add deployment-specific validation, and provide a tested production configuration using the existing Secret, ConfigMap, `extraEnv`, annotation, and volume extension points.

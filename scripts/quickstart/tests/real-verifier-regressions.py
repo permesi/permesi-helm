@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Destructive real-cluster verifier regressions; use disposable qv-* namespaces.
 
-Faults temporarily change ONLY the selected Vault database role, restore it in
+Faults temporarily change ONLY the selected OpenBao database role, restore it in
 finally, and revoke exactly the test's new leases. Concurrency runs the complete
 shell wrapper in two existing independent full installations with the old fixed
 ports occupied. Bootstrap rotation mode creates and removes its own qv-rot-*
 namespace and runs the actual deps-only installer against interrupted rotation
 states. Requires kubectl, helm and python3; concurrency also needs curl and
 QS_ADMISSION_BIN (or Cargo).
-No credentials, raw Vault responses or child diagnostics are printed.
+No credentials, raw OpenBao responses or child diagnostics are printed.
 """
 import argparse
 import base64
@@ -71,7 +71,7 @@ def bootstrap_rotation(a, k, root, helper_fullname):
                                 '-v', 'ON_ERROR_STOP=1'], input=query).strip()
 
         def hashes(suffix=''):
-            prefix = "vault" if suffix else provider
+            prefix = "openbao"
             rows = sql("SELECT rolname,rolpassword FROM pg_authid WHERE rolname IN "
                        f"('{prefix}_permesi{suffix}','{prefix}_genesis{suffix}') ORDER BY rolname")
             result = dict(row.split('|', 1) for row in rows.splitlines())
@@ -87,10 +87,10 @@ def bootstrap_rotation(a, k, root, helper_fullname):
 
         def put_marker(service, state, manager=None):
             checked(root + ['kv', 'put', '-mount=secret/permesi', marker_path(service), '-'],
-                    input=json.dumps({'state': state, 'manager': manager or f'vault_{service}_manager'}))
+                    input=json.dumps({'state': state, 'manager': manager or f'openbao_{service}_manager'}))
 
         def complete(service):
-            require(marker(service) == {'state': 'completed', 'manager': f'vault_{service}_manager'},
+            require(marker(service) == {'state': 'completed', 'manager': f'openbao_{service}_manager'},
                     f'{service}: completion records the exact expected manager')
 
         def login(service):
@@ -98,7 +98,7 @@ def bootstrap_rotation(a, k, root, helper_fullname):
                 k + ['exec', '-i', f'statefulset/{helper_fullname}-postgresql', '--', 'bash', '-c',
                      'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -h 127.0.0.1 '
                      '-U "$1" -d "$2" -tAc "SELECT current_user"',
-                     'bash', f'vault_{service}_manager', service],
+                     'bash', f'openbao_{service}_manager', service],
                 input=passwords[service] + '\n', text=True, capture_output=True)
             if result.returncode:
                 require('password authentication failed' in result.stderr,
@@ -108,14 +108,14 @@ def bootstrap_rotation(a, k, root, helper_fullname):
         def reset_manager(service):
             # Fixture only: recreate the exact successful-config/pre-rotation state.
             password = passwords[service].replace("'", "''")
-            sql(f"SET standard_conforming_strings=on; ALTER ROLE vault_{service}_manager "
+            sql(f"SET standard_conforming_strings=on; ALTER ROLE openbao_{service}_manager "
                 f"WITH PASSWORD '{password}';")
 
         secret_name = helper_fullname + '-bootstrap-credentials'
 
         def set_root_token(token):
             checked(k + ['patch', 'secret', secret_name, '--type=merge', '-p',
-                         json.dumps({'data': {'vault-root-token':
+                         json.dumps({'data': {'openbao-root-token':
                                               base64.b64encode(token.encode()).decode()}})])
 
         def limited_install(path, capabilities, error='permission denied'):
@@ -135,13 +135,9 @@ def bootstrap_rotation(a, k, root, helper_fullname):
 
         installer()
         secret = json.loads(checked(k + ['get', 'secret', secret_name, '-o', 'json']))['data']
-        passwords = {service: base64.b64decode(secret[f'vault-{service}-password']).decode()
+        passwords = {service: base64.b64decode(secret[f'openbao-{service}-password']).decode()
                      for service in ('permesi', 'genesis')}
-        original_token = base64.b64decode(secret['vault-root-token']).decode()
-        helper = json.loads(checked(["helm", "--kube-context", a.context, "-n", a.namespace,
-                                     "get", "values", a.release + "-quickstart", "--all", "-o", "json"]))
-        provider = helper["secretsProvider"]
-        require(provider in ("vault", "openbao"), "known database owner contract")
+        original_token = base64.b64decode(secret['openbao-root-token']).decode()
         owners = hashes()
         for policy in ('permesi', 'genesis'):
             token = json.loads(checked(root + ['token', 'create', '-format=json', '-no-default-policy',
@@ -180,16 +176,16 @@ def bootstrap_rotation(a, k, root, helper_fullname):
             reset_manager(service)
             checked(root + ['delete', 'database/config/' + service])
             limited_install('database/rotate-root/' + service, ['deny'])
-            require(marker(service) == {'state': 'pending', 'manager': f'vault_{service}_manager'} and
+            require(marker(service) == {'state': 'pending', 'manager': f'openbao_{service}_manager'} and
                     login(service), f'{service}: failed new-config rotation leaves only pending state')
             installer()
             require(not login(service), f'{service}: recovery retries failed rotation')
             complete(service)
 
         # Rotation succeeds, then its completion write is forbidden. The next
-        # installer must use Vault's current private password and rotate again.
+        # installer must use OpenBao's current private password and rotate again.
         for service in passwords:
-            manager = f'vault_{service}_manager'
+            manager = f'openbao_{service}_manager'
             put_marker(service, 'pending')
             before = hashes('_manager')
             limited_install('secret/permesi/data/' + marker_path(service), ['read'])
@@ -198,7 +194,7 @@ def bootstrap_rotation(a, k, root, helper_fullname):
                     f'{service}: completion-write failure follows real rotation without false completion')
             installer()
             require(hashes('_manager')[manager] != after[manager] and not login(service),
-                    f'{service}: retry after marker-write failure uses current Vault credentials')
+                    f'{service}: retry after marker-write failure uses current OpenBao credentials')
             complete(service)
 
         before = hashes('_manager')
@@ -207,14 +203,14 @@ def bootstrap_rotation(a, k, root, helper_fullname):
         require(hashes('_manager') == before, 'marker-read failure refuses bootstrap without rotating')
         limited_install('database/config/permesi', ['deny'], 'cannot inspect database/config/permesi')
         require(hashes('_manager') == before, 'config-read failure refuses to overwrite private credentials')
-        checked(root + ['write', 'database/config/permesi', f'username={provider}_permesi', 'verify_connection=false'])
+        checked(root + ['write', 'database/config/permesi', 'username=openbao_permesi', 'verify_connection=false'])
         try:
             installer(False, 'legacy owner-as-manager')
             require(hashes('_manager') == before, 'legacy owner-as-manager config is still explicitly refused')
         finally:
             checked(root + ['write', 'database/config/permesi',
-                            'username=vault_permesi_manager', 'verify_connection=true'])
-        for state, manager in (('completed', 'unexpected_manager'), ('invalid', 'vault_permesi_manager')):
+                            'username=openbao_permesi_manager', 'verify_connection=true'])
+        for state, manager in (('completed', 'unexpected_manager'), ('invalid', 'openbao_permesi_manager')):
             put_marker('permesi', state, manager)
             try:
                 installer(False, 'rotation marker')
@@ -251,7 +247,7 @@ def main():
     require(a.namespace.startswith('qv-'), 'primary namespace is explicitly disposable qv-*')
     k = ['kubectl', '--context', a.context, '-n', a.namespace]
     helper_fullname = a.helper_fullname or a.helper_release or a.release + '-quickstart'
-    root = k + ['exec', '-i', f'deploy/{helper_fullname}-vault', '-c', 'vault', '--', 'vault']
+    root = k + ['exec', '-i', f'deploy/{helper_fullname}-openbao', '-c', 'openbao', '--', 'bao']
     verify = ['bash', str(VERIFY), '--context', a.context, '--namespace', a.namespace, '--release', a.release]
     if a.helper_release:
         verify += ['--helper-release', a.helper_release]

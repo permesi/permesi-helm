@@ -7,12 +7,14 @@
 #   -f charts/permesi-stack/examples/quickstart.yaml --wait --wait-for-jobs --timeout 12m
 #
 # For another namespace/release, explicitly update all namespace-qualified DSNs,
-# Agent origins, commonName/dnsNames, PASERK URL and helper service/SA names.
+# Agent origins, commonName/dnsNames, helper service/SA names.
 # No tpl or parent-to-sibling mutation is performed. Bootstrap Jobs are ordinary
 # resources; --wait-for-jobs is REQUIRED to avoid false-success on failed SQL.
-# Vault and PostgreSQL are ephemeral, single-replica and ClusterIP-only. Never
-# retain PostgreSQL after losing Vault: the OPAQUE seed cannot be regenerated.
+# OpenBao and PostgreSQL are ephemeral, single-replica and ClusterIP-only. Never
+# retain PostgreSQL after losing OpenBao: the OPAQUE seed cannot be regenerated.
 # The helper pins the SQL source archive to the exact application release.
+# Genesis signs with admission key version 1, which install.sh (or the operator)
+# publishes to the core OpenBao admission authority before the first request.
 quickstart:
   enabled: true
   acknowledgeDevelopment: true
@@ -26,7 +28,7 @@ quickstart:
         serviceName: permesi-genesis
         browserDnsNames: [genesis.localhost]
     kubernetesRoles:
-      audience: vault
+      audience: openbao
       permesi:
         serviceAccount: permesi
       genesis:
@@ -43,30 +45,24 @@ permesi:
       value: postgres://placeholder@permesi-quickstart-postgresql.permesi-quickstart.svc:5432/permesi?sslmode=disable
   tls:
     pemBundlePath: /var/run/permesi/tls/bundle.pem
-  vault:
+  openbao:
     authMethod: auto
-    url: /var/run/secrets/vaultproject.io/agent.sock
+    url: /var/run/secrets/openbao/agent.sock
     agent:
       enabled: true
-      address: http://permesi-quickstart-vault.permesi-quickstart.svc:8200
+      address: http://permesi-quickstart-openbao.permesi-quickstart.svc:8200
       auth:
         mount: kubernetes
         role: permesi
-        audience: vault
+        audience: openbao
       pki:
         mount: pki-int
         role: permesi-runtime
         commonName: permesi.permesi-quickstart.svc.cluster.local
         dnsNames: [permesi, permesi.permesi-quickstart, permesi.permesi-quickstart.svc, permesi.permesi-quickstart.svc.cluster.local, api.localhost]
-      paserkCa:
-        enabled: true
-        path: pki-int/cert/ca_chain
   admission:
-    paserkUrl: https://permesi-genesis.permesi-quickstart.svc.cluster.local:8080/paserk.json
     issuer: https://genesis.localhost:9443
     audience: permesi
-    paserkCa:
-      mountPath: /var/run/permesi/admission-ca
   auth:
     frontendBaseUrl: http://localhost:8080
     corsAllowedOrigins: http://localhost:8080
@@ -78,6 +74,7 @@ permesi:
     - {name: PERMESI_SIGNUP_DEVELOPMENT_DOMAINS, value: example.test}
 
 genesis:
+  admissionSigningVersion: 1
   enabled: true
   replicaCount: 2
   serviceAccount:
@@ -88,16 +85,16 @@ genesis:
       value: postgres://placeholder@permesi-quickstart-postgresql.permesi-quickstart.svc:5432/genesis?sslmode=disable
   tls:
     pemBundlePath: /var/run/genesis/tls/bundle.pem
-  vault:
+  openbao:
     authMethod: auto
-    url: /var/run/secrets/vaultproject.io/agent.sock
+    url: /var/run/secrets/openbao/agent.sock
     agent:
       enabled: true
-      address: http://permesi-quickstart-vault.permesi-quickstart.svc:8200
+      address: http://permesi-quickstart-openbao.permesi-quickstart.svc:8200
       auth:
         mount: kubernetes
         role: genesis
-        audience: vault
+        audience: openbao
       pki:
         mount: pki-int
         role: genesis-runtime

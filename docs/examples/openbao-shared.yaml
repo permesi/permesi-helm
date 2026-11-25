@@ -1,7 +1,6 @@
 # Production example for the OpenBao application contract. Supply site-specific DNS, CA Secrets,
 # DSNs, CIDRs, approved signer version and immutable application images before installation.
 permesi:
-  secretsProvider: openbao
   enabled: true
 
   replicaCount: 2
@@ -21,14 +20,13 @@ permesi:
   # No tls.existingSecret: the Agent renders the bundle at tls.pemBundlePath.
 
   admission:
-    paserkUrl: ""
     issuer: https://genesis.permesi.example.com
     audience: permesi
     # Admission authority comes from core OpenBao KV.
 
-  vault:
+  openbao:
     # The application connects to this Unix socket; the Agent listens on it.
-    url: unix:///var/run/permesi/vault-agent/agent.sock
+    url: unix:///var/run/permesi/openbao-agent/agent.sock
     # No roleId / secretId / wrappedToken: the Agent authenticates via Kubernetes.
     agent:
       enabled: true
@@ -40,11 +38,11 @@ permesi:
       auth:
         mount: kubernetes
         role: permesi
-        audience: vault
+        audience: openbao
         tokenExpirationSeconds: 3600
       ca:
         # Public OpenBao CA; omit both for a public-root OpenBao.
-        existingConfigMap: vault-ca
+        existingConfigMap: openbao-ca
         key: ca.crt
       pki:
         mount: pki-int
@@ -55,9 +53,6 @@ permesi:
           - api.permesi.example.com
         ttl: 24h
         renewalThreshold: 0.8
-      paserkCa:
-        enabled: false
-        path: pki-int/cert/ca_chain
 
   auth:
     frontendBaseUrl: https://console.permesi.example.com
@@ -185,7 +180,6 @@ permesi:
             protocol: TCP
 
 genesis:
-  secretsProvider: openbao
   admissionSigningVersion: 1
   enabled: true
 
@@ -202,8 +196,8 @@ genesis:
 
   # No tls.existingSecret: the Agent renders the bundle at tls.pemBundlePath.
 
-  vault:
-    url: unix:///var/run/genesis/vault-agent/agent.sock
+  openbao:
+    url: unix:///var/run/genesis/openbao-agent/agent.sock
     agent:
       enabled: true
       address: https://openbao.example.com:8200
@@ -214,10 +208,10 @@ genesis:
       auth:
         mount: kubernetes
         role: genesis
-        audience: vault
+        audience: openbao
         tokenExpirationSeconds: 3600
       ca:
-        existingConfigMap: vault-ca
+        existingConfigMap: openbao-ca
         key: ca.crt
       pki:
         mount: pki-int

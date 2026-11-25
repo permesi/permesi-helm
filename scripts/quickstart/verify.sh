@@ -2,7 +2,7 @@
 # Permesi quickstart verifier (DEVELOPMENT ONLY).
 #
 # Exercises the real dependencies installed by install.sh: PostgreSQL schema,
-# ownership and grants; Vault mounts, key types, PKI issuance limits; and
+# ownership and grants; OpenBao mounts, key types, PKI issuance limits; and
 # split-trust denials using tokens from the actual Kubernetes auth roles (or,
 # before the application ServiceAccounts exist, tokens carrying exactly the
 # roles' policies). Never prints Secret data, tokens or private keys.
@@ -57,10 +57,9 @@ helper_settings="$("${H[@]}" get values "$QS_RELEASE" --all -o json \
   || { echo 'verify.sh: cannot resolve effective helper settings' >&2; exit 1; }
 mapfile -t helper_fields <<< "$helper_settings"
 PG_STATEFULSET="${helper_fields[0]}"
-VAULT_DEPLOY="${helper_fields[3]}"
+OPENBAO_DEPLOY="${helper_fields[3]}"
 PG_POD="${PG_STATEFULSET}-0"
 OIDC_ENABLED="${helper_fields[5]}"
-provider="${helper_fields[6]}"
 HELPER_STATUS="$("${H[@]}" status "$QS_RELEASE" -o json \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["status"])')" \
   || { echo 'verify.sh: cannot inspect helper release status' >&2; exit 1; }
@@ -71,11 +70,11 @@ fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); }
 check() { local desc="$1"; shift; if "$@" >/dev/null 2>&1; then pass "${desc}"; else fail "${desc}"; fi; }
 section() { echo; echo "== $* =="; }
 
-# Root-token Vault CLI inside the dev Vault pod (token comes from the pod env).
-vroot() { "${K[@]}" exec "deploy/${VAULT_DEPLOY}" -c vault -- vault "$@"; }
-# Vault CLI with a caller-supplied token passed on stdin (never in argv).
-vas() { local token="$1"; shift; printf '%s' "${token}" | "${K[@]}" exec -i "deploy/${VAULT_DEPLOY}" -c vault -- \
-  sh -c 'VAULT_TOKEN="$(cat)" exec vault "$@"' vault "$@"; }
+# Root-token OpenBao CLI inside the dev OpenBao pod (token comes from the pod env).
+vroot() { "${K[@]}" exec "deploy/${OPENBAO_DEPLOY}" -c openbao -- bao "$@"; }
+# OpenBao CLI with a caller-supplied token passed on stdin (never in argv).
+vas() { local token="$1"; shift; printf '%s' "${token}" | "${K[@]}" exec -i "deploy/${OPENBAO_DEPLOY}" -c openbao -- \
+  sh -c 'BAO_TOKEN="$(cat)" exec bao "$@"' bao "$@"; }
 # psql as the PostgreSQL superuser over the in-pod Unix socket.
 psql_q() { "${K[@]}" exec "${PG_POD}" -c postgresql -- psql -X -v ON_ERROR_STOP=1 -U postgres -tA "$@"; }
 sql_is() { local want="$1" db="$2" q="$3"; [[ "$(psql_q -d "${db}" -c "${q}" 2>/dev/null)" == "${want}" ]]; }
@@ -85,7 +84,7 @@ sql_is() { local want="$1" db="$2" q="$3"; [[ "$(psql_q -d "${db}" -c "${q}" 2>/
 PT="" GT=""
 LEASES=()
 revoke_test_token() {
-  printf '%s' "$1" | "${K[@]}" exec -i "deploy/${VAULT_DEPLOY}" -c vault -- vault write auth/token/revoke token=- >/dev/null 2>&1
+  printf '%s' "$1" | "${K[@]}" exec -i "deploy/${OPENBAO_DEPLOY}" -c openbao -- bao write auth/token/revoke token=- >/dev/null 2>&1
 }
 cleanup() {
   local status=$? lease tok
@@ -112,7 +111,7 @@ echo "verify.sh: context=${CONTEXT} namespace=${NAMESPACE} release=${RELEASE}"
 section "Dependencies"
 check "helper Helm release deployed" test "$HELPER_STATUS" = deployed
 check "PostgreSQL StatefulSet ready" test "$("${K[@]}" get statefulset "${PG_STATEFULSET}" -o jsonpath='{.status.readyReplicas}')" = 1
-check "dev Vault Deployment ready" test "$("${K[@]}" get deployment "${VAULT_DEPLOY}" -o jsonpath='{.status.readyReplicas}')" = 1
+check "dev OpenBao Deployment ready" test "$("${K[@]}" get deployment "${OPENBAO_DEPLOY}" -o jsonpath='{.status.readyReplicas}')" = 1
 if boot_status="$("${K[@]}" get jobs -l "app.kubernetes.io/instance=${QS_RELEASE},app.kubernetes.io/component=bootstrap" \
   --sort-by=.metadata.creationTimestamp -o json | python3 -c '
 import json,sys
@@ -121,7 +120,7 @@ status=jobs[-1].get("status", {}) if jobs else {}
 failed=any(c.get("type")=="Failed" and c.get("status")=="True" for c in status.get("conditions", []))
 print("collected" if not jobs else "succeeded" if status.get("succeeded")==1 and not failed else "incomplete")')"; then
   if [[ "$boot_status" == collected ]]; then
-    echo 'INFO: bootstrap Job collected; all durable PostgreSQL/Vault checks below remain required'
+    echo 'INFO: bootstrap Job collected; all durable PostgreSQL/OpenBao checks below remain required'
   else
     check "latest bootstrap Job succeeded" test "$boot_status" = succeeded
   fi
@@ -131,37 +130,37 @@ fi
 check "only ClusterIP Services" test -z "$("${K[@]}" get svc -l "app.kubernetes.io/instance=${QS_RELEASE}" -o jsonpath='{range .items[?(@.spec.type!="ClusterIP")]}{.metadata.name}{end}')"
 
 section "PostgreSQL schema, ownership and grants"
-check "databases genesis/permesi owned by ${provider}_genesis/${provider}_permesi" sql_is "genesis:${provider}_genesis,permesi:${provider}_permesi" postgres \
+check "databases genesis/permesi owned by openbao_genesis/openbao_permesi" sql_is "genesis:openbao_genesis,permesi:openbao_permesi" postgres \
   "SELECT string_agg(datname||':'||pg_get_userbyid(datdba), ',' ORDER BY datname) FROM pg_database WHERE datname IN ('genesis','permesi')"
-check "vault_* owners: LOGIN CREATEROLE, not superuser" sql_is "2" postgres \
-  "SELECT count(*) FROM pg_roles WHERE rolname IN ('${provider}_genesis','${provider}_permesi') AND rolcanlogin AND rolcreaterole AND NOT rolsuper AND NOT rolcreatedb"
-if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && PGPASSWORD=change-me psql -X -U "$1" -d permesi -h 127.0.0.1 -c "select 1"' sh "${provider}_permesi" >/dev/null 2>&1; then
-  fail "${provider}_permesi must not accept the change-me placeholder password"
+check "openbao_* owners: LOGIN CREATEROLE, not superuser" sql_is "2" postgres \
+  "SELECT count(*) FROM pg_roles WHERE rolname IN ('openbao_genesis','openbao_permesi') AND rolcanlogin AND rolcreaterole AND NOT rolsuper AND NOT rolcreatedb"
+if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && PGPASSWORD=change-me psql -X -U "$1" -d permesi -h 127.0.0.1 -c "select 1"' sh "openbao_permesi" >/dev/null 2>&1; then
+  fail "openbao_permesi must not accept the change-me placeholder password"
 else
-  pass "${provider}_permesi rejects the change-me placeholder password"
+  pass "openbao_permesi rejects the change-me placeholder password"
 fi
 check "runtime roles NOLOGIN, not superuser" sql_is "2" postgres \
   "SELECT count(*) FROM pg_roles WHERE rolname IN ('genesis_runtime','permesi_runtime') AND NOT rolcanlogin AND NOT rolsuper AND NOT rolcreaterole"
 check "owners hold runtime roles WITH ADMIN OPTION (canonical grant)" sql_is "2" postgres \
-  "SELECT count(*) FROM pg_auth_members m WHERE m.admin_option AND (pg_get_userbyid(m.roleid),pg_get_userbyid(m.member)) IN (('genesis_runtime','${provider}_genesis'),('permesi_runtime','${provider}_permesi'))"
+  "SELECT count(*) FROM pg_auth_members m WHERE m.admin_option AND (pg_get_userbyid(m.roleid),pg_get_userbyid(m.member)) IN (('genesis_runtime','openbao_genesis'),('permesi_runtime','openbao_permesi'))"
 check "owners hold pg_signal_backend (lease revocation)" sql_is "2" postgres \
-  "SELECT count(*) FROM pg_auth_members WHERE roleid='pg_signal_backend'::regrole AND pg_get_userbyid(member) IN ('${provider}_genesis','${provider}_permesi')"
+  "SELECT count(*) FROM pg_auth_members WHERE roleid='pg_signal_backend'::regrole AND pg_get_userbyid(member) IN ('openbao_genesis','openbao_permesi')"
 check "permesi_runtime has no CREATE on schema public" sql_is "f" permesi "SELECT has_schema_privilege('permesi_runtime','public','CREATE')"
 check "genesis_runtime has no CREATE on schema public" sql_is "f" genesis "SELECT has_schema_privilege('genesis_runtime','public','CREATE')"
 check "no cross-database CONNECT for the other owner" sql_is "false,false" postgres \
-  "SELECT has_database_privilege('${provider}_genesis','permesi','CONNECT')::text||','||has_database_privilege('${provider}_permesi','genesis','CONNECT')::text"
+  "SELECT has_database_privilege('openbao_genesis','permesi','CONNECT')::text||','||has_database_privilege('openbao_permesi','genesis','CONNECT')::text"
 check "Genesis test client 00000000-0000-0000-0000-000000000000 seeded" sql_is "1" genesis \
   "SELECT count(*) FROM clients WHERE uuid='00000000-0000-0000-0000-000000000000'"
 check "no trust authentication for TCP connections" sql_is "0" postgres \
   "SELECT count(*) FROM pg_hba_file_rules WHERE type LIKE 'host%' AND auth_method='trust'"
-if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && psql -X -U "$1" -d permesi -h 127.0.0.1 -w -c "select 1"' sh "${provider}_permesi" >/dev/null 2>&1; then
+if "${K[@]}" exec "${PG_POD}" -c postgresql -- sh -c 'cd /tmp && psql -X -U "$1" -d permesi -h 127.0.0.1 -w -c "select 1"' sh "openbao_permesi" >/dev/null 2>&1; then
   fail "TCP login without a password must fail"
 else
   pass "TCP login without a password fails"
 fi
-echo "INFO: verify_permesi.sql ran as ${provider}_permesi in the bootstrap Job; check.sql (pg_cron) is NOT exercised by the quickstart"
+echo "INFO: verify_permesi.sql ran as openbao_permesi in the bootstrap Job; check.sql (pg_cron) is NOT exercised by the quickstart"
 
-section "Vault mounts, keys and PKI"
+section "OpenBao mounts, keys and PKI"
 mount_type() { vroot read -field=type "sys/mounts/$1" 2>/dev/null; }
 check "auth/kubernetes enabled" test "$(vroot read -field=type sys/auth/kubernetes 2>/dev/null)" = kubernetes
 check "secret/permesi is KV v2" sh -c "test '$(mount_type secret/permesi)' = kv && test '$(vroot read -field=options sys/mounts/secret/permesi 2>/dev/null)' = 'map[version:2]'"
@@ -175,7 +174,7 @@ for k in transit/permesi/keys/totp:chacha20-poly1305 transit/genesis/keys/genesi
   key="${k%%:*}"
   check "${key} type ${k##*:}" test "$(vroot read -field=type "${key}" 2>/dev/null)" = "${k##*:}"
   period=2592000
-  if [[ "$provider/$key" == openbao/transit/genesis/keys/genesis-signing ]]; then period=0; fi
+  if [[ "$key" == transit/genesis/keys/genesis-signing ]]; then period=0; fi
   check "${key} non-exportable, no plaintext backup, configured rotation" test \
     "$(vroot read -field=exportable "${key}")/$(vroot read -field=allow_plaintext_backup "${key}")/$(vroot read -field=auto_rotate_period "${key}")" = "false/false/${period}"
 done
@@ -188,7 +187,7 @@ check "database/config/{permesi,genesis} restricted to their own role" test \
 for svc in permesi genesis; do
   check "database/config/${svc} initial manager rotation completed" test \
     "$(vroot kv get -mount=secret/permesi -field=state "bootstrap/manager-rotation/${svc}")/$(vroot kv get -mount=secret/permesi -field=manager "bootstrap/manager-rotation/${svc}")" \
-    = "completed/vault_${svc}_manager"
+    = "completed/openbao_${svc}_manager"
 done
 ca_chain="$(vroot read -field=certificate pki-int/cert/ca_chain 2>/dev/null || true)"
 check "pki-int CA chain = intermediate + root (2 certificates)" test "$(grep -c 'BEGIN CERTIFICATE' <<<"${ca_chain}")" = 2
@@ -211,9 +210,9 @@ fi
 section "Kubernetes auth roles"
 for svc in permesi:"${PERMESI_NAME}" genesis:"${GENESIS_NAME}"; do
   role="${svc%%:*}" sa="${svc##*:}"
-  check "role ${role} bound to SA ${sa} in ${NAMESPACE} only, audience vault" test \
+  check "role ${role} bound to SA ${sa} in ${NAMESPACE} only, audience openbao" test \
     "$(vroot read -field=bound_service_account_names "auth/kubernetes/role/${role}")|$(vroot read -field=bound_service_account_namespaces "auth/kubernetes/role/${role}")|$(vroot read -field=audience "auth/kubernetes/role/${role}")" \
-    = "[${sa}]|[${NAMESPACE}]|vault"
+    = "[${sa}]|[${NAMESPACE}]|openbao"
 done
 
 # role_token <role> <sa>: real Kubernetes-auth login when the application
@@ -225,9 +224,9 @@ token_source() {
 role_token() {
   local role="$1" sa="$2"
   if "${K[@]}" get serviceaccount "${sa}" >/dev/null 2>&1; then
-    "${K[@]}" create token "${sa}" --audience vault --duration 10m \
-      | "${K[@]}" exec -i "deploy/${VAULT_DEPLOY}" -c vault -- \
-          vault write -field=token auth/kubernetes/login role="${role}" jwt=-
+    "${K[@]}" create token "${sa}" --audience openbao --duration 10m \
+      | "${K[@]}" exec -i "deploy/${OPENBAO_DEPLOY}" -c openbao -- \
+          bao write -field=token auth/kubernetes/login role="${role}" jwt=-
   else
     local p args=()
     for p in $(vroot read -field=token_policies "auth/kubernetes/role/${role}" | tr -d '[]'); do args+=("-policy=${p}"); done
@@ -267,7 +266,7 @@ deny "genesis -> pki-int/issue/permesi-runtime" "${GT}" write pki-int/issue/perm
 deny "genesis -> sys/mounts" "${GT}" read sys/mounts
 
 # Retain the exact issued identity privately. Other application roles cannot
-# satisfy this proof. Do not print Vault JSON, usernames, passwords or lease IDs.
+# satisfy this proof. Do not print OpenBao JSON, usernames, passwords or lease IDs.
 for pair in permesi:"${PT}" genesis:"${GT}"; do
   svc="${pair%%:*}" tok="${pair#*:}"
   if credentials="$(vas "${tok}" read -format=json "database/creds/${svc}" 2>/dev/null)" &&
@@ -280,14 +279,12 @@ for pair in permesi:"${PT}" genesis:"${GT}"; do
       continue
     fi
     LEASES+=("${lease}")
-    # SQL literal quoting, even though the normal Vault username is generated.
+    # SQL literal quoting, even though the normal OpenBao username is generated.
     quoted_user="${username//\'/\'\'}"
     lookup_privilege="has_table_privilege(oid,'users','SELECT')"
     if [[ "$svc" == genesis ]]; then
       lookup_privilege="has_column_privilege(oid,'clients','uuid','SELECT')"
-      if [[ "$provider" == openbao ]]; then
-        lookup_privilege+=" AND NOT has_table_privilege(oid,'clients','SELECT') AND rolconnlimit=10"
-      fi
+      lookup_privilege+=" AND NOT has_table_privilege(oid,'clients','SELECT') AND rolconnlimit=10"
     fi
     check "database/creds/${svc}: exact issued identity has only its runtime role and required privileges" \
       sql_is "t" "${svc}" \
@@ -329,7 +326,7 @@ if [[ "$DEPS_ONLY" != true && "${FAILURES}" -eq 0 ]]; then
   section "Real application runtime (temporary verifier credentials already revoked)"
   python3 "$(dirname "${BASH_SOURCE[0]}")/verify-runtime.py" \
     --context "$CONTEXT" --namespace "$NAMESPACE" --release "$RELEASE" --helper-fullname "$QS_FULLNAME" \
-    --vault-deployment "$VAULT_DEPLOY" --postgres-pod "$PG_POD" "${RUNTIME_ARGS[@]}" \
+    --openbao-deployment "$OPENBAO_DEPLOY" --postgres-pod "$PG_POD" "${RUNTIME_ARGS[@]}" \
     || fail "application runtime verification"
 fi
 

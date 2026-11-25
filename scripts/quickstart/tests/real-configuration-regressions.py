@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Qualify endpoint, Job-collection and OIDC contracts with real PostgreSQL/Vault.
+"""Qualify endpoint, Job-collection and OIDC contracts with real PostgreSQL/OpenBao.
 
 Owns one absent qv-config-* namespace and its helper release. Uses the actual
 installer/verifier; restores faulted state and removes only owned resources.
-Captured child diagnostics and Vault responses are never printed.
+Captured child diagnostics and OpenBao responses are never printed.
 """
 import argparse
 import hashlib
@@ -41,14 +41,14 @@ def main():
     require(not run(kubectl + ["get", "namespace", args.namespace, "--ignore-not-found", "-o", "name"]),
             "configuration namespace does not already exist")
     helper = args.release + "-quickstart"
-    vault = args.release + "-vault"
-    root = kubectl + ["exec", "-i", "deploy/" + vault, "-c", "vault", "--", "vault"]
+    openbao = args.release + "-openbao"
+    root = kubectl + ["exec", "-i", "deploy/" + openbao, "-c", "openbao", "--", "bao"]
     verify = ["bash", str(QUICKSTART / "verify.sh"), "--context", args.context,
               "--namespace", args.namespace, "--release", args.release, "--deps-only"]
     with tempfile.TemporaryDirectory(prefix="quickstart-config-") as directory:
         values_path = Path(directory) / "values.json"
         values = {"postgresql": {"service": {"name": args.release + "-db", "port": 15432}},
-                  "vault": {"service": {"name": vault, "port": 18200}},
+                  "openbao": {"service": {"name": openbao, "port": 18200}},
                   "bootstrap": {"oidcSigning": {"enabled": False}}}
         install = ["bash", str(QUICKSTART / "install.sh"), "--context", args.context,
                    "--namespace", args.namespace, "--release", args.release,
@@ -109,7 +109,7 @@ def main():
 
             job_name = args.release + "-expected-failure"
             images = json.loads((QUICKSTART / "lock.json").read_text())["images"]
-            lock = images.get("openbao") or images["vault"]
+            lock = images["openbao"]
             image = lock["repository"] + "@" + lock["digest"]
             failed_job = {"apiVersion": "batch/v1", "kind": "Job", "metadata": {
                 "name": job_name, "labels": {"app.kubernetes.io/instance": helper,

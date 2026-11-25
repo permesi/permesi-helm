@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Keep only Vault's credential banner out of pod logs; never spool raw output.
+# Keep only OpenBao's credential banner out of pod logs; never spool raw output.
 set -eu
 umask 077
 work="$(mktemp -d)"
@@ -29,7 +29,7 @@ mkfifo "$work/output"
 # immediately, including startup errors; discard only the two banner labels.
 awk '/^[[:space:]]*(Root Token|Unseal Key):/ { next } { print; fflush() }' < "$work/output" &
 filter_pid=$!
-vault server -dev -dev-listen-address=0.0.0.0:8200 -dev-no-store-token "$@" > "$work/output" 2>&1 &
+bao server -dev -dev-listen-address=0.0.0.0:8200 -dev-no-store-token "$@" > "$work/output" 2>&1 &
 server_pid=$!
 if [ -n "$pending_signal" ]; then kill -"$pending_signal" "$server_pid" 2>/dev/null || :; fi
 # A trapped signal interrupts wait. Re-wait until the actual server has exited,

@@ -1,9 +1,8 @@
-secretsProvider: vault
 qualificationObservations: false
 # permesi-quickstart: disposable development dependencies.
 #
-# WARNING: development-only. In-memory dev Vault, ephemeral PostgreSQL, and a
-# bootstrap-only credential Secret. Losing Vault while PostgreSQL is retained is
+# WARNING: development-only. In-memory dev OpenBao, ephemeral PostgreSQL, and a
+# bootstrap-only credential Secret. Losing OpenBao while PostgreSQL is retained is
 # NOT recoverable by regenerating the OPAQUE seed. Never deploy to production.
 #
 # acknowledgeDevelopment must be explicitly set to true before any resource is
@@ -15,7 +14,7 @@ fullnameOverride: ""
 
 rbac:
   # false: a cluster administrator must pregrant tokenreviews.create to ONLY
-  # system:serviceaccount:<namespace>:<fullname>-vault (not application/bootstrap
+  # system:serviceaccount:<namespace>:<fullname>-openbao (not application/bootstrap
   # accounts). The installer skips cluster-RBAC creation preflight in this mode.
   # Namespace-scoped credential Job RBAC is unaffected.
   createTokenReviewBinding: true
@@ -23,12 +22,12 @@ rbac:
 bootstrap:
   # Operator-provisioned credentials Secret. When empty, the credentials Job
   # creates "<fullname>-bootstrap-credentials" once and never regenerates it.
-  # Required keys: postgres-admin-password, vault-root-token,
-  # vault-permesi-password, vault-genesis-password.
+  # Required keys: postgres-admin-password, openbao-root-token,
+  # openbao-permesi-password, openbao-genesis-password.
   credentialsSecret: ""
   # Owner passwords remain stable for canonical schema bootstrap. Separate
-  # vault_{permesi,genesis}_manager logins initially share these passwords, then
-  # Vault immediately rotates them; manager credentials live only inside Vault.
+  # openbao_{permesi,genesis}_manager logins initially share these passwords, then
+  # OpenBao immediately rotates them; manager credentials live only inside OpenBao.
   # Existing-Secret passwords may include ':' and '\', but not CR/LF.
 
   # Canonical permesi db/sql include tree. Set exactly one source.
@@ -50,7 +49,7 @@ bootstrap:
   # names follow each component's release/fullname convention (umbrella-safe).
   # Override when components use serviceAccount.name or fullnameOverride.
   kubernetesRoles:
-    audience: "vault"
+    audience: "openbao"
     ttl: "1h"
     maxTtl: "4h"
     permesi:
@@ -81,11 +80,12 @@ bootstrap:
       serviceName: ""
       browserDnsNames: ["genesis.localhost"]
 
+# Image pins must equal scripts/quickstart/openbao-images.json (release check).
 postgresql:
   image:
     repository: "docker.io/library/postgres"
-    tag: "18.6"
-    digest: ""
+    tag: "19.0"
+    digest: "sha256:d2c8a7d3d224a9c0335bf9f69ae6ad0b9aa7d88c4b64bab89f0f261332f6d4de"
     pullPolicy: IfNotPresent
   service:
     # Default "<fullname>-postgresql".
@@ -95,14 +95,14 @@ postgresql:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
 
-vault:
+openbao:
   image:
-    repository: "docker.io/hashicorp/vault"
-    tag: "1.20.4"
-    digest: ""
+    repository: "docker.io/openbao/openbao"
+    tag: "2.7.3"
+    digest: "sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b"
     pullPolicy: IfNotPresent
   service:
-    # Default "<fullname>-vault".
+    # Default "<fullname>-openbao".
     name: ""
     port: 8200
   resources:

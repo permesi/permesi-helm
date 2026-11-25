@@ -2,16 +2,14 @@
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- $dbSecret := include "genesis.dbSecretName" . -}}
 {{- $tlsSecret := include "genesis.tlsSecretName" . -}}
-{{- $vaultRoleIdSecret := include "genesis.vaultRoleIdSecretName" . -}}
-{{- $vaultSecretIdSecret := include "genesis.vaultSecretIdSecretName" . -}}
-{{- $agentEnabled := .Values.vault.agent.enabled -}}
-{{- $nativeEnabled := eq .Values.vault.authMethod "kubernetes" -}}
+{{- $openbaoRoleIdSecret := include "genesis.openbaoRoleIdSecretName" . -}}
+{{- $openbaoSecretIdSecret := include "genesis.openbaoSecretIdSecretName" . -}}
+{{- $agentEnabled := .Values.openbao.agent.enabled -}}
+{{- $nativeEnabled := eq .Values.openbao.authMethod "kubernetes" -}}
 {{- $agentManagesTls := and $agentEnabled (not $socketMode) -}}
 {{- $agentSocketDir := include "genesis.agentSocketDir" . -}}
 {{- $agentTlsDir := include "genesis.agentTlsDir" . -}}
 {{- $mountTls := or $tlsSecret $agentManagesTls -}}
-{{- $openbao := eq .Values.secretsProvider "openbao" -}}
-{{- $prefix := ternary "OPENBAO" "VAULT" $openbao -}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -40,7 +38,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- if $agentEnabled }}
-        checksum/vault-agent-config: {{ include "genesis.agentConfigChecksum" . }}
+        checksum/openbao-agent-config: {{ include "genesis.agentConfigChecksum" . }}
         {{- end }}
       {{- end }}
     spec:
@@ -54,13 +52,13 @@ spec:
       {{- end }}
       {{- if $agentEnabled }}
       initContainers:
-        - name: vault-agent
-          image: {{ include "genesis.image" .Values.vault.agent.image | quote }}
-          imagePullPolicy: {{ .Values.vault.agent.image.pullPolicy }}
-          command: [{{ ternary "/usr/bin/bao" "/bin/vault" $openbao | quote }}]
+        - name: openbao-agent
+          image: {{ include "genesis.image" .Values.openbao.agent.image | quote }}
+          imagePullPolicy: {{ .Values.openbao.agent.image.pullPolicy }}
+          command: ["/usr/bin/bao"]
           args:
             - agent
-            - -config=/vault/config/agent.hcl
+            - -config=/openbao/config/agent.hcl
           restartPolicy: Always
           securityContext:
             runAsNonRoot: true
@@ -75,20 +73,20 @@ spec:
             - name: HOME
               value: /tmp
           volumeMounts:
-            - name: vault-agent-config
-              mountPath: /vault/config
+            - name: openbao-agent-config
+              mountPath: /openbao/config
               readOnly: true
-            {{- if .Values.vault.agent.ca.existingConfigMap }}
-            - name: vault-agent-ca
-              mountPath: /vault/ca
+            {{- if .Values.openbao.agent.ca.existingConfigMap }}
+            - name: openbao-agent-ca
+              mountPath: /openbao/ca
               readOnly: true
             {{- end }}
-            - name: vault-agent-token
-              mountPath: /var/run/secrets/vault-token
+            - name: openbao-agent-token
+              mountPath: /var/run/secrets/openbao-token
               readOnly: true
-            - name: vault-agent-socket
+            - name: openbao-agent-socket
               mountPath: {{ $agentSocketDir | quote }}
-            - name: vault-agent-scratch
+            - name: openbao-agent-scratch
               mountPath: /tmp
             {{- if $agentManagesTls }}
             - name: tls-bundle
@@ -100,11 +98,11 @@ spec:
                 - sh
                 - -c
                 - '{{ include "genesis.agentProbeCommand" . | trim }}'
-            periodSeconds: {{ .Values.vault.agent.startupProbe.periodSeconds }}
-            timeoutSeconds: {{ .Values.vault.agent.startupProbe.timeoutSeconds }}
-            failureThreshold: {{ .Values.vault.agent.startupProbe.failureThreshold }}
+            periodSeconds: {{ .Values.openbao.agent.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.openbao.agent.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.openbao.agent.startupProbe.failureThreshold }}
           resources:
-            {{- toYaml .Values.vault.agent.resources | nindent 12 }}
+            {{- toYaml .Values.openbao.agent.resources | nindent 12 }}
       {{- end }}
       containers:
         - name: genesis
@@ -141,56 +139,54 @@ spec:
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
 
-            - name: GENESIS_{{ $prefix }}_URL
-              value: {{ .Values.vault.url | quote }}
-            {{- if ne .Values.vault.authMethod "auto" }}
-            - name: GENESIS_{{ $prefix }}_AUTH_METHOD
-              value: {{ .Values.vault.authMethod | quote }}
+            - name: GENESIS_OPENBAO_URL
+              value: {{ .Values.openbao.url | quote }}
+            {{- if ne .Values.openbao.authMethod "auto" }}
+            - name: GENESIS_OPENBAO_AUTH_METHOD
+              value: {{ .Values.openbao.authMethod | quote }}
             {{- if $nativeEnabled }}
-            - name: GENESIS_{{ $prefix }}_KUBERNETES_AUTH_MOUNT
-              value: {{ .Values.vault.kubernetes.authMount | quote }}
-            - name: GENESIS_{{ $prefix }}_KUBERNETES_ROLE
-              value: {{ .Values.vault.kubernetes.role | quote }}
-            - name: GENESIS_{{ $prefix }}_KUBERNETES_TOKEN_PATH
-              value: {{ .Values.vault.kubernetes.tokenPath | quote }}
+            - name: GENESIS_OPENBAO_KUBERNETES_AUTH_MOUNT
+              value: {{ .Values.openbao.kubernetes.authMount | quote }}
+            - name: GENESIS_OPENBAO_KUBERNETES_ROLE
+              value: {{ .Values.openbao.kubernetes.role | quote }}
+            - name: GENESIS_OPENBAO_KUBERNETES_TOKEN_PATH
+              value: {{ .Values.openbao.kubernetes.tokenPath | quote }}
             {{- end }}
             {{- end }}
-            {{- if $vaultRoleIdSecret }}
-            - name: GENESIS_{{ $prefix }}_ROLE_ID
+            {{- if $openbaoRoleIdSecret }}
+            - name: GENESIS_OPENBAO_ROLE_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ $vaultRoleIdSecret | quote }}
-                  key: {{ .Values.vault.roleId.secretKey | quote }}
-            {{- else if .Values.vault.roleId.value }}
-            - name: GENESIS_{{ $prefix }}_ROLE_ID
-              value: {{ .Values.vault.roleId.value | quote }}
+                  name: {{ $openbaoRoleIdSecret | quote }}
+                  key: {{ .Values.openbao.roleId.secretKey | quote }}
+            {{- else if .Values.openbao.roleId.value }}
+            - name: GENESIS_OPENBAO_ROLE_ID
+              value: {{ .Values.openbao.roleId.value | quote }}
             {{- end }}
-            {{- if $vaultSecretIdSecret }}
-            - name: GENESIS_{{ $prefix }}_SECRET_ID
+            {{- if $openbaoSecretIdSecret }}
+            - name: GENESIS_OPENBAO_SECRET_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ $vaultSecretIdSecret | quote }}
-                  key: {{ .Values.vault.secretId.secretKey | quote }}
-            {{- else if .Values.vault.secretId.value }}
-            - name: GENESIS_{{ $prefix }}_SECRET_ID
-              value: {{ .Values.vault.secretId.value | quote }}
+                  name: {{ $openbaoSecretIdSecret | quote }}
+                  key: {{ .Values.openbao.secretId.secretKey | quote }}
+            {{- else if .Values.openbao.secretId.value }}
+            - name: GENESIS_OPENBAO_SECRET_ID
+              value: {{ .Values.openbao.secretId.value | quote }}
             {{- end }}
-            {{- if .Values.vault.wrappedToken.existingSecret }}
-            - name: GENESIS_{{ $prefix }}_WRAPPED_TOKEN
+            {{- if .Values.openbao.wrappedToken.existingSecret }}
+            - name: GENESIS_OPENBAO_WRAPPED_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.vault.wrappedToken.existingSecret | quote }}
-                  key: {{ .Values.vault.wrappedToken.secretKey | quote }}
-            {{- else if .Values.vault.wrappedToken.value }}
-            - name: GENESIS_{{ $prefix }}_WRAPPED_TOKEN
-              value: {{ .Values.vault.wrappedToken.value | quote }}
+                  name: {{ .Values.openbao.wrappedToken.existingSecret | quote }}
+                  key: {{ .Values.openbao.wrappedToken.secretKey | quote }}
+            {{- else if .Values.openbao.wrappedToken.value }}
+            - name: GENESIS_OPENBAO_WRAPPED_TOKEN
+              value: {{ .Values.openbao.wrappedToken.value | quote }}
             {{- end }}
-            {{- if $openbao }}
             - name: GENESIS_ADMISSION_SIGNING_VERSION
               value: {{ .Values.admissionSigningVersion | int64 | quote }}
-            {{- end }}
             - name: GENESIS_TRANSIT_MOUNT
-              value: {{ .Values.vault.transitMount | quote }}
+              value: {{ .Values.openbao.transitMount | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -206,13 +202,13 @@ spec:
               readOnly: true
             {{- end }}
             {{- if $agentEnabled }}
-            - name: vault-agent-socket
+            - name: openbao-agent-socket
               mountPath: {{ $agentSocketDir | quote }}
               readOnly: true
             {{- end }}
             {{- if $nativeEnabled }}
-            - name: vault-native-token
-              mountPath: {{ include "genesis.pathDir" .Values.vault.kubernetes.tokenPath | quote }}
+            - name: openbao-native-token
+              mountPath: {{ include "genesis.pathDir" .Values.openbao.kubernetes.tokenPath | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -268,37 +264,37 @@ spec:
           {{- end }}
         {{- end }}
         {{- if $agentEnabled }}
-        - name: vault-agent-socket
+        - name: openbao-agent-socket
           emptyDir:
             medium: Memory
-        - name: vault-agent-config
+        - name: openbao-agent-config
           configMap:
             name: {{ include "genesis.agentConfigName" . | quote }}
-        - name: vault-agent-token
+        - name: openbao-agent-token
           projected:
             sources:
               - serviceAccountToken:
                   path: token
-                  audience: {{ .Values.vault.agent.auth.audience | quote }}
-                  expirationSeconds: {{ .Values.vault.agent.auth.tokenExpirationSeconds }}
+                  audience: {{ .Values.openbao.agent.auth.audience | quote }}
+                  expirationSeconds: {{ .Values.openbao.agent.auth.tokenExpirationSeconds }}
             defaultMode: 0400
-        {{- if .Values.vault.agent.ca.existingConfigMap }}
-        - name: vault-agent-ca
+        {{- if .Values.openbao.agent.ca.existingConfigMap }}
+        - name: openbao-agent-ca
           configMap:
-            name: {{ .Values.vault.agent.ca.existingConfigMap | quote }}
+            name: {{ .Values.openbao.agent.ca.existingConfigMap | quote }}
         {{- end }}
-        - name: vault-agent-scratch
+        - name: openbao-agent-scratch
           emptyDir:
             medium: Memory
         {{- end }}
         {{- if $nativeEnabled }}
-        - name: vault-native-token
+        - name: openbao-native-token
           projected:
             sources:
               - serviceAccountToken:
-                  path: {{ include "genesis.pathBase" .Values.vault.kubernetes.tokenPath | quote }}
-                  audience: {{ .Values.vault.kubernetes.audience | quote }}
-                  expirationSeconds: {{ .Values.vault.kubernetes.tokenExpirationSeconds }}
+                  path: {{ include "genesis.pathBase" .Values.openbao.kubernetes.tokenPath | quote }}
+                  audience: {{ .Values.openbao.kubernetes.audience | quote }}
+                  expirationSeconds: {{ .Values.openbao.kubernetes.tokenExpirationSeconds }}
             defaultMode: 0400
         {{- end }}
         {{- with .Values.extraVolumes }}

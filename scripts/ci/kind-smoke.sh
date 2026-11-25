@@ -138,7 +138,7 @@ kubectl rollout status deployment/web -n "$NS_WEB_RESTRICTED" --timeout=180s >/d
 pass "working-tree web chart Ready under Restricted PSA"
 
 # Backends: install without --wait; pods must be admitted but will NOT become
-# Ready (no Vault/DB/TLS in the smoke environment).
+# Ready (no OpenBao/DB/TLS in the smoke environment).
 for chart in permesi genesis; do
     ns="kind-smoke-${chart}"
     kubectl create namespace "$ns" >/dev/null || die_check "create namespace ${ns}"
@@ -147,9 +147,12 @@ for chart in permesi genesis; do
         pod-security.kubernetes.io/enforce-version=latest >/dev/null \
         || die_check "label namespace ${ns} as restricted"
 
-    helm install "$chart" "charts/$chart" -n "$ns" --set replicaCount=1 --timeout 5m >/dev/null \
+    # Genesis requires the activated admission signing version on every render.
+    extra=()
+    [[ "$chart" == genesis ]] && extra=(--set admissionSigningVersion=1)
+    helm install "$chart" "charts/$chart" -n "$ns" --set replicaCount=1 "${extra[@]}" --timeout 5m >/dev/null \
         || die_check "install ${chart} chart under Restricted PSA"
-    echo "note: ${chart} pods are not expected to become Ready (no Vault/DB/TLS)"
+    echo "note: ${chart} pods are not expected to become Ready (no OpenBao/DB/TLS)"
 
     pod_name=""
     for ((i = 0; i < 30; i++)); do

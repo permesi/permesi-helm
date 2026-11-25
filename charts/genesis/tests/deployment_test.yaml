@@ -3,6 +3,8 @@ release:
   name: my-release
 templates:
   - deployment.yaml
+values:
+  - published-values.yaml
 tests:
   - it: renders default termination grace of 60 seconds
     asserts:

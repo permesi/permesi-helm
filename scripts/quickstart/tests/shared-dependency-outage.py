@@ -15,7 +15,7 @@ run, require = helpers["run"], helpers["require"]
 def trial(kube, prefix):
     # Each in-container watchdog resumes its own processes after a bounded interval,
     # including if the client disconnects. Existing ephemeral key material survives.
-    tls = ssl.create_default_context(cadata=run(kube + ["exec", "deploy/" + prefix + "-vault", "-c", "vault",
+    tls = ssl.create_default_context(cadata=run(kube + ["exec", "deploy/" + prefix + "-openbao", "-c", "openbao",
         "--", "bao", "read", "-field=certificate", "pki-root/cert/ca"]))
     with ExitStack() as stack:
         endpoints = []
@@ -39,10 +39,10 @@ def trial(kube, prefix):
                     response.read()
                     return response.status
         pause = runpy.run_path(str(Path(__file__).with_name("kind-pause.py")))["paused"]
-        selector = json.loads(run(kube + ["get", "deploy", prefix + "-vault", "-o", "json"]))["spec"]["selector"]["matchLabels"]
+        selector = json.loads(run(kube + ["get", "deploy", prefix + "-openbao", "-o", "json"]))["spec"]["selector"]["matchLabels"]
         pods = json.loads(run(kube + ["get", "pods", "-l", ",".join(k + "=" + v for k, v in selector.items()), "-o", "json"]))
-        vault, = [p["metadata"]["name"] for p in pods["items"] if "deletionTimestamp" not in p["metadata"]]
-        with pause(kube, prefix + "-postgresql-0", "postgresql", 24), pause(kube, vault, "vault", 22):
+        openbao, = [p["metadata"]["name"] for p in pods["items"] if "deletionTimestamp" not in p["metadata"]]
+        with pause(kube, prefix + "-postgresql-0", "postgresql", 24), pause(kube, openbao, "openbao", 22):
             end = time.monotonic() + 16
             while time.monotonic() < end:
                 if all(status(e, "/ready") == 503 for e in endpoints):

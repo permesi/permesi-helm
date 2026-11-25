@@ -50,12 +50,12 @@ capabilities:
 {{- .Values.postgresql.service.name | default (printf "%s-postgresql" (include "quickstart.fullname" .)) -}}
 {{- end -}}
 
-{{- define "quickstart.vaultServiceName" -}}
-{{- .Values.vault.service.name | default (printf "%s-vault" (include "quickstart.fullname" .)) -}}
+{{- define "quickstart.openbaoServiceName" -}}
+{{- .Values.openbao.service.name | default (printf "%s-openbao" (include "quickstart.fullname" .)) -}}
 {{- end -}}
 
-{{- define "quickstart.vaultAddr" -}}
-{{- printf "http://%s.%s.svc:%v" (include "quickstart.vaultServiceName" .) .Release.Namespace .Values.vault.service.port -}}
+{{- define "quickstart.openbaoAddr" -}}
+{{- printf "http://%s.%s.svc:%v" (include "quickstart.openbaoServiceName" .) .Release.Namespace .Values.openbao.service.port -}}
 {{- end -}}
 
 {{- define "quickstart.image" -}}

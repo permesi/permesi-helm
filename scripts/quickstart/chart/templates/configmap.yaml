@@ -12,7 +12,7 @@ data:
       options { file_path = "/audit/entry-audit.json" }
     }
   {{- end }}
-  {{- range $f := list "fetch-schema.sh" "sql-bootstrap.sh" "vault-bootstrap.sh" "generate-credentials.sh" "start-dev-vault.sh" }}
+  {{- range $f := list "fetch-schema.sh" "sql-bootstrap.sh" "openbao-bootstrap.sh" "generate-credentials.sh" "start-dev-openbao.sh" }}
   {{ $f }}: |
     {{- $.Files.Get (printf "files/%s" $f) | nindent 4 }}
   {{- end }}

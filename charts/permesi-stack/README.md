@@ -58,7 +58,7 @@ helm --kube-context kind-permesi-helm-test upgrade --install permesi charts/perm
 
 Use a namespace you own; if it already exists, inspect it rather than treating it
 as disposable. By default Helm needs cluster-scoped reviewer RBAC creation
-permission; a pregranted Vault-only binding supports a namespaced installer
+permission; a pregranted OpenBao-only binding supports a namespaced installer
 (set `quickstart.rbac.createTokenReviewBinding=false`; see the installation guide).
 Kubernetes ≥1.29 with native sidecars and Linux/amd64 are the
 tested requirements. The profile configures Agent, canonical SQL bootstrap,
@@ -66,16 +66,16 @@ service identities, DSNs, exact SANs, admission trust, outbox-only `example.test
 signup and public browser URLs. No sibling-value mutation is used.
 
 The parent rejects enabled quickstart without a complete coherent application
-profile, mismatched service/SA/Vault/DB/PKI/admission wiring and unsafe overrides.
+profile, mismatched service/SA/OpenBao/DB/PKI/admission wiring and unsafe overrides.
 Helper schema rejects unsupported persistence, production mode, replicas and
 public infrastructure settings. Bootstrap Jobs are ordinary resources, not
 post-install hooks; **`--wait --wait-for-jobs` is required** so failed SQL/archive/
-Vault bootstrap fails the Helm operation. Do not infer success from web/dependency
+OpenBao bootstrap fails the Helm operation. Do not infer success from web/dependency
 readiness alone.
 
 Other releases/namespaces require a complete explicit override of component and
-helper names/SAs, namespace-qualified DSNs, Vault addresses, PKI CN/SANs and
-PASERK URL. Changing only `-n` or the release name is not sufficient.
+helper names/SAs, namespace-qualified DSNs, OpenBao addresses and PKI CN/SANs.
+Changing only `-n` or the release name is not sufficient.
 `tests/alternate-values.yaml` demonstrates release `atlas` in `uq-alt` with
 custom Services and SAs; it is a source-tree test fixture, not packaged guidance.
 
@@ -117,11 +117,11 @@ leases, checks fail-closed container restart/new pool identities and real
 admission recovery; run it only against a disposable installation.
 
 This is **development only**: single ephemeral PostgreSQL and in-memory HTTP dev
-Vault, no HA/backups/pg_cron/production support. Bootstrap administrator/owner/root
+OpenBao, no HA/backups/pg_cron/production support. Bootstrap administrator/owner/root
 credentials use a retained, narrowly mounted Kubernetes Secret; application
 TLS/DB/AppRole secrets are not synchronized to Kubernetes. The helper filters
-root-token/unseal-key dev banner lines without hiding other Vault diagnostics.
-Lost Vault with retained databases is not repaired by generating replacement seeds.
+root-token/unseal-key dev banner lines without hiding other OpenBao diagnostics.
+Lost OpenBao with retained databases is not repaired by generating replacement seeds.
 Outbox signup is not delivered email, verified login, OIDC E2E or browser/WASM
 qualification. See [current quickstart qualifications](../../docs/operations.md#11-quickstart-qualification-and-known-boundaries).
 
@@ -144,7 +144,7 @@ an unrelated namespace/cluster.
 The umbrella-managed image blocks (`permesi.image`, `genesis.image`, `web.image`)
 accept an optional `digest` (`sha256:<64 hex>`). When set, the chart renders
 `repository@digest`; a tag change does not override it. Clear the digest to return
-to `repository:tag`. Backend `vault.agent.image.digest` is pinned independently.
+to `repository:tag`. Backend `openbao.agent.image.digest` is pinned independently.
 See [release procedures](../../docs/operations.md#10-release-and-image-identity)
 for digest clearing and independent app/chart version handling.
 
@@ -153,30 +153,19 @@ for digest clearing and independent app/chart version handling.
 A tested, internally consistent production profile is provided at
 [`docs/examples/production-stack.yaml`](../../docs/examples/production-stack.yaml);
 see [`docs/operations.md`](../../docs/operations.md) for the matching operational
-runbook (Vault, TLS, split trust, HA, NetworkPolicy, upgrades). A Vault Agent
+runbook (OpenBao, TLS, split trust, HA, NetworkPolicy, upgrades). An OpenBao Agent
 profile (Kubernetes auth + PKI, no TLS/AppRole Secrets) is at
-[`docs/examples/vault-agent-stack.yaml`](../../docs/examples/vault-agent-stack.yaml),
+[`docs/examples/openbao-shared.yaml`](../../docs/examples/openbao-shared.yaml),
 with the step-by-step manual guide at
 [`docs/install-guide.md`](../../docs/install-guide.md).
 
-## Release-name-dependent Genesis DNS
+## Admission trust and Genesis signing version
 
-The Genesis `Service` and `Deployment` names include the release name: a release
-named `permesi` in namespace `permesi` creates `permesi-genesis`, not `genesis`
-(`charts/genesis/templates/_helpers.tpl`, `charts/genesis/templates/service.yaml`).
-The umbrella chart supplies no `fullnameOverride`, so Permesi's admission keyset
-URL must use that generated name:
-
-```yaml
-permesi:
-  admission:
-    paserkUrl: https://permesi-genesis.permesi.svc.cluster.local:8080/paserk.json
-```
-
-In general, the endpoint is
-`https://<release>-genesis.<namespace>.svc.cluster.local:<genesis.service.port>/paserk.json`.
-If you override `genesis.fullnameOverride` or `genesis.nameOverride`, adjust the
-host to match the generated Service name (and its TLS certificate SAN). The
-chart's install `NOTES` print the actual URL and warn when
-`permesi.admission.paserkUrl` does not match it; an external or separately managed
-Genesis URL is still valid.
+Permesi reads the approved Genesis public keys and the minimum accepted version
+from the core OpenBao authority record (`secret/permesi/admission-authority`), not
+from a Genesis URL, so there is no keyset URL to wire between the components.
+Genesis requires an explicit `genesis.admissionSigningVersion`: the core operator
+publishes that key version to the authority before Genesis switches to it, and
+rendering fails without it. The Genesis `Service` and `Deployment` names still
+include the release name (a release `permesi` in namespace `permesi` creates
+`permesi-genesis`), which matters for its TLS SANs and browser hostname.

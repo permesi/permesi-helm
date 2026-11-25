@@ -26,10 +26,13 @@ def resources(result):
 
 
 # Disabled means the exact original component interfaces, not merely no Jobs.
-defaults = resources(render(CHART, "--set", "web.runtimeConfig.allowBuildDefaults=true"))
+# Genesis has no default admission signing version: the core operator publishes it.
+defaults = resources(render(CHART, "--set", "web.runtimeConfig.allowBuildDefaults=true",
+                            "--set", "genesis.admissionSigningVersion=1"))
 components = {}
 for name in ("permesi", "genesis", "web"):
-    args = ["--set", "runtimeConfig.allowBuildDefaults=true"] if name == "web" else []
+    args = {"web": ["--set", "runtimeConfig.allowBuildDefaults=true"],
+            "genesis": ["--set", "admissionSigningVersion=1"]}.get(name, [])
     components.update(resources(render(Path("charts") / name, *args)))
 assert defaults == components, "disabled umbrella must equal the three component renders"
 assert not any(k in ("Job", "StatefulSet", "ClusterRole", "ClusterRoleBinding") for k, _ in defaults)
@@ -48,11 +51,17 @@ print("PASS: enabled profile has ordinary bootstrap Jobs, internal Services and 
 # The helper's closed schema rejects unsupported pretend-production controls;
 # do not add a second parent implementation of these infrastructure settings.
 for value in (
-    "quickstart.vault.mode=production",
+    "quickstart.openbao.mode=production",
     "quickstart.postgresql.persistence.enabled=true",
     "quickstart.postgresql.replicaCount=2",
-    "quickstart.vault.service.type=LoadBalancer",
+    "quickstart.openbao.service.type=LoadBalancer",
 ):
     result = render(CHART, "-f", str(PROFILE), "--set", value)
     assert result.returncode != 0 and "Additional property" in result.stderr, value
 print("PASS: unsupported production/persistence/replica/public exposure controls fail schema validation")
+
+# HashiCorp Vault was removed: stale helper keys fail instead of being ignored.
+for value in ("quickstart.vault.image.tag=1.20.4", "quickstart.secretsProvider=vault"):
+    result = render(CHART, "-f", str(PROFILE), "--set", value)
+    assert result.returncode != 0 and "Additional property" in result.stderr, value
+print("PASS: removed Vault helper keys fail schema validation")

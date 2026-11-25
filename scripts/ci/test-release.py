@@ -239,8 +239,8 @@ class BumpTests(unittest.TestCase):
             self.assertEqual(standalone[svc]["image"]["digest"], "")
             self.assertEqual(stack[svc]["image"], standalone[svc]["image"])
             if svc != "web":
-                self.assertEqual(standalone[svc]["vault"]["agent"]["image"],
-                                 before[svc]["vault"]["agent"]["image"])
+                self.assertEqual(standalone[svc]["openbao"]["agent"]["image"],
+                                 before[svc]["openbao"]["agent"]["image"])
 
     def test_chart_only_retains_all_values_and_app_versions(self):
         self.full_digests()
@@ -263,6 +263,9 @@ class BumpTests(unittest.TestCase):
             ["0.4.5", "--digest", "unknown=" + d],
             ["0.4.5", "--digest", "permesi=" + d, "--digest", "permesi=" + d],
             ["0.4.5", "--tag-only", "--digest", "permesi=" + d],
+            ["0.6.0"],
+            ["0.6.0", "--tag-only"],
+            ["1.0.0", "--tag-only"],
             [f"$(touch {self.sentinel})"],
             ["--chart-version", "0.4.3", "0.4.5"],
             ["--chart-version", "bad", "--chart-version", "0.4.8", "0.4.5"],

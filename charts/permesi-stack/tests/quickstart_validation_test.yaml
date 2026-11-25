@@ -34,45 +34,45 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: serviceName/serviceAccount must match actual component names
-  - it: rejects a different Vault origin
+  - it: rejects a different OpenBao origin
     set:
-      genesis.vault.agent.address: http://external-vault:8200
+      genesis.openbao.agent.address: http://external-openbao:8200
     asserts:
       - failedTemplate:
           errorPattern: Agent address/auth must match bootstrap
   - it: rejects a different Kubernetes auth audience
     set:
-      genesis.vault.agent.auth.audience: wrong-audience
+      genesis.openbao.agent.auth.audience: wrong-audience
     asserts:
       - failedTemplate:
           errorPattern: Agent address/auth must match bootstrap
   - it: rejects a cross-service Kubernetes auth role
     set:
-      genesis.vault.agent.auth.role: permesi
+      genesis.openbao.agent.auth.role: permesi
     asserts:
       - failedTemplate:
           errorPattern: Agent address/auth must match bootstrap
   - it: rejects a cross-service PKI role
     set:
-      genesis.vault.agent.pki.role: permesi-runtime
+      genesis.openbao.agent.pki.role: permesi-runtime
     asserts:
       - failedTemplate:
           errorPattern: Agent PKI mount/role must match bootstrap
   - it: rejects an unauthorized certificate name
     set:
-      genesis.vault.agent.pki.commonName: evil.example.com
+      genesis.openbao.agent.pki.commonName: evil.example.com
     asserts:
       - failedTemplate:
           errorPattern: PKI commonName is outside bootstrap exact DNS names
   - it: rejects SANs missing the browser hostname
     set:
-      genesis.vault.agent.pki.dnsNames: [permesi-genesis.permesi-quickstart.svc.cluster.local]
+      genesis.openbao.agent.pki.dnsNames: [permesi-genesis.permesi-quickstart.svc.cluster.local]
     asserts:
       - failedTemplate:
           errorPattern: PKI SANs must include Service FQDN and browser hostname
   - it: rejects an unauthorized SAN
     set:
-      genesis.vault.agent.pki.dnsNames: [permesi-genesis.permesi-quickstart.svc.cluster.local, genesis.localhost, evil.example.com]
+      genesis.openbao.agent.pki.dnsNames: [permesi-genesis.permesi-quickstart.svc.cluster.local, genesis.localhost, evil.example.com]
     asserts:
       - failedTemplate:
           errorPattern: PKI SAN is outside bootstrap exact DNS names
@@ -104,26 +104,18 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: Genesis issuer/audience must match Permesi admission
-  - it: rejects a plaintext or external PASERK URL
+  - it: rejects the removed provider switch on the helper
     set:
-      permesi.secretsProvider: vault
-      genesis.secretsProvider: vault
       quickstart.secretsProvider: vault
-      permesi.vault.agent.paserkCa.enabled: true
-      permesi.admission.paserkUrl: http://permesi-genesis:8080/paserk.json
     asserts:
       - failedTemplate:
-          errorPattern: Genesis Service HTTPS PASERK URL
-  - it: rejects using an untrusted CA source for PASERK
+          errorPattern: Additional property secretsProvider is not allowed
+  - it: rejects the removed PASERK admission URL
     set:
-      permesi.secretsProvider: vault
-      genesis.secretsProvider: vault
-      quickstart.secretsProvider: vault
-      permesi.vault.agent.paserkCa.enabled: true
-      permesi.vault.agent.paserkCa.path: pki-root/cert/ca
+      permesi.admission.paserkUrl: https://permesi-genesis:8080/paserk.json
     asserts:
       - failedTemplate:
-          errorPattern: bootstrap CA chain
+          errorPattern: paserkUrl
   - it: rejects the unseeded browser client
     set:
       web.runtimeConfig.clientId: 11111111-1111-1111-1111-111111111111

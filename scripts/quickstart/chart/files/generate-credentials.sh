@@ -14,7 +14,7 @@ export SSL_CERT_FILE="${SA_DIR}/ca.crt"
 
 # 32 base64url characters (safe in .pgpass, SQL literals and URLs).
 gen() { head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'; }
-# Vault rejects custom root token IDs carrying a token-type prefix ("hvs.");
+# OpenBao rejects custom root token IDs carrying a token-type prefix;
 # 48 hex characters are a valid custom ID.
 gen_token() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 
@@ -26,8 +26,8 @@ cat > "${body}" <<EOF
  "metadata":{"name":"${SECRET_NAME}","namespace":"${NAMESPACE}",
   "labels":{"app.kubernetes.io/name":"permesi-quickstart","app.kubernetes.io/instance":"${INSTANCE}","app.kubernetes.io/component":"bootstrap-credentials"},
   "annotations":{"permesi.dev/lifecycle":"bootstrap-only development credentials; not Helm-owned; delete for a dev reset"}},
- "stringData":{"postgres-admin-password":"$(gen)","vault-root-token":"$(gen_token)",
-  "vault-permesi-password":"$(gen)","vault-genesis-password":"$(gen)"}}
+ "stringData":{"postgres-admin-password":"$(gen)","openbao-root-token":"$(gen_token)",
+  "openbao-permesi-password":"$(gen)","openbao-genesis-password":"$(gen)"}}
 EOF
 
 # The bearer token is visible only inside this single-purpose container.

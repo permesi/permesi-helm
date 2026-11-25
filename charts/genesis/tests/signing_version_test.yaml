@@ -1,0 +1,18 @@
+suite: genesis admission signing version
+release:
+  name: my-release
+templates:
+  - deployment.yaml
+# No published-values baseline: the chart defaults carry no signing version.
+tests:
+  - it: requires an explicit admission signing version
+    asserts:
+      - failedTemplate:
+          errorPattern: "requires an explicit admissionSigningVersion"
+
+  - it: rejects a zero signing version through the schema
+    set:
+      admissionSigningVersion: 0
+    asserts:
+      - failedTemplate:
+          errorPattern: "admissionSigningVersion"

@@ -4,7 +4,7 @@
 {{- $svc := .Values.bootstrap.services -}}
 {{- $roles := .Values.bootstrap.kubernetesRoles -}}
 # Ordered bootstrap: schema acquisition -> PostgreSQL bootstrap/verification
-# (postgres image) -> Vault provisioning (vault image). One Job per Helm
+# (postgres image) -> OpenBao provisioning (OpenBao image). One Job per Helm
 # revision, so every install/upgrade re-runs the idempotent bootstrap.
 apiVersion: batch/v1
 kind: Job
@@ -46,8 +46,8 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: schema-acquisition
-          image: {{ include "quickstart.image" .Values.vault.image }}
-          imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
+          image: {{ include "quickstart.image" .Values.openbao.image }}
+          imagePullPolicy: {{ .Values.openbao.image.pullPolicy }}
           command: ["sh", "/scripts/fetch-schema.sh"]
           env:
             - name: SCHEMA_URL
@@ -76,8 +76,6 @@ spec:
           imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
           command: ["bash", "/scripts/sql-bootstrap.sh"]
           env:
-            - name: SECRETS_PROVIDER
-              value: {{ .Values.secretsProvider | quote }}
             - name: PG_HOST
               value: {{ include "quickstart.postgresqlServiceName" . | quote }}
             - name: PG_PORT
@@ -104,24 +102,22 @@ spec:
               mountPath: /credentials
               readOnly: true
       containers:
-        - name: vault-bootstrap
-          image: {{ include "quickstart.image" .Values.vault.image }}
-          imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
-          command: ["sh", "/scripts/vault-bootstrap.sh"]
+        - name: openbao-bootstrap
+          image: {{ include "quickstart.image" .Values.openbao.image }}
+          imagePullPolicy: {{ .Values.openbao.image.pullPolicy }}
+          command: ["sh", "/scripts/openbao-bootstrap.sh"]
           env:
-            - name: VAULT_ADDR
-              value: {{ include "quickstart.vaultAddr" . | quote }}
-            - name: VAULT_PUBLIC_ADDR
-              value: {{ include "quickstart.vaultAddr" . | quote }}
-            - name: VAULT_TOKEN
+            - name: BAO_ADDR
+              value: {{ include "quickstart.openbaoAddr" . | quote }}
+            - name: OPENBAO_PUBLIC_ADDR
+              value: {{ include "quickstart.openbaoAddr" . | quote }}
+            - name: BAO_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ $creds }}
-                  key: vault-root-token
+                  key: openbao-root-token
             - name: HOME
               value: /tmp
-            - name: SECRETS_PROVIDER
-              value: {{ .Values.secretsProvider | quote }}
             - name: PG_HOST
               value: {{ printf "%s.%s.svc" (include "quickstart.postgresqlServiceName" .) .Release.Namespace | quote }}
             - name: PG_PORT
@@ -165,13 +161,13 @@ spec:
             - name: policies
               mountPath: /policies
               readOnly: true
-            - name: vault-tmp
+            - name: openbao-tmp
               mountPath: /tmp
             - name: state
               mountPath: /state
               readOnly: true
             # Owner passwords used only for the managers' initial configuration.
-            - name: vault-credentials
+            - name: openbao-credentials
               mountPath: /credentials
               readOnly: true
       volumes:
@@ -195,7 +191,7 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 8Mi
-        - name: vault-tmp
+        - name: openbao-tmp
           emptyDir:
             medium: Memory
             sizeLimit: 8Mi
@@ -205,15 +201,15 @@ spec:
             defaultMode: 0440
             items:
               - {key: postgres-admin-password, path: postgres-admin-password}
-              - {key: vault-permesi-password, path: vault-permesi-password}
-              - {key: vault-genesis-password, path: vault-genesis-password}
-        - name: vault-credentials
+              - {key: openbao-permesi-password, path: openbao-permesi-password}
+              - {key: openbao-genesis-password, path: openbao-genesis-password}
+        - name: openbao-credentials
           secret:
             secretName: {{ $creds }}
             defaultMode: 0440
             items:
-              - {key: vault-permesi-password, path: vault-permesi-password}
-              - {key: vault-genesis-password, path: vault-genesis-password}
+              - {key: openbao-permesi-password, path: openbao-permesi-password}
+              - {key: openbao-genesis-password, path: openbao-genesis-password}
         {{- range $i, $cm := $schema.existingConfigMaps }}
         - name: sql-input-{{ $i }}
           configMap:

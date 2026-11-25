@@ -1,4 +1,4 @@
-suite: genesis native Vault authentication
+suite: genesis native OpenBao authentication
 release:
   name: genesis
   namespace: genesis
@@ -19,74 +19,74 @@ tests:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_AUTH_METHOD
+        name: GENESIS_OPENBAO_AUTH_METHOD
         value: kubernetes
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_KUBERNETES_ROLE
+        name: GENESIS_OPENBAO_KUBERNETES_ROLE
         value: genesis-runtime
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_KUBERNETES_AUTH_MOUNT
+        name: GENESIS_OPENBAO_KUBERNETES_AUTH_MOUNT
         value: kubernetes
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_KUBERNETES_TOKEN_PATH
-        value: /var/run/secrets/vault-native/token
+        name: GENESIS_OPENBAO_KUBERNETES_TOKEN_PATH
+        value: /var/run/secrets/openbao-native/token
   - equal:
       path: spec.template.spec.volumes
       value:
-      - name: vault-native-token
+      - name: openbao-native-token
         projected:
           sources:
           - serviceAccountToken:
               path: token
-              audience: vault
+              audience: openbao
               expirationSeconds: 3600
           defaultMode: 256
   - equal:
       path: spec.template.spec.containers[0].volumeMounts
       value:
-      - name: vault-native-token
-        mountPath: /var/run/secrets/vault-native
+      - name: openbao-native-token
+        mountPath: /var/run/secrets/openbao-native
         readOnly: true
   - notExists:
-      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_VAULT_ROLE_ID")]
+      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_OPENBAO_ROLE_ID")]
   - notExists:
-      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_VAULT_SECRET_ID")]
+      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_OPENBAO_SECRET_ID")]
   - notExists:
-      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_VAULT_WRAPPED_TOKEN")]
+      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_OPENBAO_WRAPPED_TOKEN")]
 - it: uses the requested token filename directory audience and lifetime
   set:
-    vault.kubernetes.tokenPath: /run/native-jwt/projected.jwt
-    vault.kubernetes.authMount: teams/cluster-1
-    vault.kubernetes.audience: vault-native
-    vault.kubernetes.tokenExpirationSeconds: 600
+    openbao.kubernetes.tokenPath: /run/native-jwt/projected.jwt
+    openbao.kubernetes.authMount: teams/cluster-1
+    openbao.kubernetes.audience: openbao-native
+    openbao.kubernetes.tokenExpirationSeconds: 600
   asserts:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_KUBERNETES_AUTH_MOUNT
+        name: GENESIS_OPENBAO_KUBERNETES_AUTH_MOUNT
         value: teams/cluster-1
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_KUBERNETES_TOKEN_PATH
+        name: GENESIS_OPENBAO_KUBERNETES_TOKEN_PATH
         value: /run/native-jwt/projected.jwt
   - contains:
       path: spec.template.spec.containers[0].volumeMounts
       content:
-        name: vault-native-token
+        name: openbao-native-token
         mountPath: /run/native-jwt
         readOnly: true
   - equal:
       path: spec.template.spec.volumes[0].projected.sources[0].serviceAccountToken
       value:
         path: projected.jwt
-        audience: vault-native
+        audience: openbao-native
         expirationSeconds: 600
 - it: allows native authentication alongside an existing TLS Secret
   set:
@@ -104,8 +104,8 @@ tests:
   - contains:
       path: spec.template.spec.containers[0].volumeMounts
       content:
-        name: vault-native-token
-        mountPath: /var/run/secrets/vault-native
+        name: openbao-native-token
+        mountPath: /var/run/secrets/openbao-native
         readOnly: true
   - notExists:
       path: spec.template.spec.initContainers
@@ -143,24 +143,24 @@ tests:
       path: spec.template.spec.initContainers
 - it: renders explicit AppRole authentication without a native JWT volume
   set:
-    vault.authMethod: approle
-    vault.roleId.value: fixture-role
-    vault.secretId.existingSecret: fixture-credentials
+    openbao.authMethod: approle
+    openbao.roleId.value: fixture-role
+    openbao.secretId.existingSecret: fixture-credentials
   asserts:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_AUTH_METHOD
+        name: GENESIS_OPENBAO_AUTH_METHOD
         value: approle
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_ROLE_ID
+        name: GENESIS_OPENBAO_ROLE_ID
         value: fixture-role
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_SECRET_ID
+        name: GENESIS_OPENBAO_SECRET_ID
         valueFrom:
           secretKeyRef:
             name: fixture-credentials
@@ -171,83 +171,83 @@ tests:
       path: spec.template.spec.containers[0].volumeMounts
 - it: preserves legacy auto socket mode without new auth flags or a projected JWT
   set:
-    vault.authMethod: auto
-    vault.url: /var/run/secrets/vaultproject.io/agent.sock
+    openbao.authMethod: auto
+    openbao.url: /var/run/secrets/openbao/agent.sock
   asserts:
   - notExists:
-      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_VAULT_AUTH_METHOD")]
+      path: spec.template.spec.containers[0].env[?(@.name == "GENESIS_OPENBAO_AUTH_METHOD")]
   - notExists:
       path: spec.template.spec.volumes
   - notExists:
       path: spec.template.spec.containers[0].volumeMounts
-- it: requires a native Vault role
+- it: requires a native OpenBao role
   set:
-    vault.kubernetes.role: ''
+    openbao.kubernetes.role: ''
   asserts:
   - failedTemplate:
-      errorPattern: vault.kubernetes.role must be set
-- it: rejects a whitespace-only native Vault role
+      errorPattern: openbao.kubernetes.role must be set
+- it: rejects a whitespace-only native OpenBao role
   set:
-    vault.kubernetes.role: '   '
+    openbao.kubernetes.role: '   '
   asserts:
   - failedTemplate:
-      errorPattern: vault.kubernetes.role must be set
+      errorPattern: openbao.kubernetes.role must be set
 - it: rejects socket in native mode
   set:
-    vault.url: /run/vault/agent.sock
+    openbao.url: /run/openbao/agent.sock
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin
+      errorPattern: TCP OpenBao URL origin
 - it: rejects Unix URL in native mode
   set:
-    vault.url: unix:///run/vault/agent.sock
+    openbao.url: unix:///run/openbao/agent.sock
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin
+      errorPattern: TCP OpenBao URL origin
 - it: rejects non-origin path in native mode
   set:
-    vault.url: https://vault.example.com/v1
+    openbao.url: https://openbao.example.com/v1
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin
+      errorPattern: TCP OpenBao URL origin
 - it: rejects query in native mode
   set:
-    vault.url: https://vault.example.com?x=1
+    openbao.url: https://openbao.example.com?x=1
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin
+      errorPattern: TCP OpenBao URL origin
 - it: rejects credentials in native mode
   set:
-    vault.url: https://user:pass@vault.example.com
+    openbao.url: https://user:pass@openbao.example.com
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin
+      errorPattern: TCP OpenBao URL origin
 - it: rejects empty hostname in native mode
   set:
-    vault.url: https://:8200
+    openbao.url: https://:8200
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin
+      errorPattern: TCP OpenBao URL origin
 - it: rejects an Agent alongside native auth
   set:
-    vault.agent.enabled: true
+    openbao.agent.enabled: true
   asserts:
   - failedTemplate:
-      errorPattern: vault.agent.enabled requires vault.authMethod=auto
+      errorPattern: openbao.agent.enabled requires openbao.authMethod=auto
 - it: rejects an Agent alongside explicit AppRole auth
   set:
-    vault.authMethod: approle
-    vault.agent.enabled: true
+    openbao.authMethod: approle
+    openbao.agent.enabled: true
   asserts:
   - failedTemplate:
-      errorPattern: vault.agent.enabled requires vault.authMethod=auto
+      errorPattern: openbao.agent.enabled requires openbao.authMethod=auto
 - it: rejects explicit AppRole auth over a socket
   set:
-    vault.authMethod: approle
-    vault.url: /run/vault/agent.sock
+    openbao.authMethod: approle
+    openbao.url: /run/openbao/agent.sock
   asserts:
   - failedTemplate:
-      errorPattern: approle requires a TCP Vault URL
+      errorPattern: approle requires a TCP OpenBao URL
 - it: requires automatic service-account token mounting to be disabled
   set:
     serviceAccount.automount: true
@@ -256,136 +256,136 @@ tests:
       errorPattern: serviceAccount.automount must be false
 - it: rejects native mode with roleId.value
   set:
-    vault.roleId.value: fixture-credential
+    openbao.roleId.value: fixture-credential
   asserts:
   - failedTemplate:
       errorPattern: roleId/secretId/wrappedToken must not be set
 - it: rejects native mode with roleId.existingSecret
   set:
-    vault.roleId.existingSecret: fixture-credential
+    openbao.roleId.existingSecret: fixture-credential
   asserts:
   - failedTemplate:
       errorPattern: roleId/secretId/wrappedToken must not be set
 - it: rejects native mode with secretId.value
   set:
-    vault.secretId.value: fixture-credential
+    openbao.secretId.value: fixture-credential
   asserts:
   - failedTemplate:
       errorPattern: roleId/secretId/wrappedToken must not be set
 - it: rejects native mode with secretId.existingSecret
   set:
-    vault.secretId.existingSecret: fixture-credential
+    openbao.secretId.existingSecret: fixture-credential
   asserts:
   - failedTemplate:
       errorPattern: roleId/secretId/wrappedToken must not be set
 - it: rejects native mode with wrappedToken.value
   set:
-    vault.wrappedToken.value: fixture-credential
+    openbao.wrappedToken.value: fixture-credential
   asserts:
   - failedTemplate:
       errorPattern: roleId/secretId/wrappedToken must not be set
 - it: rejects native mode with wrappedToken.existingSecret
   set:
-    vault.wrappedToken.existingSecret: fixture-credential
+    openbao.wrappedToken.existingSecret: fixture-credential
   asserts:
   - failedTemplate:
       errorPattern: roleId/secretId/wrappedToken must not be set
-- it: rejects Vault ESO credentials
+- it: rejects OpenBao ESO credentials
   set:
     externalSecret.enabled: true
-    externalSecret.store: vault
-    vault.externalSecret.remoteKey: approle
+    externalSecret.store: openbao
+    openbao.externalSecret.remoteKey: approle
   asserts:
   - failedTemplate:
-      errorPattern: vault.externalSecret.remoteKey must not be set
-- it: rejects dormant Vault ESO credential configuration
+      errorPattern: openbao.externalSecret.remoteKey must not be set
+- it: rejects dormant OpenBao ESO credential configuration
   set:
-    vault.externalSecret.remoteKey: approle
+    openbao.externalSecret.remoteKey: approle
   asserts:
   - failedTemplate:
-      errorPattern: vault.externalSecret.remoteKey must not be set
+      errorPattern: openbao.externalSecret.remoteKey must not be set
 - it: rejects token path relative/token
   set:
-    vault.kubernetes.tokenPath: relative/token
+    openbao.kubernetes.tokenPath: relative/token
   asserts:
   - failedTemplate:
       errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
 - it: rejects token path /token
   set:
-    vault.kubernetes.tokenPath: /token
+    openbao.kubernetes.tokenPath: /token
   asserts:
   - failedTemplate:
       errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
 - it: rejects token path /run/native/../token
   set:
-    vault.kubernetes.tokenPath: /run/native/../token
+    openbao.kubernetes.tokenPath: /run/native/../token
   asserts:
   - failedTemplate:
       errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
 - it: rejects token path /run/native/token/
   set:
-    vault.kubernetes.tokenPath: /run/native/token/
+    openbao.kubernetes.tokenPath: /run/native/token/
   asserts:
   - failedTemplate:
       errorPattern: tokenPath must be a normalized absolute file path inside a dedicated directory
 - it: rejects auth mount /v1/auth/kubernetes
   set:
-    vault.kubernetes.authMount: /v1/auth/kubernetes
+    openbao.kubernetes.authMount: /v1/auth/kubernetes
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects auth mount ../kubernetes
   set:
-    vault.kubernetes.authMount: ../kubernetes
+    openbao.kubernetes.authMount: ../kubernetes
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects auth mount team/../kubernetes
   set:
-    vault.kubernetes.authMount: team/../kubernetes
+    openbao.kubernetes.authMount: team/../kubernetes
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects auth mount team//kubernetes
   set:
-    vault.kubernetes.authMount: team//kubernetes
+    openbao.kubernetes.authMount: team//kubernetes
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects auth mount kubernetes?x=1
   set:
-    vault.kubernetes.authMount: kubernetes?x=1
+    openbao.kubernetes.authMount: kubernetes?x=1
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects an empty audience
   set:
-    vault.kubernetes.audience: ' '
+    openbao.kubernetes.audience: ' '
   asserts:
   - failedTemplate:
       errorPattern: audience must not be empty
 - it: rejects token lifetimes below the Kubernetes minimum
   set:
-    vault.kubernetes.tokenExpirationSeconds: 599
+    openbao.kubernetes.tokenExpirationSeconds: 599
   asserts:
   - failedTemplate:
       errorPattern: 'tokenExpirationSeconds: Must be greater than or equal to 600'
 - it: rejects token lifetimes above the chart bound
   set:
-    vault.kubernetes.tokenExpirationSeconds: 86401
+    openbao.kubernetes.tokenExpirationSeconds: 86401
   asserts:
   - failedTemplate:
       errorPattern: 'tokenExpirationSeconds: Must be less than or equal to 86400'
 - it: rejects unknown auth methods
   set:
-    vault.authMethod: unknown
+    openbao.authMethod: unknown
   asserts:
   - failedTemplate:
       errorPattern: 'authMethod: .*must be one of'
 - it: rejects reuse of the projected token volume name
   set:
     extraVolumes:
-    - name: vault-native-token
+    - name: openbao-native-token
       emptyDir: {}
   asserts:
   - failedTemplate:
@@ -393,22 +393,22 @@ tests:
 - it: rejects remounting the reserved projected token volume
   set:
     extraVolumeMounts:
-    - name: vault-native-token
+    - name: openbao-native-token
       mountPath: /run/other-token
   asserts:
   - failedTemplate:
       errorPattern: extraVolumeMounts must not use reserved volume names
-- it: rejects overlapping extra mount /var/run/secrets/vault-native
+- it: rejects overlapping extra mount /var/run/secrets/openbao-native
   set:
     extraVolumes:
     - name: collision
       emptyDir: {}
     extraVolumeMounts:
     - name: collision
-      mountPath: /var/run/secrets/vault-native
+      mountPath: /var/run/secrets/openbao-native
   asserts:
   - failedTemplate:
-      errorPattern: extraVolumeMounts must not overlap native Vault token
+      errorPattern: extraVolumeMounts must not overlap native OpenBao token
 - it: rejects overlapping extra mount /var/run/secrets
   set:
     extraVolumes:
@@ -419,81 +419,81 @@ tests:
       mountPath: /var/run/secrets
   asserts:
   - failedTemplate:
-      errorPattern: extraVolumeMounts must not overlap native Vault token
-- it: rejects overlapping extra mount /var/run/secrets/vault-native/child
+      errorPattern: extraVolumeMounts must not overlap native OpenBao token
+- it: rejects overlapping extra mount /var/run/secrets/openbao-native/child
   set:
     extraVolumes:
     - name: collision
       emptyDir: {}
     extraVolumeMounts:
     - name: collision
-      mountPath: /var/run/secrets/vault-native/child
+      mountPath: /var/run/secrets/openbao-native/child
   asserts:
   - failedTemplate:
-      errorPattern: extraVolumeMounts must not overlap native Vault token
-- it: rejects overlapping extra mount /var/run/secrets/vault-native/../vault-native
+      errorPattern: extraVolumeMounts must not overlap native OpenBao token
+- it: rejects overlapping extra mount /var/run/secrets/openbao-native/../openbao-native
   set:
     extraVolumes:
     - name: collision
       emptyDir: {}
     extraVolumeMounts:
     - name: collision
-      mountPath: /var/run/secrets/vault-native/../vault-native
+      mountPath: /var/run/secrets/openbao-native/../openbao-native
   asserts:
   - failedTemplate:
-      errorPattern: extraVolumeMounts must not overlap native Vault token
+      errorPattern: extraVolumeMounts must not overlap native OpenBao token
 - it: rejects token mounts hiding the TLS bundle
   set:
-    vault.kubernetes.tokenPath: /var/run/genesis/tls/token
+    openbao.kubernetes.tokenPath: /var/run/genesis/tls/token
   asserts:
   - failedTemplate:
-      errorPattern: native Vault token and application mount directories must not overlap
+      errorPattern: native OpenBao token and application mount directories must not overlap
 - it: rejects token mounts above a legacy TLS directory
   set:
-    vault.kubernetes.tokenPath: /var/run/genesis/token
+    openbao.kubernetes.tokenPath: /var/run/genesis/token
     tls.existingSecret: legacy-tls
   asserts:
   - failedTemplate:
-      errorPattern: native Vault token and application mount directories must not overlap
+      errorPattern: native OpenBao token and application mount directories must not overlap
 - it: rejects token mounts hiding the application listener socket
   set:
-    config.socketPath: /var/run/secrets/vault-native/app.sock
+    config.socketPath: /var/run/secrets/openbao-native/app.sock
     service.enabled: false
   asserts:
   - failedTemplate:
-      errorPattern: native Vault token and application mount directories must not overlap
-- it: rejects extraEnv override of VAULT_URL
+      errorPattern: native OpenBao token and application mount directories must not overlap
+- it: rejects extraEnv override of OPENBAO_URL
   set:
     extraEnv:
-    - name: GENESIS_VAULT_URL
+    - name: GENESIS_OPENBAO_URL
       value: override
   asserts:
   - failedTemplate:
-      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
-- it: rejects extraEnv override of VAULT_AUTH_METHOD
+      errorPattern: extraEnv must not override chart-managed OpenBao authentication or credentials
+- it: rejects extraEnv override of OPENBAO_AUTH_METHOD
   set:
     extraEnv:
-    - name: GENESIS_VAULT_AUTH_METHOD
+    - name: GENESIS_OPENBAO_AUTH_METHOD
       value: override
   asserts:
   - failedTemplate:
-      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
-- it: rejects extraEnv override of VAULT_KUBERNETES_TOKEN_PATH
+      errorPattern: extraEnv must not override chart-managed OpenBao authentication or credentials
+- it: rejects extraEnv override of OPENBAO_KUBERNETES_TOKEN_PATH
   set:
     extraEnv:
-    - name: GENESIS_VAULT_KUBERNETES_TOKEN_PATH
+    - name: GENESIS_OPENBAO_KUBERNETES_TOKEN_PATH
       value: override
   asserts:
   - failedTemplate:
-      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
-- it: rejects extraEnv override of VAULT_ROLE_ID
+      errorPattern: extraEnv must not override chart-managed OpenBao authentication or credentials
+- it: rejects extraEnv override of OPENBAO_ROLE_ID
   set:
     extraEnv:
-    - name: GENESIS_VAULT_ROLE_ID
+    - name: GENESIS_OPENBAO_ROLE_ID
       value: override
   asserts:
   - failedTemplate:
-      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+      errorPattern: extraEnv must not override chart-managed OpenBao authentication or credentials
 - it: rejects relative extra mounts that can shadow the native JWT
   set:
     extraVolumes:
@@ -501,90 +501,90 @@ tests:
       emptyDir: {}
     extraVolumeMounts:
     - name: shadow
-      mountPath: var/run/secrets/vault-native
+      mountPath: var/run/secrets/openbao-native
   asserts:
   - failedTemplate:
       errorPattern: extraVolumeMounts mountPath must be absolute
-- it: rejects chart-owned Vault URL overrides in explicit AppRole mode
+- it: rejects chart-owned OpenBao URL overrides in explicit AppRole mode
   set:
-    vault.authMethod: approle
-    vault.roleId.value: fixture-role
-    vault.secretId.value: fixture-secret
+    openbao.authMethod: approle
+    openbao.roleId.value: fixture-role
+    openbao.secretId.value: fixture-secret
     extraEnv:
-    - name: GENESIS_VAULT_URL
+    - name: GENESIS_OPENBAO_URL
       value: /run/agent.sock
   asserts:
   - failedTemplate:
-      errorPattern: extraEnv must not override chart-managed Vault authentication or credentials
+      errorPattern: extraEnv must not override chart-managed OpenBao authentication or credentials
 - it: rejects auth mount auth/kubernetes
   set:
-    vault.kubernetes.authMount: auth/kubernetes
+    openbao.kubernetes.authMount: auth/kubernetes
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects auth mount v1/auth/kubernetes
   set:
-    vault.kubernetes.authMount: v1/auth/kubernetes
+    openbao.kubernetes.authMount: v1/auth/kubernetes
   asserts:
   - failedTemplate:
-      errorPattern: authMount must be a relative Vault auth mount
+      errorPattern: authMount must be a relative OpenBao auth mount
 - it: rejects native origins with out-of-range ports
   set:
-    vault.url: https://vault.example.com:99999
+    openbao.url: https://openbao.example.com:99999
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin port must be within 0-65535
+      errorPattern: TCP OpenBao URL origin port must be within 0-65535
 - it: rejects native IPv6 origins with out-of-range ports
   set:
-    vault.url: https://[2001:db8::1]:65536/
+    openbao.url: https://[2001:db8::1]:65536/
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin port must be within 0-65535
+      errorPattern: TCP OpenBao URL origin port must be within 0-65535
 - it: rejects native origin ports too large for integer conversion
   set:
-    vault.url: https://vault.example.com:99999999999999999999
+    openbao.url: https://openbao.example.com:99999999999999999999
   asserts:
   - failedTemplate:
-      errorPattern: TCP Vault URL origin port must be within 0-65535
+      errorPattern: TCP OpenBao URL origin port must be within 0-65535
 - it: accepts the highest native origin port and a trailing slash
   set:
-    vault.url: https://vault.example.com:65535/
+    openbao.url: https://openbao.example.com:65535/
   asserts:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_URL
-        value: https://vault.example.com:65535/
+        name: GENESIS_OPENBAO_URL
+        value: https://openbao.example.com:65535/
 - it: accepts the lowest native origin port over HTTP
   set:
-    vault.url: http://vault.example.com:0
+    openbao.url: http://openbao.example.com:0
   asserts:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_URL
-        value: http://vault.example.com:0
+        name: GENESIS_OPENBAO_URL
+        value: http://openbao.example.com:0
 - it: accepts native IPv6 origins without an explicit port
   set:
-    vault.url: https://[2001:db8::1]
+    openbao.url: https://[2001:db8::1]
   asserts:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_URL
+        name: GENESIS_OPENBAO_URL
         value: https://[2001:db8::1]
 - it: accepts native IPv6 origins with the highest port and a trailing slash
   set:
-    vault.url: http://[2001:db8::1]:65535/
+    openbao.url: http://[2001:db8::1]:65535/
   asserts:
   - contains:
       path: spec.template.spec.containers[0].env
       content:
-        name: GENESIS_VAULT_URL
+        name: GENESIS_OPENBAO_URL
         value: http://[2001:db8::1]:65535/
 - it: rejects projected token filenames beginning with two dots
   set:
-    vault.kubernetes.tokenPath: /run/native/..jwt
+    openbao.kubernetes.tokenPath: /run/native/..jwt
   asserts:
   - failedTemplate:
       errorPattern: tokenPath filename must not start with

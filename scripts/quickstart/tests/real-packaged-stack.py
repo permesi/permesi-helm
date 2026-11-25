@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install, verify and reinstall the packaged embedded umbrella in an owned namespace.
 
-Uses the exact locked application checkout and immutable images. PostgreSQL, Vault,
+Uses the exact locked application checkout and immutable images. PostgreSQL, OpenBao,
 bootstrap and all applications are installed by the packaged umbrella itself.
 """
 import argparse
@@ -120,8 +120,7 @@ def main():
             directory = Path(directory)
             run(["helm", "package", str(charts / "permesi-stack"), "-d", str(directory)])
             package = next(directory.glob("permesi-stack-*.tgz"))
-            example = "quickstart-openbao.yaml" if args.openbao_image or release_openbao else "quickstart.yaml"
-            profile_values = (charts / "permesi-stack/examples" / example).read_text()
+            profile_values = (charts / "permesi-stack/examples/quickstart.yaml").read_text()
             values = yaml.safe_load(profile_values.replace(".permesi-quickstart", "." + namespace))
             if not release_openbao:
                 values["quickstart"]["bootstrap"]["schema"] = {
@@ -142,13 +141,10 @@ def main():
                         {"name": "PERMESI_OAUTH_AUDIENCE", "value": "capacity-api"}])
                 values["genesis"]["admissionSigningVersion"] = 1
                 quickstart = values["quickstart"]
-                quickstart.update(secretsProvider="openbao", qualificationObservations=True, vault={"image": pinned(args.openbao_image)},
+                quickstart.update(qualificationObservations=True, openbao={"image": pinned(args.openbao_image)},
                                   postgresql={"image": pinned(args.postgres_image)})
                 for svc in ("permesi", "genesis"):
-                    values[svc]["secretsProvider"] = "openbao"
-                    values[svc]["vault"]["agent"]["image"] = pinned(args.openbao_image)
-                values["permesi"]["admission"]["paserkUrl"] = ""
-                values["permesi"]["vault"]["agent"]["paserkCa"]["enabled"] = False
+                    values[svc]["openbao"]["agent"]["image"] = pinned(args.openbao_image)
             isolated = args.profile == "isolated"
             reader = None
             core = edge = "permesi-quickstart"
@@ -176,9 +172,9 @@ def main():
                 observed = {}
                 for pod in pods:
                     for container in pod["status"].get("containerStatuses", []):
-                        if container["name"] not in ("vault", "postgresql"):
+                        if container["name"] not in ("openbao", "postgresql"):
                             continue
-                        key = "openbao" if container["name"] == "vault" else "postgres"
+                        key = "openbao" if container["name"] == "openbao" else "postgres"
                         reference = qualification["images"][key]
                         raw = container["imageID"].split("@")[-1]
                         wanted = reference.split("@")[1]
@@ -197,7 +193,7 @@ def main():
                 (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
             if args.openbao_image or release_openbao:
                 # Operator action outside the release. CAS zero protects an existing withdrawal floor.
-                operator = k + ["exec", "-i", "deploy/" + core + "-vault", "-c", "vault", "--", "bao"]
+                operator = k + ["exec", "-i", "deploy/" + core + "-openbao", "-c", "openbao", "--", "bao"]
                 metadata = json.loads(run((reader or operator + ["read"]) + ["-format=json", "transit/genesis/keys/genesis-signing"]))["data"]
                 require(metadata["type"] == "ed25519", "bootstrap signer is Ed25519")
                 payload = {"minimum_version": 1, "keys": {"1": metadata["keys"]["1"]["public_key"]}}
@@ -231,7 +227,7 @@ def main():
                     print("Capacity gate failed; continuing independent checks", flush=True)
             if args.openbao_image and not isolated:
                 runpy.run_path(str(tests / "shared-dependency-outage.py"))["trial"](k, core)
-                for name in ("permesi", "permesi-genesis", core + "-vault"):
+                for name in ("permesi", "permesi-genesis", core + "-openbao"):
                     run(k + ["rollout", "status", "deploy/" + name, "--timeout=90s"])
                 run(k + ["rollout", "status", "statefulset/" + core + "-postgresql", "--timeout=90s"])
                 verify_profile()

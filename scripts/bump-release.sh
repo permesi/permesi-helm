@@ -11,7 +11,8 @@
 # <version> in the standalone and umbrella values. With --digest (all three
 # services required) the matching digests are written too; without it (tag-only,
 # also selectable explicitly with --tag-only) every managed digest is cleared so
-# a previous digest never pins a new tag.
+# a previous digest never pins a new tag. Tag-only is refused from app 0.6, whose
+# OpenBao charts require pinned images.
 #
 # Chart version: --chart-version, otherwise <version> when that advances the
 # current chart version, otherwise the next patch of the current chart version.
@@ -156,6 +157,11 @@ else
             [[ -n "${digests[${svc}]+set}" ]] || die "missing --digest for '${svc}': provide all of ${services[*]} or none (tag-only)"
         done
     fi
+    # From 0.6 the permesi and genesis charts render OpenBao workloads only and
+    # refuse unpinned images, so a tag-only bump would publish unrenderable charts.
+    if [[ ${#digests[@]} -eq 0 && "$(semver_cmp "${version}" "0.6.0")" != -1 ]]; then
+        die "app ${version} needs --digest for ${services[*]}: OpenBao charts require pinned images (tag-only releases end at 0.5)"
+    fi
     if [[ -z "${chart_version}" ]]; then
         if [[ "$(semver_cmp "${version}" "${current_chart_version}")" == 1 ]]; then
             chart_version="${version}"
@@ -220,7 +226,7 @@ mv "${target}.tmp" "${target}"
 
 if [[ "${mode}" == "app" ]]; then
     # Standalone charts: rewrite tag and digest of the top-level `image:` block
-    # only (the Vault Agent image is pinned independently).
+    # only (the OpenBao Agent image is pinned independently).
     for i in "${!values_files[@]}"; do
         file="${values_files[i]}"
         svc="${services[i]}"

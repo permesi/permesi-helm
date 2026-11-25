@@ -1,14 +1,14 @@
 {{- $fullname := include "quickstart.fullname" . -}}
-# Dev-mode Vault: in-memory storage, auto-unsealed, HTTP on ClusterIP only.
+# Dev-mode OpenBao: in-memory storage, auto-unsealed, HTTP on ClusterIP only.
 # Recreating this pod loses every key, PKI issuer and seed (see NOTES).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "quickstart.vaultServiceName" . }}
+  name: {{ include "quickstart.openbaoServiceName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "quickstart.labels" . | nindent 4 }}
-    app.kubernetes.io/component: vault
+    app.kubernetes.io/component: openbao
 spec:
   replicas: 1
   strategy:
@@ -16,15 +16,15 @@ spec:
   selector:
     matchLabels:
       {{- include "quickstart.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: vault
+      app.kubernetes.io/component: openbao
   template:
     metadata:
       labels:
         {{- include "quickstart.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: vault
+        app.kubernetes.io/component: openbao
     spec:
-      serviceAccountName: {{ $fullname }}-vault
-      # Vault's own API-audience token is its Kubernetes-auth reviewer JWT.
+      serviceAccountName: {{ $fullname }}-openbao
+      # OpenBao's own API-audience token is its Kubernetes-auth reviewer JWT.
       automountServiceAccountToken: true
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -44,35 +44,30 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: vault
-          image: {{ include "quickstart.image" .Values.vault.image }}
-          imagePullPolicy: {{ .Values.vault.image.pullPolicy }}
-          command: ["sh", "/scripts/start-dev-vault.sh"]
+        - name: openbao
+          image: {{ include "quickstart.image" .Values.openbao.image }}
+          imagePullPolicy: {{ .Values.openbao.image.pullPolicy }}
+          command: ["sh", "/scripts/start-dev-openbao.sh"]
           {{- if .Values.qualificationObservations }}
           args: ["-config=/scripts/audit.hcl"]
           {{- end }}
           env:
-            - name: VAULT_DEV_ROOT_TOKEN_ID
+            - name: BAO_DEV_ROOT_TOKEN_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ include "quickstart.credentialsSecretName" . }}
-                  key: vault-root-token
-            # Same root credential (already present above) for operator `vault`
+                  key: openbao-root-token
+            # Same root credential (already present above) for operator `bao`
             # CLI exec by verify.sh/connect.sh. Dev-only.
-            - name: VAULT_TOKEN
+            - name: BAO_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "quickstart.credentialsSecretName" . }}
-                  key: vault-root-token
-            - name: VAULT_ADDR
+                  key: openbao-root-token
+            - name: BAO_ADDR
               value: "http://127.0.0.1:8200"
-            - name: VAULT_API_ADDR
-              value: {{ include "quickstart.vaultAddr" . | quote }}
-            # The image entrypoint would setcap/chown as root; this pod is non-root.
-            - name: SKIP_SETCAP
-              value: "true"
-            - name: SKIP_CHOWN
-              value: "true"
+            - name: BAO_API_ADDR
+              value: {{ include "quickstart.openbaoAddr" . | quote }}
             - name: HOME
               value: /tmp
           ports:
@@ -103,7 +98,7 @@ spec:
               mountPath: /scripts
               readOnly: true
           resources:
-            {{- toYaml .Values.vault.resources | nindent 12 }}
+            {{- toYaml .Values.openbao.resources | nindent 12 }}
       volumes:
         {{- if .Values.qualificationObservations }}
         - name: audit
@@ -117,8 +112,8 @@ spec:
               - key: audit.hcl
                 path: audit.hcl
               {{- end }}
-              - key: start-dev-vault.sh
-                path: start-dev-vault.sh
+              - key: start-dev-openbao.sh
+                path: start-dev-openbao.sh
         - name: tmp
           emptyDir:
             medium: Memory

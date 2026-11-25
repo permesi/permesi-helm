@@ -7,14 +7,14 @@ templates:
 set:
   acknowledgeDevelopment: true
 tests:
-  - it: grants TokenReview only to the Vault service account
+  - it: grants TokenReview only to the OpenBao service account
     documentIndex: 1
     asserts:
       - equal:
           path: subjects
           value:
             - kind: ServiceAccount
-              name: dev-permesi-quickstart-vault
+              name: dev-permesi-quickstart-openbao
               namespace: qs-regression
   - it: leaves credential Job grants intact when TokenReview is pregranted
     set:

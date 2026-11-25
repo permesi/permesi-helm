@@ -23,6 +23,13 @@ if pathlib.Path(sys.argv[0]).name == 'kubectl':
         print('restricted')
     elif 'config' in args or 'version' in args:
         pass
+    elif 'exec' in args and args[args.index('--') + 1:args.index('--') + 4] == ['bao', 'kv', 'metadata']:
+        raise SystemExit(2)  # no admission authority yet
+    elif 'exec' in args and 'transit/genesis/keys/genesis-signing' in args:
+        print(json.dumps({'data': {'type': 'ed25519', 'keys': {'1': {'public_key': 'fixture-public-key'}}}}))
+    elif 'exec' in args and 'admission-authority' in args and '-cas=0' in args:
+        with open(os.environ['AUTHORITY'], 'w') as output:
+            output.write(sys.stdin.read())
     else:
         raise SystemExit('unexpected kubectl call: ' + repr(args))
 elif 'template' in args:
@@ -47,7 +54,7 @@ class InstallerTests(unittest.TestCase):
         """Check the actual Helm -f payloads consumed by the backend charts."""
         values = {
             "postgresql": {"service": {"name": "qs-database", "port": 15432}},
-            "vault": {"service": {"name": "qs-vault", "port": 18200}},
+            "openbao": {"service": {"name": "qs-openbao", "port": 18200}},
             "bootstrap": {"oidcSigning": {"enabled": True}},
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -61,17 +68,24 @@ class InstallerTests(unittest.TestCase):
                 ["bash", str(ROOT / "scripts/quickstart/install.sh"), "--context", "fixture",
                  "--namespace", "qv-endpoints", "--acknowledge-development"],
                 env={**os.environ, "PATH": str(scratch) + os.pathsep + os.environ["PATH"],
-                     "CAPTURE": str(capture), "HELPER_VALUES": json.dumps(values)},
+                     "CAPTURE": str(capture), "HELPER_VALUES": json.dumps(values),
+                     "AUTHORITY": str(scratch / "authority")},
                 capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             releases = [json.loads(line) for line in capture.read_text().splitlines()]
+            authority = json.loads((scratch / "authority").read_text())
+        self.assertEqual(authority, {"minimum_version": 1, "keys": {"1": "fixture-public-key"}})
         self.assertEqual(len(releases), 2)
         for release in releases:
             app = release["values"]
             self.assertIn("@qs-database.qv-endpoints.svc:15432/", app["database"]["dsn"]["value"])
-            self.assertEqual(app["vault"]["agent"]["address"],
-                             "http://qs-vault.qv-endpoints.svc:18200")
+            self.assertEqual(app["openbao"]["agent"]["address"],
+                             "http://qs-openbao.qv-endpoints.svc:18200")
+            self.assertNotIn("vault", app)
+            self.assertNotIn("paserkUrl", app.get("admission", {}))
+        genesis = next(r["values"] for r in releases if "genesis" in r["release"])
+        self.assertEqual(genesis["admissionSigningVersion"], 1)
 
 
 if __name__ == "__main__":

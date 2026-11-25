@@ -10,7 +10,7 @@ values:
 templates:
   - charts/quickstart/templates/bootstrap-job.yaml
   - charts/quickstart/templates/postgres-statefulset.yaml
-  - charts/quickstart/templates/vault-deployment.yaml
+  - charts/quickstart/templates/openbao-deployment.yaml
 tests:
   - it: runs ordered bootstrap as an ordinary bounded Job
     template: charts/quickstart/templates/bootstrap-job.yaml

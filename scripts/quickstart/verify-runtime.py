@@ -22,7 +22,7 @@ import time
 def run(args, **kwargs):
     result = subprocess.run(args, text=True, capture_output=True, **kwargs)
     if result.returncode:
-        # Never echo command output: Vault/API failures can contain credentials.
+        # Never echo command output: OpenBao/API failures can contain credentials.
         raise RuntimeError(f"{Path(args[0]).name} failed (exit {result.returncode})")
     return result.stdout.strip()
 
@@ -90,7 +90,7 @@ def main():
     parser.add_argument('--namespace', required=True)
     parser.add_argument('--release', default='permesi')
     parser.add_argument('--helper-fullname', help='Dependency object prefix; defaults to <release>-quickstart')
-    parser.add_argument('--vault-deployment', help='Vault workload name resolved from effective helper values')
+    parser.add_argument('--openbao-deployment', help='OpenBao workload name resolved from effective helper values')
     parser.add_argument('--postgres-pod', help='PostgreSQL pod resolved from effective helper values')
     parser.add_argument('--exercise-lifecycle', action='store_true')
     parser.add_argument('--rotation-timeout', type=int, default=240)
@@ -110,20 +110,20 @@ def main():
         return [pod for pod in kj('get', 'pods', '-l', labels)['items']
                 if 'deletionTimestamp' not in pod['metadata']]
     def agent(pod, *args, invalid=False):
-        cmd = k + ['exec', pod, '-c', 'vault-agent', '--', 'env',
-                   f'VAULT_TOKEN={"invalid-operator-token" if invalid else ""}',
-                   'vault', *args]
+        cmd = k + ['exec', pod, '-c', 'openbao-agent', '--', 'env',
+                   f'BAO_TOKEN={"invalid-operator-token" if invalid else ""}',
+                   'bao', *args]
         return subprocess.run(cmd, text=True, capture_output=True)
     def proxy(pod, *args, invalid=False):
         # CLI global address belongs after the operation, before its arguments.
-        return agent(pod, args[0], '-address=unix:///var/run/secrets/vaultproject.io/agent.sock',
+        return agent(pod, args[0], '-address=unix:///var/run/secrets/openbao/agent.sock',
                      *args[1:], invalid=invalid)
 
     ns = kj('get', 'namespace', a.namespace)
     require(ns['metadata'].get('labels', {}).get('pod-security.kubernetes.io/enforce') == 'restricted',
             f'{a.namespace}: Restricted PSA enforced')
     qs = a.helper_fullname or a.release + '-quickstart'
-    vault_deployment = a.vault_deployment or qs + '-vault'
+    openbao_deployment = a.openbao_deployment or qs + '-openbao'
     postgres_pod = a.postgres_pod or qs + '-postgresql-0'
     names = {'permesi': fullname(a.release, 'permesi'),
              'genesis': fullname(a.release + '-genesis', 'genesis')}
@@ -144,7 +144,7 @@ def main():
             require(locked['appRevision'] in version, f'{svc}: build identity matches the qualified SQL revision')
             spec = pod['spec']
             app = next(c for c in spec['containers'] if c['name'] == svc)
-            sidecar = next(c for c in spec['initContainers'] if c['name'] == 'vault-agent')
+            sidecar = next(c for c in spec['initContainers'] if c['name'] == 'openbao-agent')
             require(sidecar.get('restartPolicy') == 'Always' and not spec.get('automountServiceAccountToken', True),
                     f"{pod['metadata']['name']}: native Agent; no automatic SA token")
             volumes = {v['name']: v for v in spec['volumes']}
@@ -155,10 +155,10 @@ def main():
                     f"{pod['metadata']['name']}: no AppRole credentials")
             require(all(m.get('readOnly') for m in mounts), f"{pod['metadata']['name']}: backend artifact mounts read-only")
             pod_name = pod['metadata']['name']
-            mode = run(k + ['exec', pod_name, '-c', 'vault-agent', '--', 'stat', '-c', '%a:%u:%g',
-                            '/var/run/secrets/vaultproject.io/agent.sock'])
+            mode = run(k + ['exec', pod_name, '-c', 'openbao-agent', '--', 'stat', '-c', '%a:%u:%g',
+                            '/var/run/secrets/openbao/agent.sock'])
             require(mode == '600:10001:10001', f'{pod_name}: socket mode/owner 600:10001:10001')
-            count = run(k + ['exec', pod_name, '-c', 'vault-agent', '--', 'sh', '-c',
+            count = run(k + ['exec', pod_name, '-c', 'openbao-agent', '--', 'sh', '-c',
                 f"grep -c 'BEGIN .*PRIVATE KEY' /var/run/{svc}/tls/bundle.pem; grep -c 'BEGIN CERTIFICATE' /var/run/{svc}/tls/bundle.pem"])
             require(count.splitlines() == ['1', '3'], f'{pod_name}: bundle has one key + leaf/intermediate/root')
             result = proxy(pod_name, 'read', '-field=display_name', 'auth/token/lookup-self')
@@ -200,7 +200,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='permesi-verify-') as tmp:
         tmp = Path(tmp)
         ca = tmp / 'root.pem'
-        ca.write_text(run(k + ['exec', f'deploy/{vault_deployment}', '-c', 'vault', '--', 'vault',
+        ca.write_text(run(k + ['exec', f'deploy/{openbao_deployment}', '-c', 'openbao', '--', 'bao',
                               'read', '-field=certificate', 'pki-root/cert/ca']) + '\n')
         wrong_ca = tmp / 'wrong-ca.pem'
         wrong_ca.write_text(kj('get', 'configmap', 'kube-root-ca.crt')['data']['ca.crt'])
@@ -314,13 +314,13 @@ def main():
                 for svc, p in selected.items():
                     pod = p['metadata']['name']
                     baseline = kj('get', 'pod', pod)['status']['initContainerStatuses']
-                    old = next(s['restartCount'] for s in baseline if s['name'] == 'vault-agent')
+                    old = next(s['restartCount'] for s in baseline if s['name'] == 'openbao-agent')
                     # Restart ONLY the Agent. Shared TLS/socket emptyDirs survive.
-                    subprocess.run(k + ['exec', pod, '-c', 'vault-agent', '--', 'kill', '-TERM', '1'], capture_output=True)
+                    subprocess.run(k + ['exec', pod, '-c', 'openbao-agent', '--', 'kill', '-TERM', '1'], capture_output=True)
                     deadline = time.monotonic() + 120
                     while time.monotonic() < deadline:
                         state = kj('get', 'pod', pod)['status']['initContainerStatuses']
-                        s = next(s for s in state if s['name'] == 'vault-agent')
+                        s = next(s for s in state if s['name'] == 'openbao-agent')
                         if s['restartCount'] > old and s.get('ready'):
                             result = proxy(pod, 'read', '-field=display_name', 'auth/token/lookup-self')
                             if result.returncode == 0:
@@ -347,8 +347,8 @@ def main():
                     old_status = next(s for s in before_pod['status']['containerStatuses'] if s['name'] == svc)
                     old_users = pool_users(svc, before_pod)
                     require(bool(old_users), f'{svc}: identified active application DB pool credentials privately')
-                    run(k + ['exec', f'deploy/{vault_deployment}', '-c', 'vault', '--',
-                             'vault', 'lease', 'revoke', '-sync', '-prefix', f'database/creds/{svc}'])
+                    run(k + ['exec', f'deploy/{openbao_deployment}', '-c', 'openbao', '--',
+                             'bao', 'lease', 'revoke', '-sync', '-prefix', f'database/creds/{svc}'])
                     quoted = ','.join("'" + user.replace("'", "''") + "'" for user in old_users)
                     remaining = run(k + ['exec', postgres_pod, '-c', 'postgresql', '--',
                                          'psql', '-X', '-U', 'postgres', '-d', svc, '-tAc',
@@ -366,7 +366,7 @@ def main():
                             previous = run(k + ['logs', pod, '-c', svc, '--previous'])
                             require(terminated.get('exitCode', 0) != 0 and
                                     any(reason in previous for reason in
-                                        ('database_healthcheck_failed', 'vault_db_lease_renewal_failed')),
+                                        ('database_healthcheck_failed', 'openbao_db_lease_renewal_failed')),
                                     f'{svc}: revoked pool triggered fail-closed app exit and container restart')
                             new_users = pool_users(svc, current)
                             require(bool(new_users) and old_users.isdisjoint(new_users),
@@ -402,7 +402,7 @@ def main():
         # admission, not just Deployment status.
         cmd = ['python3', __file__, '--context', a.context, '--namespace', a.namespace,
                '--release', a.release, '--helper-fullname', qs,
-               '--vault-deployment', vault_deployment, '--postgres-pod', postgres_pod]
+               '--openbao-deployment', openbao_deployment, '--postgres-pod', postgres_pod]
         print(run(cmd, env=dict(os.environ, QS_ADMISSION_BIN=binary)), flush=True)
 
 

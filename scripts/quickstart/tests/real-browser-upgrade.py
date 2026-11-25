@@ -59,7 +59,7 @@ def main():
     require(not run(k + ["get", "namespace", args.namespace, "--ignore-not-found", "-o", "name"]),
             "browser namespace does not already exist")
     helper = "permesi-quickstart"
-    root = k + ["exec", "-i", "deploy/" + helper + "-vault", "-c", "vault", "--", "vault"]
+    root = k + ["exec", "-i", "deploy/" + helper + "-openbao", "-c", "openbao", "--", "bao"]
     revision = run(["git", "-C", str(args.app_source), "rev-parse", "HEAD"])
     baseline = json.loads((QUICKSTART / "lock.json").read_text())["images"]
     candidate = json.loads((args.fixture / "scripts/quickstart/lock.json").read_text())["images"]
@@ -114,12 +114,11 @@ def main():
             for service, name in (("permesi", "permesi"), ("genesis", "permesi-genesis")):
                 component = profile[service]
                 component["database"]["dsn"]["value"] = f"postgres://placeholder@{helper}-postgresql.{args.namespace}.svc:5432/{service}?sslmode=disable"
-                agent = component["vault"]["agent"]
-                agent["address"] = f"http://{helper}-vault.{args.namespace}.svc:8200"
+                agent = component["openbao"]["agent"]
+                agent["address"] = f"http://{helper}-openbao.{args.namespace}.svc:8200"
                 agent["pki"]["commonName"] = f"{name}.{args.namespace}.svc.cluster.local"
                 agent["pki"]["dnsNames"] = [name, f"{name}.{args.namespace}", f"{name}.{args.namespace}.svc",
                     f"{name}.{args.namespace}.svc.cluster.local", "api.localhost" if service == "permesi" else "genesis.localhost"]
-            profile["permesi"]["admission"]["paserkUrl"] = f"https://permesi-genesis.{args.namespace}.svc.cluster.local:8080/paserk.json"
             profile["permesi"]["auth"]["frontendBaseUrl"] = origin
             profile["permesi"]["auth"]["corsAllowedOrigins"] = origin
             profile["web"]["runtimeConfig"]["apiBaseUrl"] = origin

@@ -34,7 +34,7 @@ CALLBACK = "https://client.example.test/callback"
 def measure(kube, core, edge, binary, record, *, login_only=False):
     """Provision one test-owned principal and measure its existing session and OAuth grants."""
     with ExitStack() as stack:
-        cas = [run(kube + ["exec", "deploy/" + prefix + "-vault", "-c", "vault", "--", "bao",
+        cas = [run(kube + ["exec", "deploy/" + prefix + "-openbao", "-c", "openbao", "--", "bao",
                            "read", "-field=certificate", "pki-root/cert/ca"]) for prefix in sorted({core, edge})]
         tls = ssl.create_default_context(cadata="\n".join(cas))
         ca = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "ca.pem"

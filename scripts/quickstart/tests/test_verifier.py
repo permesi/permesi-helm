@@ -2,7 +2,7 @@
 """Run actual verifier sections against explicit lifecycle and policy fixtures.
 
 These tests check shell control flow; the real-cluster regression driver supplies
-the independent database/Vault proof and protected-state assertions.
+the independent database/OpenBao proof and protected-state assertions.
 """
 import os
 from pathlib import Path
@@ -50,7 +50,7 @@ elif 'svc' not in args:
 ''')
             binary.chmod(0o700)
             prelude = (f'K=("{binary}")\nQS_FULLNAME=permesi-quickstart\n'
-                       'QS_RELEASE=permesi-quickstart\nVAULT_DEPLOY=permesi-quickstart-vault\n'
+                       'QS_RELEASE=permesi-quickstart\nOPENBAO_DEPLOY=permesi-quickstart-openbao\n'
                        'PG_STATEFULSET=permesi-quickstart-postgresql\n'
                        f'HELPER_STATUS={helper_status}\n')
             section = self.source('section "Dependencies"', 'section "PostgreSQL')
@@ -81,7 +81,6 @@ elif 'svc' not in args:
     def test_disabled_oidc_does_not_require_an_rsa_key(self):
         fixture = '''
 OIDC_ENABLED=false
-provider=vault
 vroot() {
   local field="${3#-field=}" path="${4:-}"
   [[ "$*" != *oidc-signing* ]] || return 2
@@ -89,6 +88,7 @@ vroot() {
     *-field=type*totp) echo chacha20-poly1305 ;;
     *-field=type*genesis-signing) echo ed25519 ;;
     *-field=exportable*|*-field=allow_plaintext_backup*) echo false ;;
+    *-field=auto_rotate_period*genesis-signing) echo 0 ;;
     *-field=auto_rotate_period*) echo 2592000 ;;
     *) return 2 ;;
   esac

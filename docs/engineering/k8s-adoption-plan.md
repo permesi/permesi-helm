@@ -1,5 +1,12 @@
 # Kubernetes adoption plan (D1)
 
+> **Historical record.** This plan predates the OpenBao-only charts (chart 0.6):
+> where it names HashiCorp Vault, `vault/contrib/terraform`, the `vault:` values
+> block or PASERK admission settings, read OpenBao, the application's
+> `openbao/contrib/opentofu` module, `openbao:` and the core admission authority.
+> Current procedures are in [the install guide](../install-guide.md) and
+> [operations guide](../operations.md).
+
 ## 1. Decision and scope
 
 Make **chart-managed Vault Agent + Kubernetes authentication + Vault PKI** the recommended opt-in backend profile. Keep the existing Secret/ESO/AppRole interfaces and default manifests unchanged. Do not introduce cert-manager or synchronize application TLS private keys into Kubernetes Secrets.

@@ -19,62 +19,59 @@ source paths below are relative to the application repository (`permesi/`).
    schemas and verification; do not separately apply all files as administrator.
    Reapply additive schema changes as the existing owner before upgrading the
    binary. See `permesi/db/sql/README.md`; no application migrations run.
-3. **Vault** with the service-specific transit/KV/database/PKI mounts and exact
+3. **OpenBao** with the service-specific transit/KV/database/PKI mounts and exact
    SA/namespace/audience Kubernetes bindings for Agent or optional native login.
-   AppRole is a supported legacy alternative, not a prerequisite for Agent.
-4. **Trust and TLS.** Agent renders backend bundles and Permesi PASERK CA into
-   memory volumes, not Kubernetes Secrets. Vault/DB public trust anchors and
-   operator-managed edge TLS are separate. Legacy Secret/ESO inputs remain
-   supported. See §3 and the [manual guide](install-guide.md).
+   Provision it with the application's OpenTofu module
+   (`openbao/contrib/opentofu`, encrypted state) or the equivalent `bao` commands
+   in the [manual guide](install-guide.md). AppRole is a supported alternative,
+   not a prerequisite for Agent. Chart 0.6 deploys application 0.6 and later only;
+   HashiCorp Vault is no longer supported.
+4. **Trust and TLS.** Agent renders backend bundles into memory volumes, not
+   Kubernetes Secrets. Admission trust needs no CA: Permesi reads the approved
+   Genesis public keys from the core OpenBao authority record. OpenBao/DB public
+   trust anchors and operator-managed edge TLS are separate. Secret/ESO inputs
+   remain supported. See §3 and the [manual guide](install-guide.md).
 
-## 2. Vault setup
+## 2. OpenBao setup
 
 ### 2.1 AppRole URL semantics (F-01)
 
-Permesi 0.4.3 does **not** normalize `vault.url`: it POSTs the role/secret ID to
-that value verbatim (`crates/vault_client/src/lib.rs:121-165`). Use the full login
-endpoint for Permesi:
+Both services accept either an OpenBao origin or the full login endpoint: an
+origin with an empty or `/` path is completed to `/v1/auth/approle/login`, and any
+other URL (a reverse-proxy prefix or a custom auth mount) is used verbatim
+(`crates/openbao_client/src/lib.rs`, `approle_login_url`). Agent socket mode is
+passed through unchanged.
 
 ```yaml
 permesi:
-  vault:
-    url: https://vault.example.com:8200/v1/auth/approle/login
-```
-
-The **unreleased build** on app branch `feat/k8s-hardening` accepts a Vault base
-URL (`https://vault.example.com:8200`, empty or `/` path) and
-normalizes it to `/v1/auth/approle/login`; an explicit non-root login URL is still
-preserved verbatim. This does not change Agent (socket) mode. Until that release
-ships, keep the full endpoint for Permesi.
-
-Genesis normalizes a base URL (or accepts the full endpoint) via
-`services/genesis/src/vault/mod.rs:21-26`, so either form works:
-
-```yaml
+  openbao:
+    url: https://openbao.example.com:8200/v1/auth/approle/login
 genesis:
-  vault:
-    url: https://vault.example.com:8200
+  openbao:
+    url: https://openbao.example.com:8200
 ```
 
 ### 2.2 Restart-safe authentication (F-02)
 
 The application logs in on every startup and cannot reuse a consumed one-use
-credential. The supplied Terraform AppRole defaults
-(`vault/contrib/terraform/approle.tf:11-14`) set `secret_id_num_uses = 1` and a
+credential. The application's OpenTofu module
+(`openbao/contrib/opentofu/approle.tf`) sets `secret_id_num_uses = 1` and a
 one-hour SecretID TTL (`secret_id_ttl = 3600`); tokens themselves expire at
 `token_ttl = 3600` with `token_max_ttl = 14400`. Renewal failure shuts the pod
-down so it can re-login (`crates/service_utils/src/vault/renew.rs:118-122`).
+down so it can re-login (`crates/service_utils/src/openbao/renew.rs`), and the
+process requests that restart itself one minute before a token or lease reaches
+its max TTL.
 
 Credentials must therefore remain valid for **every future pod start**, not just
 the current rollout: restarts, rescheduling, scale-out, and the re-login that
 follows a token `max_ttl` expiry or renewal failure. Pick **one** of:
 
-- **Vault Agent (recommended).** Use the chart-managed Agent sidecar
-  (`vault.agent.enabled: true`). It authenticates via Kubernetes auth and renders
-  the TLS bundle and (for Permesi) the PASERK CA; set `vault.url` to the Unix
-  socket it listens on. The agent re-authenticates and renews independently of the
-  application, so replicas and restarts always have a live token. The agent socket
-  must already exist when the transport is constructed. See §2.4.
+- **OpenBao Agent (recommended).** Use the chart-managed Agent sidecar
+  (`openbao.agent.enabled: true`). It authenticates via Kubernetes auth and renders
+  the TLS bundle; set `openbao.url` to the Unix socket it listens on. The agent
+  re-authenticates and renews independently of the application, so replicas and
+  restarts always have a live token. The agent socket must already exist when the
+  transport is constructed. See §2.4.
 - **Long-lived SecretID plus a rotation procedure.** Provision the AppRole with a
   `secret_id_num_uses`/`secret_id_ttl` policy that covers the Secret's whole
   service life, and rotate it *before* expiry: update the Secret, then
@@ -94,30 +91,31 @@ tokens only for a single initial bootstrap, never as steady-state HA credentials
 
 ### 2.3 Dynamic database credentials
 
-The application always replaces DSN credentials with Vault-issued ones from fixed
-paths `/v1/database/creds/permesi` and `/v1/database/creds/genesis`
-(`services/permesi/src/cli/actions/server.rs:118-131`). Renewal failure triggers a
+The application always replaces DSN credentials with OpenBao-issued ones from
+fixed paths `/v1/database/creds/permesi` and `/v1/database/creds/genesis`
+(`crates/service_utils/src/openbao/database.rs`). Renewal failure triggers a
 deliberate restart so the pod re-acquires fresh credentials. The DSN Secret can
 therefore carry a placeholder username/password; only host/port/database and TLS
 options matter.
 
-### 2.4 Managed Vault Agent operations
+### 2.4 Managed OpenBao Agent operations
 
-The recommended path is the chart-managed Agent sidecar (`vault.agent.enabled:
-true`): a native sidecar (`initContainers[].restartPolicy: Always`) running the
-official `hashicorp/vault` image with Kubernetes auto-auth, a local Unix-socket
-proxy (`api_proxy { use_auto_auth_token = true }`, **no cache block**), and PKI
-templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
-≥ 1.29 with `SidecarContainers` is required in this mode. See
-`docs/install-guide.md` §4 and `docs/examples/vault-agent-stack.yaml`.
+The recommended path is the chart-managed Agent sidecar (`openbao.agent.enabled:
+true`): a native sidecar (`initContainers[].restartPolicy: Always`, container
+`openbao-agent`) running the pinned `docker.io/openbao/openbao` image with
+Kubernetes auto-auth, a local Unix-socket proxy
+(`api_proxy { use_auto_auth_token = true }`, **no cache block**), and a PKI
+template rendering the TLS bundle. Kubernetes ≥ 1.29 with `SidecarContainers` is
+required in this mode. See `docs/install-guide.md` §4 and
+`docs/examples/openbao-shared.yaml`.
 
 - **Leaf reissue/reload vs CA rollout.** The Agent reissues the TLS bundle before
   TTL expiry (renewal threshold default `0.8`, leave margin for retries plus the
   backend's ~10 s reload). The application watches the bundle mtime and reloads
   in place; do **not** switch the bundle to a `subPath` mount. A certificate is
-  reissued, not renewed in place. CA/intermediate rotation is different: the
-  PASERK roots are startup-loaded, so roll with overlapping trusted roots before
-  an issuer change, then `kubectl rollout restart` the backends.
+  reissued, not renewed in place. CA/intermediate rotation is different: roll
+  with overlapping trusted roots before an issuer change, then
+  `kubectl rollout restart` the backends.
 - **Agent restart.** The startup probe checks authenticated proxy access and
   nonempty required files before initial backend startup; existence alone is not
   sufficient. `pkiCert` may reuse a valid cached bundle after restart, so a probe
@@ -128,52 +126,49 @@ templates rendering the TLS bundle and (Permesi only) the PASERK CA. Kubernetes
   expiry/rotation is not qualified by that scenario. The native sidecar
   outlives the app container during graceful shutdown.
 - **JWT rotation.** The Agent re-reads the projected service-account JWT, so
-  service-account token rotation (audience `vault`) is absorbed without pod
-  changes. The Kubernetes auth role's `bound_service_account_names`/`namespaces`
-  must match the rendered SA name and exact namespace; a mismatched audience/role
-  denies login.
+  service-account token rotation (audience `openbao` by default) is absorbed
+  without pod changes. The Kubernetes auth role's
+  `bound_service_account_names`/`namespaces` must match the rendered SA name and
+  exact namespace, and its audience must match `openbao.agent.auth.audience`; a
+  mismatched audience/role denies login.
 - **DB lease fail-closed recovery.** The application, not Agent, owns DB lease
   renewal. The corrected verifier synchronously revoked each service's real pool
   leases, observed exact old roles disappear, a nonzero application exit and
   same-pod restart with new pool identities, then trusted HTTPS/admission
-  recovery. Restore Vault/DB connectivity and allow the Deployment to restart
+  recovery. Restore OpenBao/DB connectivity and allow the Deployment to restart
   the app; do not assume Agent repairs a live pool. This DB-lease proof does not
   qualify revocation of the Agent workload auth token itself.
 - **No exposed TCP proxy / no cache / no quit endpoint.** The socket proxy is the
   only listener; it preserves an explicitly supplied operator `X-Vault-Token`
-  (never `use_auto_auth_token = "force"`), and Unix requests do not set
+  header (OpenBao keeps the upstream header name; never
+  `use_auto_auth_token = "force"`), and Unix requests do not set
   `X-Vault-Request`, so `require_request_header` must stay off.
-- **Issuer chains.** The TLS template writes one private key, the leaf, then
-  the ordered, deduplicated `.Data.CAChain` returned by Vault, including a root if
-  returned. Import the complete chain into the issuing mount; a partial import
-  yields a partial served chain. The PASERK CA is a separate JSON-endpoint
-  template, not a substitute for the listener's issuer chain.
+- **Issuer chains.** The TLS template writes one private key, the leaf, then the
+  issuer chain read from the PKI mount's `cert/ca_chain`. Import the complete
+  chain into the issuing mount; a partial import yields a partial served chain.
 
 ### 2.5 Optional native Kubernetes login
 
-Requires an **unreleased rebuilt application image**; default `0.4.3` does not
-support native-auth flags. `vault.authMethod=auto` preserves socket→Agent and
-TCP→AppRole; `approle` explicitly selects TCP AppRole; `kubernetes` selects direct
-application login using `vault.kubernetes.*` and requires Agent disabled plus
+`openbao.authMethod=auto` preserves socket→Agent and TCP→AppRole; `approle`
+explicitly selects TCP AppRole; `kubernetes` selects direct application login
+using `openbao.kubernetes.*` and requires Agent disabled plus
 `serviceAccount.automount=false`. See the component READMEs for exact defaults.
 Native mode projects its audience-scoped JWT only into the app, grants no RBAC,
-and does not render TLS/PKI/PASERK files. Vault's reviewer, never the app SA,
-needs TokenReview.
+and does not render TLS/PKI files. OpenBao's reviewer, never the app SA, needs
+TokenReview.
 
 Remove known AppRole/wrapped-token/ESO credential inputs before cutover. Generic
 `extraEnvFrom` imports remain supported and opaque to Helm; operators must remove
-legacy AppRole credential variables from their contents. The application rejects
+AppRole credential variables from their contents. The application rejects
 native-mode credential conflicts rather than falling back.
 
 Reauthentication is restart-based, not a shared hot-swapped token session.
-After token/DB renewal failure the process drains/stops. Once Vault/reviewer/DB
+After token/DB renewal failure the process drains/stops. Once OpenBao/reviewer/DB
 dependencies are healthy, let the Deployment restart the process or explicitly
 roll the affected Deployment; it reads the latest projected JWT and reacquires
 credentials. Do not assume replacing a JWT repairs an already-issued token or DB
 pool. Standalone native login/renewal was exercised in the application milestone;
 full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
-
-
 
 ## 3. TLS
 
@@ -185,16 +180,15 @@ full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
 - **Certificate reload** watches the bundle's modification time every 10 seconds.
   Mount the Secret as a directory (the chart default) so projected updates are
   observed; do **not** switch to `subPath` mounts, which pin the old file.
-- **Outbound PASERK trust is separate.** Permesi trusts the Genesis admission
-  endpoint via system roots plus `admission.paserkCa`; the server's own TLS bundle
-  is *not* automatically the outbound trust store. Supply a dedicated CA Secret at
-  `permesi.admission.paserkCa.existingSecret` when Genesis uses a private CA.
-- **Vault trust** uses the image's root bundle (`SSL_CERT_FILE`, default
-  `/etc/ssl/certs/ca-certificates.crt`). There is no dedicated Vault CA flag; add
+- **Admission trust needs no outbound TLS.** Permesi verifies admission tokens
+  offline against the public keys in the core OpenBao authority record; it does not
+  fetch keys from Genesis, so there is no admission CA to supply.
+- **OpenBao trust** uses the image's root bundle (`SSL_CERT_FILE`, default
+  `/etc/ssl/certs/ca-certificates.crt`). There is no dedicated OpenBao CA flag; add
   your private CA to the image trust bundle or use a CA that chains to public
-  roots. In Agent mode the application talks to Vault over the Unix socket and the
-  **Agent** holds the Vault CA (`vault.agent.ca.existingConfigMap`); the backend
-  image needs no Vault CA.
+  roots. In Agent mode the application talks to OpenBao over the Unix socket and
+  the **Agent** holds the OpenBao CA (`openbao.agent.ca.existingConfigMap`); the
+  backend image needs no OpenBao CA.
 - **PostgreSQL TLS** is controlled by the DSN. Use `sslmode=verify-full` plus
   `sslrootcert=<path>` where `<path>` points at a CA mounted via
   `extraVolumes`/`extraVolumeMounts` (see the example). The development default
@@ -202,13 +196,17 @@ full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
 
 ## 4. Split trust and admission verification
 
-- Genesis signs admission tokens with the Vault transit Ed25519 key
-  `genesis-signing`; private signing material is never distributed
-  (`services/genesis/src/api/admission.rs:200-295`).
-- Permesi only fetches the **public** PASERK keyset from
-  `/paserk.json` and verifies tokens locally
-  (`services/permesi/src/api/handlers/mod.rs:133-171`). Genesis publishes the
-  latest and previous key versions, with ~300 s cache and 30 s throttled refresh.
+- Genesis signs admission tokens with the OpenBao transit Ed25519 key
+  `genesis-signing`, using the explicitly activated version
+  (`genesis.admissionSigningVersion`); private signing material is never
+  distributed.
+- Permesi verifies tokens offline against the **public** keys and minimum
+  accepted version in the core OpenBao authority record
+  (`secret/permesi/data/admission-authority`), refreshed periodically
+  (`PERMESI_ADMISSION_REFRESH_SECONDS`, bounded by
+  `PERMESI_ADMISSION_MAX_AGE_SECONDS`). It does not fetch keys from Genesis.
+  Operators publish and withdraw versions with the application's
+  `scripts/admission-authority`.
 - The issuer and audience must match on **both** sides:
   `permesi.admission.issuer`/`audience` (verifier) must equal
   `GENESIS_ADMISSION_ISS`/`GENESIS_ADMISSION_AUD` (signer). A mismatch fails
@@ -220,11 +218,10 @@ full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
 ## 5. Probes and shutdown
 
 - **Liveness** `/live` is dependency-free (both services).
-- **Readiness** `/ready` checks PostgreSQL and (for Permesi) admission-keyset
-  health — not general Vault health
-  (`services/permesi/src/api/handlers/health.rs:49-110`,
-  Genesis `health.rs:40-96`). DB authentication failure can drive a fail-closed
-  shutdown so a replacement pod fetches fresh Vault credentials.
+- **Readiness** `/ready` checks PostgreSQL — not general OpenBao health — and
+  deliberately survives an admission-authority outage so existing sessions and
+  OAuth traffic keep working. DB authentication failure can drive a fail-closed
+  shutdown so a replacement pod fetches fresh OpenBao credentials.
 - **Web** `/healthz` is nginx-only; it does not prove valid runtime config or a
   working API/Genesis.
 - **Graceful shutdown budget:** SIGTERM triggers a bounded 30 s request drain,
@@ -253,20 +250,17 @@ full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
 Enabling `networkPolicy` sets `policyTypes: [Ingress, Egress]` and renders empty
 `ingress`/`egress` lists when no rules are supplied — i.e. **deny-all** semantics.
 Turning policy on without allow-lists will cut off all traffic. The example lists
-the required flows: DNS, PostgreSQL, Vault, SMTP, Permesi→Genesis 8080, and the
-ingress controller namespace. Web pods need only DNS egress (the browser, not
+the required flows: DNS, PostgreSQL, OpenBao, SMTP and the ingress controller
+namespace; Permesi does not call Genesis. Web pods need only DNS egress (the browser, not
 nginx, calls the backends). Adjust namespace labels and `ipBlock` CIDRs to your
 environment.
 
 ## 8. Rotation and rollout
 
-- **Env secrets require a restart.** The DSN and Vault credentials are injected
+- **Env secrets require a restart.** The DSN and OpenBao credentials are injected
   via `secretKeyRef` (environment variables), which are read only when the pod
   starts. Rotate the Secret, then `kubectl rollout restart deployment <fullname>
   -n permesi`.
-- **PASERK CA requires a restart.** Permesi reads the admission PASERK CA once at
-  startup (`services/permesi/src/api/handlers/mod.rs:139-150`); rotating that CA
-  Secret does not take effect until the pod restarts.
 - **Inbound TLS bundle auto-reloads.** Only the directory-mounted inbound TLS
   bundle is re-read when its file changes (watched every ~10 s); do **not**
   switch it to a `subPath` mount, which pins the old file.
@@ -279,9 +273,9 @@ environment.
 
 ## 9. Upgrade checklist
 
-1. Back up PostgreSQL and Vault state.
+1. Back up PostgreSQL and OpenBao state (including the core admission authority).
 2. Apply/reapply schema as the owner (`permesi/db/sql/README.md`).
-3. Confirm Vault roles/keys and dynamic-cred paths still exist; rotate SecretIDs
+3. Confirm OpenBao roles/keys and dynamic-cred paths still exist; rotate SecretIDs
    if they were one-use.
 4. Diff rendered manifests:
    `helm template permesi charts/permesi-stack -n permesi -f <values>.yaml > /tmp/manifests.yaml`
@@ -293,11 +287,13 @@ environment.
 
 ## 10. Release and image identity
 
-`image.digest` and backend `vault.agent.image.digest` default to `""`.
-Nonempty `sha256:<64 lowercase hex>` wins over `tag` and renders
-`repository@digest`; otherwise `repository:tag` is used. Changing a tag while
-keeping a digest does not change the deployed image. Update or clear the digest
-deliberately. Agent image identity is independent of app-release automation.
+The Permesi and Genesis charts require `image.digest` and, with the Agent
+enabled, `openbao.agent.image.digest` on an `*/openbao` repository (the Agent
+default is the pinned OpenBao 2.7.3). A `sha256:<64 lowercase hex>` digest wins
+over `tag` and renders `repository@digest`, so changing a tag while keeping a
+digest does not change the deployed image; update both together. The web chart
+still falls back to `repository:tag` without a digest. Agent image identity is
+independent of app-release automation.
 
 ### Independent application and chart versions
 
@@ -374,6 +370,11 @@ the real-dependencies cluster driver and from remote release execution.
 
 ## 11. Quickstart qualification and known boundaries
 
+The records in this section predate the OpenBao-only charts: where they name
+Vault, the qualified dependency was HashiCorp Vault, and the role and anchor names
+are those of the time. Current qualification runs against OpenBao (see
+[admission containment](#admission-containment-with-the-openbao-application-contract)).
+
 Bootstrap correction `de750e5` separates static canonical schema owners
 `vault_permesi`/`vault_genesis` from non-owner credential managers
 `vault_permesi_manager`/`vault_genesis_manager`. Managers get only their matching
@@ -437,7 +438,7 @@ driver attempts; they do not prove natural JWT/token-max-TTL expiry or productio
 operation.
 
 The documentation qualification separately exercised
-[external Vault reviewer replacement](install-guide.md#external-vault-dedicated-reviewer-and-explicit-configuration)
+[external reviewer replacement](install-guide.md#external-openbao-dedicated-reviewer-and-explicit-configuration)
 and [pg_cron background-worker execution](install-guide.md#23-production-scheduler-pg_cron-and-verification).
 External Vault ran outside Kind: both application logins succeeded before/after a
 distinct reviewer replacement, wrong SA/audience/cross-role requests failed,
@@ -469,7 +470,7 @@ archive checksum and commit alongside all three application manifests in
 
 ### Admission containment with the OpenBao application contract
 
-The released 0.5.2 images use the Vault contract. The sandbox 0.6 application uses the OpenBao contract. Select `secretsProvider: openbao` on each backend, pin the backend and Agent image digests, clear `permesi.admission.paserkUrl` and disable `permesi.vault.agent.paserkCa.enabled`. For the embedded development fixture, select the same provider on `quickstart`. A production isolated installation uses independently constrained existing endpoints. Set each backend's database DSN and Agent address to its own PostgreSQL and OpenBao services. Reserve network access to the core database, the operator API and the authority writer for their respective principals.
+The charts render only the OpenBao contract of application 0.6 and later. Pin the backend and Agent image digests and set `genesis.admissionSigningVersion`; there is no provider switch and no PASERK setting. A production isolated installation uses independently constrained existing endpoints. Set each backend's database DSN and Agent address to its own PostgreSQL and OpenBao services. Reserve network access to the core database, the operator API and the authority writer for their respective principals.
 
 The core operator initializes the versioned authority record outside the release, using the version currently authorized to sign. Set `genesis.admissionSigningVersion` to that version. For separate OpenBao installations, place a dedicated Agent on the operator side, grant it only read access to `transit/genesis/keys/genesis-signing`, and pass its local socket to the application's `scripts/admission-authority` publisher. Publish the public key into core KV before activating a new signer version. Check `/health` for `ok` on every serving core pod and complete real signup before declaring rollout success. During an admission outage `/ready` can stay healthy for existing sessions and OAuth traffic.
 
@@ -504,8 +505,10 @@ schema to the same commit. An explicitly acknowledged tag-only event resolves
 the release tags to immutable digests. Identical replays preserve the chart
 version. A chart version can advance independently of the application version.
 
-The first 0.6 bump replaces the released fixture’s legacy dependency pins with
-OpenBao and PostgreSQL 19 and selects the OpenBao quickstart defaults. The release
+The first 0.6 bump replaces the released fixture’s legacy dependency pins
+(HashiCorp Vault, PostgreSQL 18) in `scripts/quickstart/lock.json` with the
+OpenBao and PostgreSQL 19 pins from `scripts/quickstart/openbao-images.json`; the
+charts and the quickstart are already OpenBao-only in source. The release
 gate installs the package with its pinned source archive, initializes public
 authority once with CAS zero, completes OPAQUE login, and verifies a full session.
 For a Helm-only disposable install, initialize the authority through the

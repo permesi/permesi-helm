@@ -3,7 +3,7 @@ genesis:
   database:
     dsn:
       existingSecret: genesis-edge-db
-  vault:
+  openbao:
     agent:
       address: https://edge-openbao.example.com:8200
       ca:

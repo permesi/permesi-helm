@@ -1,4 +1,4 @@
-suite: genesis vault agent render
+suite: genesis OpenBao Agent render
 release:
   name: my-release
   namespace: genesis
@@ -12,22 +12,25 @@ values:
 tests:
   - it: renders native sidecar, shared volumes, and agent-only token projection
     set:
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: genesis
-      vault.agent.pki.role: genesis-runtime
-      vault.agent.pki.commonName: genesis.permesi.svc.cluster.local
-      vault.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: genesis
+      openbao.agent.pki.role: genesis-runtime
+      openbao.agent.pki.commonName: genesis.permesi.svc.cluster.local
+      openbao.agent.pki.dnsNames[0]: genesis.permesi.svc.cluster.local
       serviceAccount.automount: false
     asserts:
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
       - exists:
-          path: spec.template.metadata.annotations["checksum/vault-agent-config"]
+          path: spec.template.metadata.annotations["checksum/openbao-agent-config"]
       - equal:
           path: spec.template.spec.initContainers[0].name
-          value: vault-agent
+          value: openbao-agent
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["/usr/bin/bao"]
       - equal:
           path: spec.template.spec.initContainers[0].restartPolicy
           value: Always
@@ -40,13 +43,13 @@ tests:
       - contains:
           path: spec.template.spec.initContainers[0].volumeMounts
           content:
-            name: vault-agent-token
-            mountPath: /var/run/secrets/vault-token
+            name: openbao-agent-token
+            mountPath: /var/run/secrets/openbao-token
             readOnly: true
       - notContains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: vault-agent-token
+            name: openbao-agent-token
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
@@ -56,13 +59,13 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: vault-agent-socket
-            mountPath: /var/run/secrets/vaultproject.io
+            name: openbao-agent-socket
+            mountPath: /var/run/secrets/openbao
             readOnly: true
       - contains:
           path: spec.template.spec.volumes
           content:
-            name: vault-agent-socket
+            name: openbao-agent-socket
             emptyDir:
               medium: Memory
       - contains:
@@ -74,17 +77,17 @@ tests:
       - contains:
           path: spec.template.spec.volumes
           content:
-            name: vault-agent-token
+            name: openbao-agent-token
             projected:
               sources:
                 - serviceAccountToken:
                     path: token
-                    audience: vault
+                    audience: openbao
                     expirationSeconds: 3600
               defaultMode: 0400
       - matchRegex:
           path: spec.template.spec.initContainers[0].startupProbe.exec.command[2]
-          pattern: 'vault token lookup -address="unix:///var/run/secrets/vaultproject.io/agent.sock"'
+          pattern: 'bao token lookup -address="unix:///var/run/secrets/openbao/agent.sock"'
       - matchRegex:
           path: spec.template.spec.initContainers[0].startupProbe.exec.command[2]
           pattern: 'test -s "/var/run/genesis/tls/bundle.pem"'
@@ -93,9 +96,9 @@ tests:
     set:
       config.socketPath: /run/genesis.sock
       service.enabled: false
-      vault.agent.enabled: true
-      vault.agent.address: https://vault.example.com:8200
-      vault.agent.auth.role: genesis
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: genesis
       serviceAccount.automount: false
     asserts:
       - notContains:
@@ -105,6 +108,6 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: vault-agent-socket
-            mountPath: /var/run/secrets/vaultproject.io
+            name: openbao-agent-socket
+            mountPath: /var/run/secrets/openbao
             readOnly: true

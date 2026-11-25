@@ -37,3 +37,17 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: sha256.*required
+  - it: refuses the removed HashiCorp Vault values block
+    set:
+      acknowledgeDevelopment: true
+      vault.image.tag: "1.20.4"
+    asserts:
+      - failedTemplate:
+          errorPattern: "Additional property vault is not allowed"
+  - it: refuses the removed secretsProvider switch
+    set:
+      acknowledgeDevelopment: true
+      secretsProvider: openbao
+    asserts:
+      - failedTemplate:
+          errorPattern: "Additional property secretsProvider is not allowed"

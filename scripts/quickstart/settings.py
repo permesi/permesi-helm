@@ -16,10 +16,9 @@ class Settings:
     postgres_name: str
     postgres_host: str
     postgres_port: int
-    vault_name: str
-    vault_address: str
+    openbao_name: str
+    openbao_address: str
     oidc_enabled: bool
-    secrets_provider: str
 
 
 def dns_label(value):
@@ -51,16 +50,15 @@ def resolve(values, fullname, namespace):
     if len(candidates) != 1:
         raise ValueError("expected one standalone or umbrella quickstart configuration")
     helper = candidates[0]
-    provider = helper.get("secretsProvider", "vault")
-    if provider not in ("openbao", "vault"):
-        raise ValueError("unsupported secrets provider")
+    if "vault" in helper or "secretsProvider" in helper:
+        raise ValueError("HashiCorp Vault helper values are no longer supported")
     enabled = helper["bootstrap"]["oidcSigning"]["enabled"]
     if type(enabled) is not bool:
         raise ValueError("OIDC enablement must be boolean")
     pg_name, pg_host, pg_port = service(helper, "postgresql", fullname, namespace)
-    vault_name, vault_host, vault_port = service(helper, "vault", fullname, namespace)
-    return Settings(pg_name, pg_host, pg_port, vault_name,
-                    f"http://{vault_host}:{vault_port}", enabled, provider)
+    bao_name, bao_host, bao_port = service(helper, "openbao", fullname, namespace)
+    return Settings(pg_name, pg_host, pg_port, bao_name,
+                    f"http://{bao_host}:{bao_port}", enabled)
 
 
 def main():

@@ -5,13 +5,8 @@
   "images": {
     "postgresql": {
       "repository": "docker.io/library/postgres",
-      "tag": "18.6",
-      "digest": "sha256:9770878138a2e83abcb10856d30cc3f24dae0d317bb956db6ab9159de6c3c80d"
-    },
-    "vault": {
-      "repository": "docker.io/hashicorp/vault",
-      "tag": "1.20.4",
-      "digest": "sha256:20ff3ed4a4da750d1be0757c82e0a10accc00c26c157bde3a694f2b227300caf"
+      "tag": "19.0",
+      "digest": "sha256:d2c8a7d3d224a9c0335bf9f69ae6ad0b9aa7d88c4b64bab89f0f261332f6d4de"
     },
     "permesi": {
       "repository": "ghcr.io/permesi/permesi",
@@ -27,6 +22,11 @@
       "repository": "ghcr.io/permesi/web",
       "tag": "0.5.2",
       "digest": "sha256:f924e67764e8d1d00dd6a7010cd15eef838d4b93a75295792daad38c524c9b65"
+    },
+    "openbao": {
+      "repository": "docker.io/openbao/openbao",
+      "tag": "2.7.3",
+      "digest": "sha256:b9418c63e2185157d8ee8689a8a93265d5aadad677d6320156172bd42ad3b10b"
     }
   }
 }

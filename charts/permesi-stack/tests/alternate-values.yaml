@@ -1,5 +1,4 @@
 quickstart:
-  secretsProvider: vault
   enabled: true
   acknowledgeDevelopment: true
   fullnameOverride: atlas-quickstart
@@ -14,13 +13,12 @@ quickstart:
         browserDnsNames:
         - genesis.localhost
     kubernetesRoles:
-      audience: vault
+      audience: openbao
       permesi:
         serviceAccount: api-backend-identity
       genesis:
         serviceAccount: token-backend-identity
 permesi:
-  secretsProvider: vault
   enabled: true
   replicaCount: 2
   serviceAccount:
@@ -31,16 +29,16 @@ permesi:
       value: postgres://placeholder@atlas-quickstart-postgresql.uq-alt.svc:5432/permesi?sslmode=disable
   tls:
     pemBundlePath: /var/run/permesi/tls/bundle.pem
-  vault:
+  openbao:
     authMethod: auto
-    url: /var/run/secrets/vaultproject.io/agent.sock
+    url: /var/run/secrets/openbao/agent.sock
     agent:
       enabled: true
-      address: http://atlas-quickstart-vault.uq-alt.svc:8200
+      address: http://atlas-quickstart-openbao.uq-alt.svc:8200
       auth:
         mount: kubernetes
         role: permesi
-        audience: vault
+        audience: openbao
       pki:
         mount: pki-int
         role: permesi-runtime
@@ -51,15 +49,9 @@ permesi:
         - api-backend.uq-alt.svc
         - api-backend.uq-alt.svc.cluster.local
         - api.localhost
-      paserkCa:
-        enabled: true
-        path: pki-int/cert/ca_chain
   admission:
-    paserkUrl: https://token-backend.uq-alt.svc.cluster.local:8080/paserk.json
     issuer: https://genesis.localhost:9443
     audience: permesi
-    paserkCa:
-      mountPath: /var/run/permesi/admission-ca
   auth:
     frontendBaseUrl: http://localhost:8080
     corsAllowedOrigins: http://localhost:8080
@@ -75,8 +67,8 @@ permesi:
     value: example.test
   fullnameOverride: api-backend
 genesis:
-  secretsProvider: vault
   enabled: true
+  admissionSigningVersion: 1
   replicaCount: 2
   serviceAccount:
     automount: false
@@ -86,16 +78,16 @@ genesis:
       value: postgres://placeholder@atlas-quickstart-postgresql.uq-alt.svc:5432/genesis?sslmode=disable
   tls:
     pemBundlePath: /var/run/genesis/tls/bundle.pem
-  vault:
+  openbao:
     authMethod: auto
-    url: /var/run/secrets/vaultproject.io/agent.sock
+    url: /var/run/secrets/openbao/agent.sock
     agent:
       enabled: true
-      address: http://atlas-quickstart-vault.uq-alt.svc:8200
+      address: http://atlas-quickstart-openbao.uq-alt.svc:8200
       auth:
         mount: kubernetes
         role: genesis
-        audience: vault
+        audience: openbao
       pki:
         mount: pki-int
         role: genesis-runtime

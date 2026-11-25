@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "required": ["acknowledgeDevelopment", "bootstrap", "postgresql", "vault"],
+  "required": ["acknowledgeDevelopment", "bootstrap", "postgresql", "openbao"],
   "definitions": {
     "image": {
       "type": "object",
@@ -43,7 +43,6 @@
   },
   "properties": {
     "qualificationObservations": {"type": "boolean"},
-    "secretsProvider": {"enum": ["vault", "openbao"]},
     "acknowledgeDevelopment": {"type": "boolean"},
     "enabled": {"type": "boolean"},
     "nameOverride": {"type": "string"},
@@ -121,7 +120,7 @@
         "resources": {"type": "object"}
       }
     },
-    "vault": {
+    "openbao": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

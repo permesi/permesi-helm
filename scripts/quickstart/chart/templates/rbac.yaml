@@ -1,7 +1,7 @@
 {{- $fullname := include "quickstart.fullname" . -}}
 {{- $tokenReview := include "quickstart.tokenReviewName" . -}}
 {{- if .Values.rbac.createTokenReviewBinding }}
-# TokenReview authority for the dev Vault ServiceAccount ONLY (Kubernetes auth
+# TokenReview authority for the dev OpenBao ServiceAccount ONLY (Kubernetes auth
 # reviewer). Cluster-scoped: requires a cluster administrator.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -26,7 +26,7 @@ roleRef:
   name: {{ $tokenReview }}
 subjects:
   - kind: ServiceAccount
-    name: {{ $fullname }}-vault
+    name: {{ $fullname }}-openbao
     namespace: {{ .Release.Namespace }}
 ---
 {{- end }}

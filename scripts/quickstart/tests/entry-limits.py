@@ -46,7 +46,7 @@ def measure(kube, pod, namespace, admin, edge):
         def signatures():
             # Count only requests inside the service. Keep the default audit HMAC protection.
             awk = '/"type":"request"/ && /"path":"transit\\/genesis\\/sign\\/genesis-signing"/ && index($0, h)==0 { n++ } END { print n+0 }'
-            return int(run(kube + ["exec", "deploy/" + edge + "-vault", "-c", "vault", "--",
+            return int(run(kube + ["exec", "deploy/" + edge + "-openbao", "-c", "openbao", "--",
                                    "awk", "-v", "h=" + digest, awk, "/audit/entry-audit.json"]))
         # Wait for kubelet to observe the new container before sampling.
         deadline = time.monotonic() + 45

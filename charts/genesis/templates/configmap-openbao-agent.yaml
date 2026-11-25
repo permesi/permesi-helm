@@ -1,4 +1,4 @@
-{{- if .Values.vault.agent.enabled }}
+{{- if .Values.openbao.agent.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

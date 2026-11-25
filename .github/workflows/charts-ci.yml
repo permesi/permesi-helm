@@ -250,7 +250,7 @@ jobs:
         run: bash scripts/ci/kind-smoke.sh
 
   real-dependencies:
-    # Exact quickstart entry points against real PostgreSQL + dev Vault.
+    # Exact quickstart entry points against real PostgreSQL + dev OpenBao.
     # Not gated on `ct list-changed` (script-only changes must also run).
     runs-on: ubuntu-latest
     needs: lint

@@ -4,7 +4,6 @@
   "additionalProperties": true,
   "properties": {
     "admissionSigningVersion": {"type": "integer", "minimum": 1, "maximum": 4294967295},
-    "secretsProvider": {"type": "string", "enum": ["openbao", "vault"]},
     "replicaCount": {
       "type": "integer",
       "minimum": 0
@@ -98,7 +97,7 @@
         }
       }
     },
-    "vault": {
+    "openbao": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -137,7 +136,7 @@
           }
         },
         "externalSecret": {
-          "$ref": "#/definitions/vaultExternalSecretRef"
+          "$ref": "#/definitions/openbaoExternalSecretRef"
         },
         "roleId": {
           "$ref": "#/definitions/envSource"
@@ -434,7 +433,7 @@
         }
       }
     },
-    "vaultExternalSecretRef": {
+    "openbaoExternalSecretRef": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

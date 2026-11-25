@@ -34,10 +34,10 @@ bootstrap:
   schema:
     # Pinned archive fetched (and sha256-verified) by the schema-acquisition
     # init container. Updated with the release fixture.
-    sourceUrl: "https://github.com/permesi/permesi/archive/c959b4bbb5a08eabeb5e9b57e013ff64703ebd6d.tar.gz"
-    sha256: "05583dfd45c1ccd7668778c57729f3837d4d818bc56178b138d85d2f9bbc68a2"
+    sourceUrl: "https://github.com/permesi/permesi/archive/3aecaf97ddfcc5d06f78644e44d605a1de4718dd.tar.gz"
+    sha256: "ce3c19487942b941cda61530df15e340ff79a545159797fceac701547cb9472a"
     # Nonsecret metadata recorded on the bootstrap Job.
-    revision: "c959b4bbb5a08eabeb5e9b57e013ff64703ebd6d"
+    revision: "3aecaf97ddfcc5d06f78644e44d605a1de4718dd"
     # Pre-packaged SQL ConfigMaps instead (air-gapped / install.sh --app-source).
     # Every *.sql key of every listed ConfigMap is copied into one flat tree.
     existingConfigMaps: []

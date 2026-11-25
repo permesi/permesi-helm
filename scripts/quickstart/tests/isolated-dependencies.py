@@ -61,12 +61,15 @@ api_proxy {{ use_auto_auth_token = true }}
                         "path": "token", "audience": "admission-reader", "expirationSeconds": 600}}]}}],
         "containers": [{"name": "agent", "image": image["repository"] + "@" + image["digest"],
             "command": ["/usr/bin/bao", "agent", "-config=/config/agent.hcl"],
-            "resources": {"requests": {"cpu": "20m", "memory": "64Mi"}, "limits": {"cpu": "100m", "memory": "128Mi"}},
+            "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"cpu": "250m", "memory": "128Mi"}},
             "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
             "volumeMounts": [{"name": name, "mountPath": path, "readOnly": name != "run"}
                              for name, path in [("config", "/config"), ("identity", "/identity"), ("run", "/run/reader")]],
+            # Each probe starts the bao CLI inside the pod. Under a CPU limit on a shared runner
+            # that alone can exceed the default one-second probe timeout, which left the pod
+            # unready although the Agent had authenticated and was serving.
             "readinessProbe": {"exec": {"command": ["bao", "read", "-address=unix:///run/reader/agent.sock",
-                "-field=type", "transit/genesis/keys/genesis-signing"]}, "periodSeconds": 3}}]})
+                "-field=type", "transit/genesis/keys/genesis-signing"]}, "periodSeconds": 3, "timeoutSeconds": 5}}]})
     try:
         run(kube + ["wait", "--for=condition=Ready", "pod/admission-reader", "--timeout=120s"])
     except RuntimeError:

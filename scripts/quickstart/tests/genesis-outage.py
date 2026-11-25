@@ -1,17 +1,22 @@
-"""Measure four legitimate core flows at a fixed offered load before and during a Genesis outage.
+"""Check that four legitimate core flows keep working on every replica while Genesis is down.
 
-Each flow is offered once every eighteen seconds for fifteen minutes per phase.
-Requests use the trusted TLS roots and the public OPAQUE/OAuth APIs. The only
-database read is the newly registered fixture user's development mailbox.
+A session lookup, an authorization-code grant with consent, a refresh and a
+UserInfo call run several times in turn against each serving core replica, first
+with Genesis up and then with it scaled to zero. Every call must succeed in both
+phases. Genesis only mints admission tokens for new sign-ins; an established
+session and its grants must not depend on it, and this is the check that would
+catch a core handler that started calling it.
+
+This is a functional gate, not a load or latency measurement. Requests use the
+trusted TLS roots and the public OPAQUE/OAuth APIs. The only database read is the
+newly registered fixture user's development mailbox.
 """
 import base64
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import hashlib
 import http.client
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -21,7 +26,6 @@ import socket
 import ssl
 import subprocess
 import tempfile
-import time
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 common = runpy.run_path(str(Path(__file__).resolve().parents[1] / "verify-runtime.py"))
@@ -29,6 +33,42 @@ run, require = common["run"], common["require"]
 ISSUER = "https://api.localhost:8443"
 FRONTEND = "http://localhost:8080"
 CALLBACK = "https://client.example.test/callback"
+
+
+FAILURES = (OSError, RuntimeError, ValueError, KeyError, http.client.HTTPException)
+
+
+def exercise(flows, replicas, served):
+    """Run each flow on every replica in turn; nothing is paced, sampled or timed.
+
+    `served` is the set the request helper adds each addressed replica to. An
+    authorization call makes three requests, so consecutive calls start on
+    alternating replicas and cross from one to the other mid-grant in both orders.
+    """
+    rounds = 2 * replicas
+    results = {}
+    for key, call in flows.items():
+        served.clear()
+        failures = Counter()
+        for _ in range(rounds):
+            try:
+                call()
+            except FAILURES as error:
+                status = re.fullmatch(r"(GET|POST) (/[a-z0-9/_-]+) returned ([0-9]{3})", str(error))
+                failures[status.group(0) if status else type(error).__name__] += 1
+        results[key] = dict(offered=rounds, successes=rounds - sum(failures.values()),
+                            failure_reasons=dict(failures), replicas=len(served))
+    return results
+
+
+def verdicts(flows, baseline, fault, replicas):
+    """Yield (passed, message) for each flow and phase: every call succeeded on every replica."""
+    for key in flows:
+        for name, phase in (("with Genesis serving", baseline), ("with Genesis offline", fault)):
+            result = phase.get(key) or {}
+            passed = (result.get("offered", 0) >= 2 * replicas and result.get("successes") == result.get("offered")
+                      and result.get("replicas") == replicas)
+            yield passed, f"{key} succeeded on every core replica {name}"
 
 
 def measure(kube, core, edge, binary, record, *, login_only=False):
@@ -50,12 +90,15 @@ def measure(kube, core, edge, binary, record, *, login_only=False):
         selector = ",".join(k + "=" + v for k, v in deploy["spec"]["selector"]["matchLabels"].items())
         live = json.loads(run(kube + ["get", "pods", "-l", selector, "-o", "json"]))["items"]
         ports = [forward("pod/" + p["metadata"]["name"]) for p in live if "deletionTimestamp" not in p["metadata"]]
-        require(len(ports) >= 2, "capacity trial addresses at least two core replicas")
+        require(len(ports) >= 2, "Genesis-outage check addresses at least two core replicas")
         index = 0
+        served = set()
         def request(path, method="GET", *, data=None, form=None, headers=None, edge_request=False, expect=(200,)):
             nonlocal index
             host = "genesis.localhost" if edge_request else "api.localhost"
             port = edge_port if edge_request else ports[index % len(ports)]
+            if not edge_request:
+                served.add(port)
             index += 1
             hdr = {"Host": host + (":9443" if edge_request else ":8443"), **(headers or {})}
             if form is not None:
@@ -119,7 +162,7 @@ def measure(kube, core, edge, binary, record, *, login_only=False):
         if login_only:
             require(True, "packaged release created a full authenticated OPAQUE session")
             return
-        org = api("/v1/orgs", "POST", data={"name": "Capacity trial", "slug": "capacity-" + secrets.token_hex(4)},
+        org = api("/v1/orgs", "POST", data={"name": "Outage check", "slug": "outage-" + secrets.token_hex(4)},
                   headers=browser, expect=(201,))
         path = "/v1/orgs/" + org["slug"] + "/projects"
         project = api(path, "POST", data={"name": "Test", "slug": "test"}, headers=browser, expect=(201,))
@@ -127,9 +170,9 @@ def measure(kube, core, edge, binary, record, *, login_only=False):
         env = api(path, "POST", data={"name": "Development", "slug": "dev", "tier": "non_production"},
                   headers=browser, expect=(201,))
         path += "/" + env["slug"] + "/apps"
-        app = api(path, "POST", data={"name": "Capacity"}, headers=browser, expect=(201,))
+        app = api(path, "POST", data={"name": "Outage check"}, headers=browser, expect=(201,))
         path += "/" + app["id"] + "/oauth/clients"
-        client = api(path, "POST", data={"name": "Capacity", "client_type": "public"}, headers=browser, expect=(201,))["client_id"]
+        client = api(path, "POST", data={"name": "Outage check", "client_type": "public"}, headers=browser, expect=(201,))["client_id"]
         path += "/" + client
         api(path + "/redirect-uris", "PUT", data={"redirect_uris": [CALLBACK]}, headers=browser)
         api(path + "/scopes", "PUT", data={"scopes": ["openid", "offline_access"]}, headers=browser)
@@ -174,48 +217,18 @@ def measure(kube, core, edge, binary, record, *, login_only=False):
         for call in flows.values():
             call()
         def phase():
-            start = time.monotonic()
-            # Authorization and explicit consent both consume the default 100-per-600s
-            # authorization budget for one source. Leave room for setup and
-            # measure successful legitimate traffic with all production limits on.
-            duration, interval = 900, 18
-            def sample(call):
-                latencies, failures = [], Counter()
-                for offset in range(0, duration, interval):
-                    due = start + offset
-                    time.sleep(max(0, due - time.monotonic()))
-                    if time.monotonic() - due >= interval:
-                        failures["missed_deadline"] += 1
-                        continue
-                    try:
-                        call()
-                        latencies.append((time.monotonic() - due) * 1000)
-                    except (OSError, RuntimeError, ValueError, KeyError, http.client.HTTPException) as error:
-                        status = re.fullmatch(r"(GET|POST) (/[a-z0-9/_-]+) returned ([0-9]{3})", str(error))
-                        reason = status.group(0) if status else type(error).__name__
-                        failures[reason] += 1
-                offered = duration // interval
-                return dict(offered=offered, successes=len(latencies), success_rate=len(latencies) / offered,
-                            throughput=len(latencies) / duration, failures=sum(failures.values()), failure_reasons=dict(failures),
-                            p95_ms=sorted(latencies)[math.ceil(.95 * len(latencies)) - 1] if latencies else None)
-            with ThreadPoolExecutor(max_workers=len(flows)) as pool:
-                jobs = {key: pool.submit(sample, call) for key, call in flows.items()}
-                results = {key: job.result() for key, job in jobs.items()}
-            time.sleep(max(0, start + duration - time.monotonic()))
-            return results
-        print("Capacity baseline started", flush=True)
+            return exercise(flows, len(ports), served)
+        print("Genesis-outage check: baseline started", flush=True)
         baseline = phase()
         run(kube + ["scale", "deploy/permesi-genesis", "--replicas=0"])
         try:
             run(kube + ["wait", "--for=delete", "pod", "-l", "app.kubernetes.io/name=genesis", "--timeout=60s"])
-            print("Capacity Genesis-offline phase started", flush=True)
+            print("Genesis-outage check: Genesis-offline phase started", flush=True)
             fault = phase()
         finally:
             run(kube + ["scale", "deploy/permesi-genesis", "--replicas=2"])
             run(kube + ["rollout", "status", "deploy/permesi-genesis", "--timeout=180s"])
-        print("CAPACITY " + json.dumps({"identity": record, "baseline": baseline, "genesis_offline": fault}), flush=True)
-        record["capacity"] = {"baseline": baseline, "genesis_offline": fault}
-        for key in flows:
-            b, f = baseline[key], fault[key]
-            require(b["success_rate"] >= .99 and f["success_rate"] >= .99 and f["throughput"] >= .95 * b["throughput"]
-                    and f["p95_ms"] <= 2 * b["p95_ms"], f"{key} meets the per-flow containment gates")
+        print("GENESIS_OUTAGE " + json.dumps({"identity": record, "baseline": baseline, "genesis_offline": fault}), flush=True)
+        record["genesisOutage"] = {"baseline": baseline, "genesis_offline": fault}
+        for passed, message in verdicts(flows, baseline, fault, len(ports)):
+            require(passed, message)

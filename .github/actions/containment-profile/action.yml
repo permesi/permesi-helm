@@ -43,17 +43,21 @@ runs:
         cargo build --locked --release --manifest-path scripts/quickstart/admission/Cargo.toml --target-dir "$RUNNER_TEMP/admission"
         python3 scripts/ci/load-candidate-archives.py
         jq -r '"OPENBAO_IMAGE=" + (.openbao | .repository + "@" + .digest), "POSTGRES_IMAGE=" + (.postgresql | .repository + "@" + .digest)' scripts/quickstart/openbao-images.json >> "$GITHUB_ENV"
-    - name: Measure the packaged containment profile
+    - name: Qualify the packaged containment profile
       env:
         PROFILE: ${{ inputs.profile }}
       shell: bash
       run: |
         set -euo pipefail
-        python3 scripts/quickstart/tests/real-packaged-stack.py --capacity --profile "$PROFILE" --context kind-containment \
+        python3 scripts/quickstart/tests/real-packaged-stack.py --genesis-outage --profile "$PROFILE" --context kind-containment \
           --app-source application --fixture "$RUNNER_TEMP/fixture" --admission-bin "$RUNNER_TEMP/admission/release/quickstart-admission" \
           --previous-core "$PREVIOUS_IMAGE" --previous-revision "$PREVIOUS_SHA" --openbao-image "$OPENBAO_IMAGE" \
           --postgres-image "$POSTGRES_IMAGE" | tee "$RUNNER_TEMP/qualification.log"
-        python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$EXCLUDED_CORE" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE" --companion "$OPENBAO_IMAGE"
+        # The image-admission policy trial builds its own namespace and chart and reads nothing
+        # from the profile's stack, so one profile exercises it completely.
+        if [[ "$PROFILE" == isolated ]]; then
+          python3 scripts/quickstart/tests/core-image-rollback.py --context kind-containment --legacy "$EXCLUDED_CORE" --current "$CURRENT_IMAGE" --previous "$PREVIOUS_IMAGE" --companion "$OPENBAO_IMAGE"
+        fi
     - name: Simulate the upcoming release from the same CI images
       if: inputs.profile == 'shared'
       shell: bash

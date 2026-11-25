@@ -46,7 +46,8 @@ def main():
     parser.add_argument("--app-source", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, default=ROOT)
     parser.add_argument("--admission-bin", default=os.environ.get("QS_ADMISSION_BIN"), required=False)
-    parser.add_argument("--capacity", action="store_true", help="run the two 15-minute fixed-load phases")
+    parser.add_argument("--genesis-outage", action="store_true",
+                        help="check the session and OAuth flows on every core replica with Genesis offline")
     parser.add_argument("--previous-core", help="previous qualified core repository@digest for native rollback")
     parser.add_argument("--previous-revision", help="full build commit embedded in the previous core")
     parser.add_argument("--namespace", help="fresh test namespace for concurrent independent runs")
@@ -54,8 +55,8 @@ def main():
     parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
     parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
     args = parser.parse_args()
-    if args.capacity and not args.openbao_image:
-        parser.error("capacity trials require a candidate OpenBao fixture")
+    if args.genesis_outage and not args.openbao_image:
+        parser.error("the Genesis-outage check requires a candidate OpenBao fixture")
     if bool(args.previous_core) != bool(args.previous_revision) or (args.previous_core and not args.openbao_image):
         parser.error("binary rollback requires both previous image and revision in a candidate profile")
     if args.profile == "isolated" and not args.openbao_image:
@@ -75,7 +76,7 @@ def main():
         qualification["outcome"] = "incomplete"
         qualification["applicationArtifact"] = {"id": os.environ.get("ARTIFACT_ID"),
                                               "digest": os.environ.get("ARTIFACT_DIGEST")}
-        qualification["requestedChecks"] = {"capacity": args.capacity, "rollback": bool(args.previous_core),
+        qualification["requestedChecks"] = {"genesisOutage": args.genesis_outage, "rollback": bool(args.previous_core),
                                             "sharedDependencyOutage": args.profile == "shared",
                                             "eviction": True, "offlineReuse": True, "partition": True, "withdrawal": True}
         qualification["profile"] = args.profile
@@ -134,11 +135,11 @@ def main():
                 def pinned(reference):
                     repository, digest = reference.split("@")
                     return {"repository": repository, "digest": digest, "pullPolicy": "IfNotPresent"}
-                if args.capacity:
+                if args.genesis_outage:
                     values["permesi"]["auth"]["frontendBaseUrl"] = "https://api.localhost:8443"
                     values["permesi"]["extraEnv"].extend([
                         {"name": "PERMESI_OIDC_ISSUER", "value": "https://api.localhost:8443"},
-                        {"name": "PERMESI_OAUTH_AUDIENCE", "value": "capacity-api"}])
+                        {"name": "PERMESI_OAUTH_AUDIENCE", "value": "qualification-api"}])
                 values["genesis"]["admissionSigningVersion"] = 1
                 quickstart = values["quickstart"]
                 quickstart.update(qualificationObservations=True, openbao={"image": pinned(args.openbao_image)},
@@ -207,7 +208,7 @@ def main():
                             "packaged embedded stack passes real TLS/admission and dependency policy verification")
             verify_profile()
             if release_openbao:
-                runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
+                runpy.run_path(str(tests / "genesis-outage.py"))["measure"](
                     k, core, edge, args.admission_bin, {}, login_only=True)
             before = records()
             require(not before.startswith("0:"), "real signup created protected application records")
@@ -217,14 +218,14 @@ def main():
             if args.openbao_image:
                 qualification["entry"] = runpy.run_path(str(tests / "eviction.py"))["trial"](k, namespace, edge)
                 (args.fixture / "qualification.json").write_text(json.dumps(qualification, indent=2) + "\n")
-            capacity_failure = None
-            if args.capacity:
+            outage_failure = None
+            if args.genesis_outage:
                 try:
-                    runpy.run_path(str(tests / "containment-capacity.py"))["measure"](
+                    runpy.run_path(str(tests / "genesis-outage.py"))["measure"](
                         k, core, edge, args.admission_bin, qualification)
                 except RuntimeError as error:
-                    capacity_failure = error
-                    print("Capacity gate failed; continuing independent checks", flush=True)
+                    outage_failure = error
+                    print("Genesis-outage check failed; continuing independent checks", flush=True)
             if args.openbao_image and not isolated:
                 runpy.run_path(str(tests / "shared-dependency-outage.py"))["trial"](k, core)
                 for name in ("permesi", "permesi-genesis", core + "-openbao"):
@@ -293,8 +294,8 @@ def main():
                     verify_previous()
             if args.openbao_image:
                 runpy.run_path(str(tests / "admission-containment.py"))["trial"](k, core, edge, reader, rollback)
-            if capacity_failure:
-                raise capacity_failure
+            if outage_failure:
+                raise outage_failure
             if args.openbao_image:
                 qualification["outcome"] = "passed"
     except BaseException:

@@ -48,6 +48,8 @@ def main():
     parser.add_argument("--admission-bin", default=os.environ.get("QS_ADMISSION_BIN"), required=False)
     parser.add_argument("--genesis-outage", action="store_true",
                         help="check the session and OAuth flows on every core replica with Genesis offline")
+    parser.add_argument("--exercise-lifecycle", action="store_true",
+                        help="rotate leaf certificates, restart Agents, revoke database leases and try wrong admission claims")
     parser.add_argument("--previous-core", help="previous qualified core repository@digest for native rollback")
     parser.add_argument("--previous-revision", help="full build commit embedded in the previous core")
     parser.add_argument("--namespace", help="fresh test namespace for concurrent independent runs")
@@ -55,6 +57,8 @@ def main():
     parser.add_argument("--openbao-image", help="Pinned OpenBao repository@digest for the containment fixture")
     parser.add_argument("--postgres-image", help="Pinned PostgreSQL repository@digest for the containment fixture")
     args = parser.parse_args()
+    if args.exercise_lifecycle and args.profile != "shared":
+        parser.error("the lifecycle trial assumes one OpenBao and one PostgreSQL; use the shared profile")
     if args.genesis_outage and not args.openbao_image:
         parser.error("the Genesis-outage check requires a candidate OpenBao fixture")
     if bool(args.previous_core) != bool(args.previous_revision) or (args.previous_core and not args.openbao_image):
@@ -76,7 +80,7 @@ def main():
         qualification["outcome"] = "incomplete"
         qualification["applicationArtifact"] = {"id": os.environ.get("ARTIFACT_ID"),
                                               "digest": os.environ.get("ARTIFACT_DIGEST")}
-        qualification["requestedChecks"] = {"genesisOutage": args.genesis_outage, "rollback": bool(args.previous_core),
+        qualification["requestedChecks"] = {"genesisOutage": args.genesis_outage, "lifecycle": args.exercise_lifecycle, "rollback": bool(args.previous_core),
                                             "sharedDependencyOutage": args.profile == "shared",
                                             "eviction": True, "offlineReuse": True, "partition": True, "withdrawal": True}
         qualification["profile"] = args.profile
@@ -165,7 +169,13 @@ def main():
                 return run(k + ["exec", core + "-postgresql-0", "-c", "postgresql", "--",
                     "psql", "-X", "-U", "postgres", "-d", "permesi", "-tAc",
                     "SELECT count(*)||':'||coalesce(md5(string_agg(id::text||email||coalesce(encode(opaque_registration_record,'hex'),'<null>'),',' ORDER BY id)),'empty') FROM users"])
-            run(install)
+            # The lifecycle trial needs leaves short enough to watch a rotation. Only this first
+            # installation carries them; the plain reinstall below restores the chart default
+            # before the trials that pause an Agent or OpenBao for longer than two minutes of
+            # validity would tolerate.
+            short_leaves = ["--set-string", "permesi.openbao.agent.pki.ttl=2m",
+                            "--set-string", "genesis.openbao.agent.pki.ttl=2m"] if args.exercise_lifecycle else []
+            run(install + short_leaves)
             if args.openbao_image:
                 # Capture actual dependency identities alongside the app and SQL
                 # inputs. For an index pin, verify the node's platform manifest.
@@ -200,13 +210,17 @@ def main():
                 payload = {"minimum_version": 1, "keys": {"1": metadata["keys"]["1"]["public_key"]}}
                 run(operator + ["kv", "put", "-mount=secret/permesi", "-cas=0", "admission-authority", "-"],
                     input=json.dumps(payload))
-            def verify_profile():
+            def verify_profile(extra=()):
                 if isolated:
                     isolated_checks["verify"](k, lock, args.admission_bin, namespace)
                 else:
-                    require("verify.sh: ALL CHECKS PASSED" in run(verify, env=environment),
+                    require("verify.sh: ALL CHECKS PASSED" in run(verify + list(extra), env=environment),
                             "packaged embedded stack passes real TLS/admission and dependency policy verification")
-            verify_profile()
+            if args.exercise_lifecycle:
+                verify_profile(["--exercise-lifecycle"])
+                require(True, "leaf rotation, Agent restart, database lease revocation and wrong admission claims behaved as required")
+            else:
+                verify_profile()
             if release_openbao:
                 runpy.run_path(str(tests / "genesis-outage.py"))["measure"](
                     k, core, edge, args.admission_bin, {}, login_only=True)

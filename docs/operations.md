@@ -496,6 +496,19 @@ Run `python3 scripts/ci/last-qualified.py` with authenticated GitHub CLI access
 to read the newest successful pair. Failed attempts produce no success record.
 When artifact retention expires, start a fresh application sandbox build.
 
+A run of `Candidate containment` started by hand with `extended` set adds the
+trials too slow for every push. The shared profile installs with two-minute
+backend leaf certificates and runs the verifier's lifecycle mode: leaf rotation
+without a restart, an Agent restart, revocation of every database lease with a
+fail-closed restart, and signed admission tokens with the wrong issuer or
+audience. The plain reinstall that follows restores the chart's leaf lifetime
+before any trial pauses an Agent or OpenBao. The isolated profile then runs
+`real-auth-modes.py` against the candidate images: Agent to native Kubernetes
+authentication, a wrong audience that must fail closed, revoked native tokens,
+AppRole, and back to the Agent. Start it with
+`gh workflow run containment-ci.yml --ref sandbox -f extended=true`. It records
+the same status as an ordinary run when it passes.
+
 The existing `permesi-release` event and manual release workflow resolve the
 application tag, verify each published manifest and its source attestation, then
 use `refresh-release-fixture.py` to bind the canonical SQL archive and bootstrap

@@ -67,7 +67,18 @@ api_proxy {{ use_auto_auth_token = true }}
                              for name, path in [("config", "/config"), ("identity", "/identity"), ("run", "/run/reader")]],
             "readinessProbe": {"exec": {"command": ["bao", "read", "-address=unix:///run/reader/agent.sock",
                 "-field=type", "transit/genesis/keys/genesis-signing"]}, "periodSeconds": 3}}]})
-    run(kube + ["wait", "--for=condition=Ready", "pod/admission-reader", "--timeout=120s"])
+    try:
+        run(kube + ["wait", "--for=condition=Ready", "pod/admission-reader", "--timeout=120s"])
+    except RuntimeError:
+        # The Agent logs its login attempts and errors, never a token. Without them a
+        # reader that runs but cannot authenticate leaves nothing to diagnose.
+        for evidence in (["logs", "pod/admission-reader", "-c", "agent", "--tail=40"],
+                         ["get", "events", "--field-selector", "involvedObject.name=admission-reader",
+                          "-o", "custom-columns=TYPE:.type,REASON:.reason,MESSAGE:.message", "--no-headers"]):
+            result = subprocess.run(kube + evidence, text=True, capture_output=True)
+            for line in (result.stdout + result.stderr).splitlines()[-40:]:
+                print("READER " + line[:300], flush=True)
+        raise
     return kube + ["exec", "admission-reader", "--", "bao", "read", "-address=unix:///run/reader/agent.sock"]
 
 

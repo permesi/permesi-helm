@@ -19,7 +19,15 @@ runs:
   steps:
     - name: Select the rollback baseline
       shell: bash
-      run: jq -r '"PREVIOUS_SHA=" + .revision, "EXCLUDED_CORE=" + .excludedCore' scripts/ci/rollback-baseline.json >> "$GITHUB_ENV"
+      # These values become environment variables and a commit to check out and build, so
+      # they are accepted only in their exact form and never as arbitrary text.
+      run: |
+        set -euo pipefail
+        revision="$(jq -r .revision scripts/ci/rollback-baseline.json)"
+        excluded="$(jq -r .excludedCore scripts/ci/rollback-baseline.json)"
+        [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::rollback baseline revision is not a full commit"; exit 1; }
+        [[ "$excluded" =~ ^ghcr\.io/permesi/permesi@sha256:[0-9a-f]{64}$ ]] || { echo "::error::rollback baseline excludedCore is not a pinned permesi image"; exit 1; }
+        { echo "PREVIOUS_SHA=$revision"; echo "EXCLUDED_CORE=$excluded"; } >> "$GITHUB_ENV"
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         repository: permesi/permesi

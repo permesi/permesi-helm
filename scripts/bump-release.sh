@@ -10,9 +10,8 @@
 # App release (default): sets appVersion and every managed image tag to
 # <version> in the standalone and umbrella values. With --digest (all three
 # services required) the matching digests are written too; without it (tag-only,
-# also selectable explicitly with --tag-only) every managed digest is cleared so
-# a previous digest never pins a new tag. Tag-only is refused from app 0.6, whose
-# OpenBao charts require pinned images.
+# also selectable explicitly with --tag-only) the bump is refused: the OpenBao
+# charts require pinned images, so clearing the digests would break rendering.
 #
 # Chart version: --chart-version, otherwise <version> when that advances the
 # current chart version, otherwise the next patch of the current chart version.
@@ -157,10 +156,10 @@ else
             [[ -n "${digests[${svc}]+set}" ]] || die "missing --digest for '${svc}': provide all of ${services[*]} or none (tag-only)"
         done
     fi
-    # From 0.6 the permesi and genesis charts render OpenBao workloads only and
-    # refuse unpinned images, so a tag-only bump would publish unrenderable charts.
-    if [[ ${#digests[@]} -eq 0 && "$(semver_cmp "${version}" "0.6.0")" != -1 ]]; then
-        die "app ${version} needs --digest for ${services[*]}: OpenBao charts require pinned images (tag-only releases end at 0.5)"
+    # The permesi and genesis charts render OpenBao workloads only and refuse
+    # unpinned images, so a tag-only bump would publish unrenderable charts.
+    if [[ ${#digests[@]} -eq 0 ]]; then
+        die "app releases need --digest for ${services[*]}: the OpenBao charts refuse unpinned images (tag-only bumps are no longer supported)"
     fi
     if [[ -z "${chart_version}" ]]; then
         if [[ "$(semver_cmp "${version}" "${current_chart_version}")" == 1 ]]; then

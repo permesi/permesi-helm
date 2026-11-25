@@ -306,15 +306,13 @@ bash scripts/bump-release.sh --chart-version "$CHART_VERSION" \
   --digest "permesi=$PERMESI_DIGEST" --digest "genesis=$GENESIS_DIGEST" \
   --digest "web=$WEB_DIGEST" "$APP_VERSION"
 
-# Intentional tag-only app release: clears every managed app digest.
-bash scripts/bump-release.sh --chart-version "$CHART_VERSION" --tag-only "$APP_VERSION"
-
 # Chart-only release: preserves appVersion and all image values byte-for-byte.
 bash scripts/bump-release.sh --chart-only "$CHART_VERSION"
 ```
 
-The legacy single `<version>` form remains tag-only and also clears old app
-digests. Without `--chart-version`, app version becomes chart version only if it
+Tag-only bumps (`--tag-only`, or a bare `<version>` without digests) are refused:
+the OpenBao charts require pinned images, so clearing digests would publish charts
+that cannot render. Without `--chart-version`, app version becomes chart version only if it
 advances every current chart; otherwise the maximum chart version advances one
 patch. Explicit chart versions must strictly advance. No version regression is
 permitted (current charts may be ahead of appVersion).
@@ -505,10 +503,12 @@ schema to the same commit. An explicitly acknowledged tag-only event resolves
 the release tags to immutable digests. Identical replays preserve the chart
 version. A chart version can advance independently of the application version.
 
-The first 0.6 bump replaces the released fixture’s legacy dependency pins
-(HashiCorp Vault, PostgreSQL 18) in `scripts/quickstart/lock.json` with the
-OpenBao and PostgreSQL 19 pins from `scripts/quickstart/openbao-images.json`; the
-charts and the quickstart are already OpenBao-only in source. The release
+Every 0.6+ bump writes the OpenBao and PostgreSQL pins from
+`scripts/quickstart/openbao-images.json` into `scripts/quickstart/lock.json`,
+replacing the 0.5 fixture's HashiCorp Vault and PostgreSQL 18 entries on the first
+one and carrying later pin bumps afterwards; the charts and the quickstart are
+already OpenBao-only in source. Until that first bump, chart CI skips the
+real-dependency job, because the locked 0.5 application cannot run on these charts. The release
 gate installs the package with its pinned source archive, initializes public
 authority once with CAS zero, completes OPAQUE login, and verifies a full session.
 For a Helm-only disposable install, initialize the authority through the

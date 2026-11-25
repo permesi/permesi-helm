@@ -14,6 +14,6 @@ Admission verification reads public authority from core OpenBao KV. Use the oper
 workflow to initialize, publish or withdraw a signing version.
 
 OpenBao URL: {{ .Values.openbao.url }}
-  Direct AppRole requires the full login endpoint, for example
-  https://<openbao>:8200/v1/auth/approle/login. When it is a Unix-socket path
-  (OpenBao Agent auto-auth), it is passed through unchanged.
+  For direct AppRole an origin (https://<openbao>:8200) is completed to
+  /v1/auth/approle/login and any other path is used verbatim. A Unix-socket path
+  (OpenBao Agent auto-auth) is passed through unchanged.

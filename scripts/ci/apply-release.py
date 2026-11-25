@@ -42,7 +42,8 @@ def stage(root, app, archive, version, revision, images, chart_version=None):
     if not repeat:
         subprocess.run(["bash", "scripts/bump-release.sh", *args,
                         *(["--chart-version", chart_version] if chart_version else []), version], cwd=root, check=True)
-    if version_tuple(version) >= (0, 6, 0) and "openbao" not in lock["images"]:
+    # Idempotent: also carries later OpenBao/PostgreSQL pin bumps into the lock.
+    if version_tuple(version) >= (0, 6, 0):
         promote(root)
     subprocess.run([sys.executable, ROOT / "scripts/ci/refresh-release-fixture.py", "--root", root,
                     "--app-source", app, "--archive", archive, "--version", version,

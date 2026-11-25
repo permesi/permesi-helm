@@ -142,11 +142,12 @@ an unrelated namespace/cluster.
 ## Image digest precedence
 
 The umbrella-managed image blocks (`permesi.image`, `genesis.image`, `web.image`)
-accept an optional `digest` (`sha256:<64 hex>`). When set, the chart renders
-`repository@digest`; a tag change does not override it. Clear the digest to return
-to `repository:tag`. Backend `openbao.agent.image.digest` is pinned independently.
-See [release procedures](../../docs/operations.md#10-release-and-image-identity)
-for digest clearing and independent app/chart version handling.
+take a `digest` (`sha256:<64 hex>`), rendered as `repository@digest`; a tag change
+does not override it. Permesi and Genesis refuse to render without one (only `web`
+may fall back to `repository:tag`), so update tag and digest together. Backend
+`openbao.agent.image.digest` is pinned independently and is also required. See
+[release procedures](../../docs/operations.md#10-release-and-image-identity) for
+independent app/chart version handling.
 
 ## Production profile and runbook
 

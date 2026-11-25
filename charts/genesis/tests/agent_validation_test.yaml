@@ -399,3 +399,56 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "destination mount directories must not overlap"
+
+  - it: rejects remounting the chart-owned openbao-agent-token volume into the application
+    set:
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: genesis
+      openbao.agent.pki.role: genesis-runtime
+      openbao.agent.pki.commonName: genesis.permesi.dev
+      openbao.agent.pki.dnsNames[0]: genesis.permesi.dev
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: openbao-agent-token
+          mountPath: /var/run/exfil
+          readOnly: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not use reserved volume names"
+
+
+  - it: rejects remounting the chart-owned openbao-agent-config volume into the application
+    set:
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: genesis
+      openbao.agent.pki.role: genesis-runtime
+      openbao.agent.pki.commonName: genesis.permesi.dev
+      openbao.agent.pki.dnsNames[0]: genesis.permesi.dev
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: openbao-agent-config
+          mountPath: /var/run/exfil
+          readOnly: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not use reserved volume names"
+
+
+  - it: rejects remounting the chart-owned tls-bundle volume into the application
+    set:
+      openbao.agent.enabled: true
+      openbao.agent.address: https://openbao.example.com:8200
+      openbao.agent.auth.role: genesis
+      openbao.agent.pki.role: genesis-runtime
+      openbao.agent.pki.commonName: genesis.permesi.dev
+      openbao.agent.pki.dnsNames[0]: genesis.permesi.dev
+      serviceAccount.automount: false
+      extraVolumeMounts:
+        - name: tls-bundle
+          mountPath: /var/run/exfil
+          readOnly: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraVolumeMounts must not use reserved volume names"

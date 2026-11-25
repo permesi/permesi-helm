@@ -1,8 +1,8 @@
-"""Pin the OpenBao dependency images in the release lock on the first 0.6 release.
+"""Pin the OpenBao dependency images in the release lock on every 0.6+ release.
 
 The charts and the quickstart helper are OpenBao-only in source, so the release
-only replaces the lock's 0.5 dependency entries (HashiCorp Vault, PostgreSQL 18)
-with the pins in scripts/quickstart/openbao-images.json.
+replaces the lock's dependency entries (the 0.5 HashiCorp Vault and PostgreSQL 18
+ones, or older OpenBao/PostgreSQL pins) with scripts/quickstart/openbao-images.json.
 """
 import json
 

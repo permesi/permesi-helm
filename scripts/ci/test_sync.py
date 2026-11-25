@@ -23,6 +23,12 @@ class ReleaseTransaction(unittest.TestCase):
             for name in ("charts", "scripts"):
                 shutil.copytree(ROOT / name, tree / name, ignore=shutil.ignore_patterns("__pycache__", "*.tgz", "target"))
             shutil.copyfile(ROOT / "README.md", tree / "README.md")
+            # Start from a stale dependency pin so the release must promote the lock.
+            lock_path = tree / "scripts/quickstart/lock.json"
+            stale = json.loads(lock_path.read_text())
+            stale["images"]["openbao"] = {**stale["images"]["openbao"], "tag": "2.7.2", "digest": "sha256:" + "e" * 64}
+            lock_path.write_text(json.dumps(stale, indent=2) + "\n")
+            pins = json.loads((tree / "scripts/quickstart/openbao-images.json").read_text())
             base = validate(ROOT)["images"]["permesi"]["tag"]
             major, minor, patch = map(int, base.split("."))
             version = "0.6.0" if (major, minor, patch) < (0, 6, 0) else f"{major}.{minor}.{patch+1}"
@@ -62,7 +68,8 @@ class ReleaseTransaction(unittest.TestCase):
             lock = validate(tree)
             self.assertEqual(lock["appRevision"], revision)
             self.assertEqual(lock["appArchiveSha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
-            self.assertEqual(lock["images"]["openbao"]["repository"], "docker.io/openbao/openbao")
+            self.assertEqual(lock["images"]["openbao"], pins["openbao"])
+            self.assertEqual(lock["images"]["postgresql"], pins["postgresql"])
             self.assertNotIn("vault", lock["images"])
             self.assertEqual(str(yaml.safe_load((tree / "charts/permesi-stack/Chart.yaml").read_text())["version"]), chart_version)
             committed = snapshot()

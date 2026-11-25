@@ -352,7 +352,7 @@ There are **no application migrations**: apply schemas before the pods start.
 
 ### Version compatibility
 
-Application CI runs against official **PostgreSQL 18**. Production requires a
+Application CI runs against official **PostgreSQL 19**. Production requires a
 pg_cron-capable deployment if you use the canonical scheduled jobs (`cron_jobs.sql`
 + `check.sql`); stock PostgreSQL does not provide pg_cron.
 
@@ -463,7 +463,7 @@ instead of libpq job connections. It avoids rotating-password/HBA/peer-map
 dependencies without granting runtime roles ownership or weakening TCP auth.
 
 Install the PostgreSQL-major-compatible pg_cron extension package in the server
-image/operator environment (for PGDG PostgreSQL 18, `postgresql-18-cron`).
+image/operator environment (for PGDG PostgreSQL 19, `postgresql-19-cron`).
 Configure the following before registration and **restart PostgreSQL** through
 its service/operator. Preserve other entries in `shared_preload_libraries`:
 
@@ -1430,10 +1430,11 @@ the Agent does not repair an existing pool automatically. See
 
 ### 8.1 Image digest and signature verification
 
-Application and Agent image blocks accept `digest: ""` or
-`sha256:<64 lowercase hex>`. A nonempty digest renders `repository@digest` and
-overrides the tag. Replace or clear the digest when changing identity; app-release
-automation updates/clears managed app digests but leaves Agent pins unchanged.
+Permesi, Genesis and OpenBao Agent image blocks require `digest:
+sha256:<64 lowercase hex>`; rendering fails without one (the web image may still
+fall back to `repository:tag`). The digest renders `repository@digest` and
+overrides the tag, so replace tag and digest together. App-release automation
+updates the managed app digests and leaves Agent pins unchanged.
 See [release procedures](operations.md#10-release-and-image-identity).
 
 Signing/provenance are independent of digest selection. The application workflow

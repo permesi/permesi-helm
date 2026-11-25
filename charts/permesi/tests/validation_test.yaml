@@ -76,3 +76,94 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "require pinned application and OpenBao Agent images"
+
+  - it: rejects PERMESI_OPENBAO_URL in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_OPENBAO_URL
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects GENESIS_OPENBAO_ROLE_ID in extraEnv
+    set:
+      extraEnv:
+        - name: GENESIS_OPENBAO_ROLE_ID
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects PERMESI_ADMISSION_ISS in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_ADMISSION_ISS
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects PERMESI_ADMISSION_AUD in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_ADMISSION_AUD
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects PERMESI_ADMISSION_PASERK_CA_PATH in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_ADMISSION_PASERK_CA_PATH
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: accepts the admission tuning setting PERMESI_ADMISSION_REFRESH_SECONDS in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_ADMISSION_REFRESH_SECONDS
+          value: "10"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_ADMISSION_REFRESH_SECONDS
+            value: "10"
+
+
+  - it: accepts the admission tuning setting PERMESI_ADMISSION_MAX_AGE_SECONDS in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_ADMISSION_MAX_AGE_SECONDS
+          value: "10"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PERMESI_ADMISSION_MAX_AGE_SECONDS
+            value: "10"
+
+
+  - it: rejects the removed admission.paserkCaPath setting
+    set:
+      admission.paserkCaPath: /var/run/permesi/ca.pem
+    asserts:
+      - failedTemplate:
+          errorPattern: "paserkCa"
+
+
+  - it: rejects the removed admission.paserkCa.existingSecret setting
+    set:
+      admission.paserkCa.existingSecret: legacy-ca
+    asserts:
+      - failedTemplate:
+          errorPattern: "paserkCa"

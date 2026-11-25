@@ -79,3 +79,42 @@ tests:
           content:
             name: GENESIS_VAULT_URL
           any: true
+
+  - it: rejects PERMESI_OPENBAO_URL in extraEnv
+    set:
+      extraEnv:
+        - name: PERMESI_OPENBAO_URL
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects GENESIS_OPENBAO_ROLE_ID in extraEnv
+    set:
+      extraEnv:
+        - name: GENESIS_OPENBAO_ROLE_ID
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects GENESIS_ADMISSION_SIGNING_VERSION in extraEnv
+    set:
+      extraEnv:
+        - name: GENESIS_ADMISSION_SIGNING_VERSION
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"
+
+
+  - it: rejects GENESIS_TRANSIT_MOUNT in extraEnv
+    set:
+      extraEnv:
+        - name: GENESIS_TRANSIT_MOUNT
+          value: override
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values for OpenBao and admission trust"

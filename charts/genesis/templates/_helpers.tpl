@@ -174,7 +174,7 @@ false
 {{- end -}}
 {{- range $e := .Values.extraEnv -}}
 {{- $name := toString $e.name -}}
-{{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (eq $name "GENESIS_ADMISSION_SIGNING_VERSION") (hasPrefix "PERMESI_ADMISSION_" $name) -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (has $name (list "GENESIS_ADMISSION_SIGNING_VERSION" "GENESIS_TRANSIT_MOUNT")) -}}
 {{- fail "Use managed values for OpenBao and admission trust" -}}
 {{- end -}}
 {{- end -}}
@@ -314,6 +314,12 @@ false
 {{- end -}}
 {{- if $reservedVol -}}
 {{- fail "genesis: extraVolumes must not use reserved volume names when openbao.agent.enabled" -}}
+{{- end -}}
+{{- /* The Agent-only projected JWT, config and scratch must never reach the application container. */ -}}
+{{- range $m := .Values.extraVolumeMounts -}}
+{{- if has (toString $m.name) (list "tls-bundle" "openbao-agent-socket" "openbao-agent-config" "openbao-agent-token" "openbao-agent-ca" "openbao-agent-scratch") -}}
+{{- fail "genesis: extraVolumeMounts must not use reserved volume names when openbao.agent.enabled" -}}
+{{- end -}}
 {{- end -}}
 
 {{- /* Nonroot UID/GID + fsGroup. */ -}}

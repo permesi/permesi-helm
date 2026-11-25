@@ -1,4 +1,4 @@
-# Official PostgreSQL 18, non-root, ephemeral PGDATA (emptyDir): a pod
+# Official PostgreSQL 19, non-root, ephemeral PGDATA (emptyDir): a pod
 # recreation loses all data. Password authentication on TCP (image default
 # scram-sha-256); no trust auth over the network.
 apiVersion: apps/v1

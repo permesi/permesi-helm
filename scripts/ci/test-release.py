@@ -228,19 +228,13 @@ class BumpTests(unittest.TestCase):
             self.assertEqual(standalone[svc]["image"]["digest"], DIGESTS[svc])
             self.assertEqual(stack[svc]["image"], standalone[svc]["image"])
 
-    def test_tag_only_clears_every_stale_digest_and_preserves_agent(self):
+    def test_tag_only_is_refused_and_preserves_pins(self):
         self.full_digests()
-        before = self.identities()[1]
-        self.bump("v0.4.6")
-        self.assert_versions("0.4.6", "0.4.6")
-        stack, standalone = self.identities()
-        for svc in SERVICES:
-            self.assertEqual(standalone[svc]["image"]["tag"], "0.4.6")
-            self.assertEqual(standalone[svc]["image"]["digest"], "")
-            self.assertEqual(stack[svc]["image"], standalone[svc]["image"])
-            if svc != "web":
-                self.assertEqual(standalone[svc]["openbao"]["agent"]["image"],
-                                 before[svc]["openbao"]["agent"]["image"])
+        baseline = self.snapshot()
+        for args in (["v0.4.6"], ["--tag-only", "0.4.6"], ["--chart-version", "0.5.0", "--tag-only", "0.4.3"]):
+            with self.subTest(args=args):
+                self.bump(*args, succeeds=False)
+                self.assertEqual(self.snapshot(), baseline)
 
     def test_chart_only_retains_all_values_and_app_versions(self):
         self.full_digests()
@@ -251,8 +245,9 @@ class BumpTests(unittest.TestCase):
         for svc, data in before.items():
             self.assertEqual((self.worktree / "charts" / svc / "values.yaml").read_bytes(), data)
 
-    def test_independent_chart_version_and_explicit_tag_only(self):
-        self.bump("--chart-version", "0.5.0", "--tag-only", "0.4.3")
+    def test_independent_chart_version_with_digests(self):
+        args = [item for svc in SERVICES for item in ("--digest", svc + "=" + DIGESTS[svc])]
+        self.bump("--chart-version", "0.5.0", *args, "0.4.3")
         self.assert_versions("0.5.0", "0.4.3")
 
     def test_invalid_inputs_mutate_nothing(self):

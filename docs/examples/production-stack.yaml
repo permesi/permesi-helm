@@ -46,8 +46,8 @@ permesi:
     # Approved signing keys come from the core OpenBao authority record.
 
   openbao:
-    # Permesi POSTs to this value exactly for AppRole login, so use the full
-    # login endpoint (F-01).
+    # AppRole login URL. An origin (https://openbao.example.com:8200) is completed
+    # to /v1/auth/approle/login; any other path is used verbatim.
     url: https://openbao.example.com:8200/v1/auth/approle/login
     roleId:
       existingSecret: permesi-openbao

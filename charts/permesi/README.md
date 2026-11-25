@@ -50,7 +50,9 @@ fails rendering. Any `externalSecret.remoteKey` also requires a non-empty
 `approle` explicitly requires TCP. `kubernetes` selects native application login
 and is mutually exclusive with managed Agent (which requires `auto`).
 
-Direct AppRole posts to `PERMESI_OPENBAO_URL`, so use the full login endpoint:
+For direct AppRole, an origin URL (empty path or `/`, no query) is completed to
+`/v1/auth/approle/login`; any other path, such as a proxy prefix or a custom auth
+mount, is used verbatim:
 
 ```yaml
 openbao:

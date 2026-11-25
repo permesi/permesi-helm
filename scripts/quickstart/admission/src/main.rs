@@ -22,10 +22,15 @@ impl CipherSuite for Suite {
 struct Http { ca: String, origin: String, api_port: String, genesis_port: String }
 impl Http {
     fn request(&self, genesis: bool, path: &str, body: Option<&Value>, token: Option<&str>) -> Result<(u16, String), String> {
+        let (status, body, _) = self.exchange(genesis, path, body, token)?;
+        Ok((status, body))
+    }
+    /// Like `request`, also returning the first `Set-Cookie` header (empty when absent).
+    fn exchange(&self, genesis: bool, path: &str, body: Option<&Value>, token: Option<&str>) -> Result<(u16, String, String), String> {
         let (host, port) = if genesis { ("genesis.localhost", &self.genesis_port) } else { ("api.localhost", &self.api_port) };
         let mut cmd = Command::new("curl");
         cmd.args(["--silent", "--show-error", "--noproxy", "*", "--max-time", "30", "--cacert", &self.ca,
-            "--resolve", &format!("{host}:{port}:127.0.0.1"), "--write-out", "\n%{http_code}",
+            "--resolve", &format!("{host}:{port}:127.0.0.1"), "--write-out", "\n%header{set-cookie}\n%{http_code}",
             "--url", &format!("https://{host}:{port}{path}"), "--config", "-"])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut config = format!("header = \"Origin: {}\"\n", self.origin);
@@ -43,8 +48,9 @@ impl Http {
         let output = child.wait_with_output().map_err(|_| "curl failed")?;
         if !output.status.success() { return Err(format!("Trusted HTTPS request failed (curl exit {:?})", output.status.code())); }
         let out = String::from_utf8(output.stdout).map_err(|_| "HTTP response not UTF-8")?;
-        let (body, status) = out.rsplit_once('\n').ok_or("Missing HTTP status")?;
-        Ok((status.parse().map_err(|_| "Invalid HTTP status")?, body.to_owned()))
+        let (rest, status) = out.rsplit_once('\n').ok_or("Missing HTTP status")?;
+        let (body, cookie) = rest.rsplit_once('\n').ok_or("Missing HTTP header line")?;
+        Ok((status.parse().map_err(|_| "Invalid HTTP status")?, body.to_owned(), cookie.to_owned()))
     }
 }
 fn field<'a>(v: &'a Value, key: &str) -> Result<&'a str, String> { v[key].as_str().ok_or_else(|| format!("Missing response field {key}")) }
@@ -106,10 +112,16 @@ fn run() -> Result<(), String> {
     let params = ClientRegistrationFinishParameters::new(Identifiers { client: Some(email.as_bytes()), server: Some(b"api.localhost") }, Some(&ksf));
     let finish = registration.state.finish(&mut OsRng, password, response, params).map_err(|_| "OPAQUE finish failed")?;
     let body = json!({"email":email,"registration_record":STANDARD.encode(finish.message.serialize())});
-    let (status, _) = http.request(false, "/v1/auth/opaque/signup/finish", Some(&body), Some(token))?;
+    let (status, _, cookie) = http.exchange(false, "/v1/auth/opaque/signup/finish", Some(&body), Some(token))?;
     expect(status, 201, "OPAQUE signup finish")?;
     // Public test email is the only persisted identifier; no password/token/proof output.
     println!("PASS: real OPAQUE signup/finish 201; pending-account email={email}");
+    // The signup-binding cookie activates nothing without the mailed link; the verifying
+    // test replays it as the registering browser would.
+    let binding = cookie.split(';').next().unwrap_or_default();
+    if binding.starts_with("permesi_signup=") && binding.bytes().all(|b| b.is_ascii_alphanumeric() || b"=_-".contains(&b)) {
+        println!("pending-account binding={binding}");
+    }
     Ok(())
 }
 fn main() { if let Err(err) = run() { eprintln!("FAIL: {err}"); std::process::exit(1); } }

@@ -89,7 +89,15 @@ def measure(kube, core, edge, binary, record, *, login_only=False):
                            "-d", "permesi", "-tAc", "SELECT payload_json->>'verify_url' FROM email_outbox WHERE to_email='" + email + "'"])
         verification = parse_qs(urlsplit(link).fragment)["token"][0]
         auth = {"X-Permesi-Zero-Token": admission(), "Origin": FRONTEND}
-        api("/v1/auth/verify-email", "POST", data={"token": verification}, headers=auth, expect=(204,))
+        # The link only activates together with the cookie signup gave the registering browser.
+        # Application builds from before that binding set no cookie and verify on the link alone.
+        binding = re.search(r"pending-account binding=(permesi_signup=[A-Za-z0-9_-]+)", log)
+        if binding:
+            api("/v1/auth/verify-email", "POST", data={"token": verification}, headers=auth, expect=(409,))
+            auth_bound = {**auth, "X-Permesi-Zero-Token": admission(), "Cookie": binding.group(1)}
+            api("/v1/auth/verify-email", "POST", data={"token": verification}, headers=auth_bound, expect=(204,))
+        else:
+            api("/v1/auth/verify-email", "POST", data={"token": verification}, headers=auth, expect=(204,))
         with subprocess.Popen([binary, "--login-proof", email], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               text=True) as proof:
             try:

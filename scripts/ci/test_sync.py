@@ -13,7 +13,7 @@ import zipfile
 import yaml
 
 from release_fixture import ROOT, SERVICES, validate
-from sandbox_artifact import successful_image_attempt, unpack, verify_metadata
+from sandbox_artifact import candidate_artifact, successful_image_attempt, unpack, verify_metadata
 
 
 class ReleaseTransaction(unittest.TestCase):
@@ -100,6 +100,27 @@ class SourceIdentity(unittest.TestCase):
         self.assertEqual(successful_image_attempt(jobs), 1)
         jobs.append(dict(name=names[0], id=11, conclusion="failure", run_attempt=2))
         self.assertIsNone(successful_image_attempt(jobs))
+
+    def test_rerun_of_failed_jobs_still_finds_the_archive_the_reused_build_uploaded(self):
+        """The reused image job is listed under the new attempt; its archive keeps the old name."""
+        sha = "a" * 40
+        names = ("CI OK", "coverage / Coverage", "Build local OCI candidates")
+        jobs = [dict(name=name, id=n, conclusion="success", run_attempt=1) for n, name in enumerate(names)]
+        jobs += [dict(name=name, id=20 + n, conclusion="success", run_attempt=2) for n, name in enumerate(names)]
+        self.assertEqual(successful_image_attempt(jobs), 2)
+        first = dict(name=f"sandbox-oci-{sha}-1", id=1)
+        self.assertIs(candidate_artifact([first], sha, 2), first)
+        rebuilt = dict(name=f"sandbox-oci-{sha}-2", id=2)
+        self.assertIs(candidate_artifact([first, rebuilt], sha, 2), rebuilt)
+        self.assertIs(candidate_artifact([first, rebuilt], sha, 1), first)
+        legacy = dict(name="sandbox-oci-" + sha, id=3)
+        self.assertIs(candidate_artifact([legacy], sha, 1), legacy)
+        for artifacts, attempt in (([], 2), ([rebuilt], 1), ([dict(first, expired=True)], 2),
+                                   ([dict(name=f"sandbox-oci-{'b' * 40}-1", id=4)], 1)):
+            with self.assertRaises(ValueError):
+                candidate_artifact(artifacts, sha, attempt)
+        with self.assertRaises(ValueError):
+            candidate_artifact([first, dict(first, id=9)], sha, 1)
 
     def test_download_rejects_checksum_and_incomplete_archives(self):
         with tempfile.TemporaryDirectory() as tmp:

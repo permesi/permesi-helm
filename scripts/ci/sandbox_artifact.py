@@ -44,6 +44,22 @@ def successful_image_attempt(jobs):
     return None
 
 
+def candidate_artifact(artifacts, sha, attempt):
+    """Pick the images the passing attempt was built from.
+
+    "Re-run failed jobs" lists the reused image job under the new attempt, but its
+    archive was uploaded by the attempt that actually built it. Take the newest
+    archive at or before the passing attempt, and exactly one of that name.
+    """
+    for number in range(attempt, 0, -1):
+        names = {f"sandbox-oci-{sha}-{number}"} | ({"sandbox-oci-" + sha} if number == 1 else set())
+        found = [item for item in artifacts if item["name"] in names and not item.get("expired")]
+        if found:
+            artifact, = found
+            return artifact
+    raise ValueError("no application image archive for the passing attempt")
+
+
 def resolve():
     supplied = os.environ.get("ARTIFACT_ID")
     if supplied:
@@ -72,10 +88,7 @@ def resolve():
             raise ValueError("no successful application CI gates at the current sandbox revision")
         records = json.loads(subprocess.check_output(["gh", "api", "--paginate", "--slurp",
             f"{API}/actions/runs/{run_id}/artifacts?per_page=100"]))
-        names = {"sandbox-oci-" + sha + "-" + str(attempt)}
-        if attempt == 1:
-            names.add("sandbox-oci-" + sha)
-        artifact, = [item for page in records for item in page["artifacts"] if item["name"] in names]
+        artifact = candidate_artifact([item for page in records for item in page["artifacts"]], sha, attempt)
         expected = artifact["digest"]
     run = api(f"actions/runs/{run_id}")
     if (run["path"] != ".github/workflows/build.yml" or run["event"] not in ("push", "workflow_dispatch")

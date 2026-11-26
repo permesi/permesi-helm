@@ -452,7 +452,11 @@ from the exact chart commit, passing the artifact ID and SHA-256 of the ZIP. A c
 successful application build for the current sandbox head. Missing or expired
 artifacts fail qualification. Each profile imports the same three manifest
 digests into its own KinD cluster and checks the running binaries. The distinct
-rollback trial builds a previous core revision and records its own digest.
+rollback trial builds a previous core revision and records its own digest. That
+revision is `revision` in `scripts/ci/rollback-baseline.json`: keep it at the commit
+of the release before the newest one, so the trial is a real downgrade and never the
+commit being qualified. `excludedCore` is an older published image that the image
+policy has to refuse.
 
 A successful matrix records a commit status scoped to the originating run and
 attempt after rechecking both sandbox heads. Each status links to its evidence.

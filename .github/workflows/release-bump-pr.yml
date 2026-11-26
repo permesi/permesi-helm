@@ -215,10 +215,23 @@ jobs:
         if: steps.charts_ci.outputs.run_id != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.charts_ci.outputs.run_id }}
         shell: bash
         run: |
           set -euo pipefail
-          gh run watch "${{ steps.charts_ci.outputs.run_id }}" --exit-status
+          # The API can answer 404 for a run that was dispatched a moment ago, and a
+          # single failed request must not abandon a release whose charts are already
+          # merged. Poll instead of watching, and give up only on a real conclusion.
+          for _ in {1..240}; do
+            state="$(gh run view "$RUN_ID" --json status,conclusion --jq '[.status, .conclusion] | join("/")' 2>/dev/null || true)"
+            case "$state" in
+              completed/success) exit 0 ;;
+              completed/*) echo "Charts CI finished as ${state#completed/}." >&2; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "Timed out waiting for Charts CI run $RUN_ID." >&2
+          exit 1
 
       - name: Trigger Auto Release on main
         if: steps.charts_ci.outputs.run_id != ''

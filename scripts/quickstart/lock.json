@@ -1,7 +1,7 @@
 {
   "platform": "linux/amd64",
-  "appRevision": "3aecaf97ddfcc5d06f78644e44d605a1de4718dd",
-  "appArchiveSha256": "ce3c19487942b941cda61530df15e340ff79a545159797fceac701547cb9472a",
+  "appRevision": "7ee7623e7e41be85f3ab7476ceca3012fe570cec",
+  "appArchiveSha256": "a5ebada0e8b5c8734257907af367501df9c8f91b42576a8bb4ef126aee041ea3",
   "images": {
     "postgresql": {
       "repository": "docker.io/library/postgres",
@@ -10,18 +10,18 @@
     },
     "permesi": {
       "repository": "ghcr.io/permesi/permesi",
-      "tag": "0.6.0",
-      "digest": "sha256:2a0098959e21b7019622a9d47d14ce014f9b53b19e09c8acee7b4f998e8f6720"
+      "tag": "0.6.1",
+      "digest": "sha256:fc7be9b14ea928d3454060a9110d6632855cc90e4f8ca678b1a48194fbbbfb06"
     },
     "genesis": {
       "repository": "ghcr.io/permesi/genesis",
-      "tag": "0.6.0",
-      "digest": "sha256:2a8b649f3bd17536932b3af9a18b6bcf7861c80f2f6332e75def3a77295b58d8"
+      "tag": "0.6.1",
+      "digest": "sha256:5a6d393afeba100b40a246cede8c7a6908db6c2820db2711e29d7222fe4f4d92"
     },
     "web": {
       "repository": "ghcr.io/permesi/web",
-      "tag": "0.6.0",
-      "digest": "sha256:741bcbec18f4e3abd14d8cb57d846604c285ffc5d3796077acf560fe20c7c0cf"
+      "tag": "0.6.1",
+      "digest": "sha256:80a16a9605a61f0e88032aec4cf0987046dee15158261265d946c14a8ab54130"
     },
     "openbao": {
       "repository": "docker.io/openbao/openbao",

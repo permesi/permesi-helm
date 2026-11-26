@@ -1,134 +1,130 @@
 # permesi-helm
 
-Helm charts for Permesi IAM, Genesis admission, and the web UI. Install components
-separately or together with `charts/permesi-stack`.
+Helm charts for Permesi IAM, Genesis admission and the web UI. Install the
+components separately or together with `charts/permesi-stack`.
 
-The charts deploy application 0.6 and later, which use OpenBao only. Use the
-OpenBao shared profile, and add the isolated overlay when Genesis has its own
-PostgreSQL and OpenBao endpoints. Both profiles use offline admission verification
-from core-owned public keys. The release lock keeps the published 0.5.2 pins until
-the 0.6.0 application release event replaces them.
-See [shared values](docs/examples/openbao-shared.yaml),
-[isolated overrides](docs/examples/openbao-isolated.yaml) and
-[release qualification](docs/operations.md#release-and-sandbox-qualification).
+| Chart | Deploys |
+| --- | --- |
+| [`permesi`](charts/permesi/README.md) | Core IAM and OIDC service |
+| [`genesis`](charts/genesis/README.md) | Edge admission token service |
+| [`web`](charts/web/README.md) | Web UI |
+| [`permesi-stack`](charts/permesi-stack/README.md) | All three, with an optional disposable quickstart |
 
-## Breaking changes in chart 0.6
-
-HashiCorp Vault support was removed; the charts cannot deploy 0.5 application
-images. The `vault:` values block is now `openbao:`, `secretsProvider` is gone, and
-the PASERK admission settings (`admission.paserkUrl`, `admission.paserkCaPath`,
-`admission.paserkCa`, `openbao.agent.paserkCa`) were removed because 0.6 reads the
-approved signing keys from the core OpenBao authority. Rendering fails, rather than
-ignoring them, when these keys are still set. Agent resources use OpenBao names
-(`openbao-agent` container, `openbao-agent-*` volumes, `<fullname>-openbao-agent`
-ConfigMap, `<fullname>-openbao` ESO Secret), the default socket is
-`/var/run/secrets/openbao/agent.sock`, the projected-token audience defaults to
-`openbao` (match it in the OpenBao Kubernetes roles), and application and Agent
-images must be pinned by digest. OpenBao itself is provisioned with the
+The backends take their secrets from OpenBao: database credentials, TLS
+certificates and the admission keys. Permesi verifies admission tokens offline,
+against public keys held in the core OpenBao. PostgreSQL, OpenBao and the public
+HTTPS edge are operated outside the charts. Provision OpenBao with the
 application's OpenTofu module (`openbao/contrib/opentofu` in permesi/permesi).
 
-## Choose your path
+## Requirements
 
-### Disposable development: one command
+- Helm 3.13 or later.
+- Linux/amd64 nodes. The application and dependency images are tested on that
+  platform only.
+- Kubernetes 1.29 or later with SidecarContainers enabled (stable from 1.33) when
+  the chart manages the OpenBao Agent, which runs as a native sidecar. Without
+  the managed Agent there is no such requirement.
+- Application and OpenBao Agent images pinned by digest. The Permesi and Genesis
+  charts refuse to render otherwise, and a digest always takes precedence over a
+  tag.
 
-From this checkout, with Bash, Helm, kubectl and Python 3 on PATH:
+## Install
+
+### Disposable development cluster
+
+From this checkout, with Bash, Helm, kubectl and Python 3 on `PATH`:
 
 ```bash
 bash scripts/quickstart/install.sh --context kind-permesi-helm-test \
   --namespace permesi-quickstart --release permesi --acknowledge-development
 ```
 
-Use your explicit kube context; the installer does not change current-context.
-It installs PostgreSQL, dev OpenBao, canonical SQL/OpenBao bootstrap, and two
-replicas of each backend with OpenBao Agent. Images and SQL are pinned in
-[`scripts/quickstart/lock.json`](scripts/quickstart/lock.json).
+Name the kube context explicitly; the installer does not change the current
+one. It installs PostgreSQL, a development OpenBao, the SQL and OpenBao
+bootstrap, and two replicas of each backend with an OpenBao Agent. Images and
+SQL are pinned in [`scripts/quickstart/lock.json`](scripts/quickstart/lock.json).
 
-**Development only:** in-memory OpenBao and ephemeral PostgreSQL, no HA/backups or
-pg_cron maintenance guarantee. Bootstrap-only administrator/root credentials live
-in a retained Kubernetes Secret; application TLS private keys stay in pod memory.
-See [install, verify, connect and teardown](docs/install-guide.md#disposable-quickstart).
+This is for development only. OpenBao runs in memory and PostgreSQL is
+ephemeral, with no high availability or backups. The bootstrap administrator
+and root credentials sit in a retained Kubernetes Secret. See
+[install, verify, connect and teardown](docs/install-guide.md#disposable-quickstart).
 
-Use an isolated development context. Canonical schema owners stay static;
-separate OpenBao credential managers rotate without changing owner passwords.
+The same disposable setup is available through Helm alone, as the umbrella
+chart's [quickstart mode](charts/permesi-stack/README.md#quickstart-mode).
 
-### Helm-only umbrella quickstart
+### Production
 
-Use the fixed release/namespace profile documented in the
-[umbrella quickstart section](charts/permesi-stack/README.md#quickstart-mode).
-It requires both development acknowledgements and `--wait --wait-for-jobs`;
-it is the same disposable dependency model, not a production installation.
+Follow the [installation guide](docs/install-guide.md) and start from one of the
+example value files:
 
-### Production profile
+- [`openbao-shared.yaml`](docs/examples/openbao-shared.yaml): both backends use
+  one PostgreSQL and one OpenBao.
+- [`openbao-isolated.yaml`](docs/examples/openbao-isolated.yaml): an overlay for
+  when Genesis has its own PostgreSQL and OpenBao.
+- [`production-stack.yaml`](docs/examples/production-stack.yaml): Secret, AppRole
+  and External Secrets alternatives to the Agent. Supported, not recommended.
 
-Use the [manual installation guide](docs/install-guide.md) and the
-[OpenBao Agent profile](docs/examples/openbao-shared.yaml). The Agent supplies
-Kubernetes authentication, the Unix proxy and PKI rendering without application
-TLS/AppRole Secrets. PostgreSQL, OpenBao and the public HTTPS edge remain
-operator-managed.
+In the recommended profile the chart runs an OpenBao Agent beside each backend.
+The Agent logs in with the pod's Kubernetes identity, proxies OpenBao on a Unix
+socket (`/var/run/secrets/openbao/agent.sock` by default) and renders the TLS
+bundle into memory, so no application TLS key or AppRole credential is stored in
+a Kubernetes Secret. The projected token's audience defaults to `openbao` and has
+to match the OpenBao Kubernetes roles. The backends can also log in to OpenBao
+themselves (`openbao.authMethod: kubernetes`); that mode does not render the TLS
+files.
 
-[Secret/AppRole/ESO alternatives](docs/examples/production-stack.yaml) remain
-supported, but are not the recommended path. Optional native Kubernetes login
-(`openbao.authMethod: kubernetes`) does not render PKI files.
-
-## Requirements and chart references
-
-- Helm 3.13+; tested application/dependency platform: **Linux/amd64**.
-- Managed Agent uses native sidecars: **Kubernetes ≥1.29**, SidecarContainers
-  enabled (stable in ≥1.33). The default Agent-disabled manifests do not impose
-  that native-sidecar requirement.
-- [Permesi](charts/permesi/README.md), [Genesis](charts/genesis/README.md),
-  [web](charts/web/README.md), [umbrella](charts/permesi-stack/README.md).
-- [Operations](docs/operations.md): auth, TLS/CA rotation, DB lease recovery,
-  network policy, schema upgrades and release procedures.
-
-For a released chart (check that its version contains the features you need):
+Install a published chart with:
 
 ```bash
 helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
   --version 0.6.0 --namespace permesi --create-namespace -f values.yaml
 ```
 
-For integrated source features, rebuild local dependencies and use the manual
-guide's source-install command; no new chart publication is implied.
+Day-two procedures are in the [operations runbook](docs/operations.md):
+authentication, TLS and CA rotation, database lease recovery, network policy,
+schema upgrades and releases.
 
-## Validation and release automation
+## Development
 
-`Charts CI` keeps render/unit/Restricted-admission checks separate from the
-`real-dependencies` job, which uses the actual quickstart install/verify driver.
-The dev gate covers real HTTPS, admission/OPAQUE signup, leaf reload and restart;
-it does not qualify production infrastructure or browser/WASM signup.
-The independent `release-contracts` job runs the 13 parser/bump regression tests
-with `python3 scripts/ci/test-release.py`.
+Run the checks that need no cluster before pushing:
 
-The Permesi and Genesis charts reject unpinned application and Agent images;
-web tag-fallback fixtures explicitly clear the digest so they remain independent
-of release-pinned defaults. Separate assertions verify that a nonempty digest
-takes precedence over a tag and malformed digests are rejected.
+```bash
+for chart in charts/* scripts/quickstart/chart; do helm unittest "$chart"; done
+python3 scripts/ci/check-release-fixture.py
+python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+python3 scripts/ci/test-release.py
+python3 -m unittest discover -s scripts/quickstart/tests -p 'test_*.py'
+python3 scripts/ci/test-chart-contracts.py
+```
 
-Consumer regressions additionally exercise real discovery-version values,
-passthrough/header trust, generated installer values, effective helper settings
-and verifier lifecycle decisions. Chart-testing uses Python 3.12 in both jobs
-that install it, including its Yamale virtual environment. The real-dependency
-job also tests custom dependency endpoints, collected/failed bootstrap Jobs,
-failed Helm releases and OIDC enable/disable transitions against actual OpenBao
-and PostgreSQL.
+They need Helm with the `helm-unittest` plugin, and Python 3.12 with PyYAML.
 
-External GitHub Actions use upstream major-version tags so compatible fixes can
-arrive without editing each workflow. Tool versions remain separate: Python stays
-at 3.12 for chart testing, and the real-dependency Kind/node/kubectl pins stay explicit.
-The Rust toolchain action uses `@v1` with `toolchain: stable`.
-Chart-testing manages a `uv` virtual environment without pip; consumer-test
-dependencies are installed with `uv pip` into that same environment.
+`Charts CI` runs the same checks, lints and installs every chart with
+chart-testing, and installs the quickstart against a real PostgreSQL and
+OpenBao in Kind. That last job covers HTTPS, admission and OPAQUE signup,
+certificate reload and restarts. It does not cover production infrastructure
+or signup through the browser.
 
-For application changes newer than the published pins, use the
+`Candidate containment` runs on every push to `sandbox`. It takes the
+application images built from the application's `sandbox` branch and runs the
+containment suite against them in two profiles, shared and isolated. See
+[release and sandbox qualification](docs/operations.md#release-and-sandbox-qualification).
+To qualify application changes by hand, use the
 [candidate qualification procedure](docs/install-guide.md#qualifying-candidate-application-images).
-It tests actual loaded image manifests and the exact application SQL revision
-without changing release defaults or publishing images.
 
-`release-bump-pr.yml` validates nested per-service image digests and source
-metadata through `scripts/ci/release-event.sh`. Tags never override a nonempty
-`image.digest`. App and chart versions are independent; use
-`scripts/bump-release.sh --chart-only X.Y.Z` for chart-only changes.
-See [release contracts and local checks](docs/operations.md#10-release-and-image-identity).
-Publishing/auto-release workflows remain repository automation; no push,
-publication or GitHub-hosted execution is claimed by local validation.
+## Releases
+
+Application and chart versions are independent. An application release
+dispatches `Release Bump PR`, which verifies the three image digests and their
+source attestations, then opens a pull request that updates the chart versions,
+the image pins and `scripts/quickstart/lock.json` together. Once that change is
+on `main` and `Charts CI` passes, `Auto Release` creates the release and
+`Publish Charts` pushes the charts to `oci://ghcr.io/permesi/charts`.
+
+For a change to the charts alone:
+
+```bash
+scripts/bump-release.sh --chart-only X.Y.Z
+```
+
+See [release and image identity](docs/operations.md#10-release-and-image-identity).

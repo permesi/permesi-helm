@@ -11,8 +11,7 @@ Two paths are documented here:
 - **Disposable quickstart** — `scripts/quickstart/install.sh`, one command,
   cluster-local PostgreSQL + dev-mode OpenBao. Development only.
 
-The charts deploy application 0.6 and later, which use OpenBao only; HashiCorp Vault is
-no longer supported. Production steps below are source-derived operator
+Production steps below are source-derived operator
 instructions, not a claim that this guide was run against production
 OpenBao/PostgreSQL or an HTTPS edge. Use the application SQL revision tested with
 your selected images; `scripts/quickstart/lock.json` records the pinned
@@ -306,8 +305,7 @@ restore, not an in-place OpenBao-image replacement.
   **≥ 1.33**, where native sidecars are stable. This opt-in mode fails chart
   rendering on an older API server; disabled mode (the default) has no such
   requirement.
-- Application images are `linux/amd64` (`ghcr.io/permesi/{permesi,genesis,web}`,
-  0.6 or later).
+- Application images are `linux/amd64` (`ghcr.io/permesi/{permesi,genesis,web}`).
   Use an amd64 node, or separately verified images.
 
 ### Architecture
@@ -797,19 +795,6 @@ is down longer than its one-hour period, reauthenticate/reprovision it through a
 authorized administrator. There is no permanent expiring reviewer token, no
 unattended root token and no fallback that gives app SAs TokenReview.
 
-Before the OpenBao-only charts, the isolated external-reviewer qualification used
-rootless Podman HashiCorp Vault 1.20.4 outside Kind; OpenBao exposes the same
-Kubernetes auth API. It used a trusted host-network-reachable Kubernetes API and protected
-one-hour reviewer JWTs. Both exact app SA roles logged in before and after a
-distinct reviewer replacement; wrong SA/audience and cross-role requests failed.
-Reviewer TokenReview was allowed and both apps were denied. A scoped non-root
-management identity updated config but could not mutate roles; an actual
-scoped Kubernetes operator could mint only the reviewer token, not other/self
-tokens. No JWT expiry wait, installed external scheduler, periodic-management
-renewal, production network/TLS deployment or global trust modification was
-claimed by that scenario. The refresh units above are the operator deployment
-procedure, not an assertion they ran here.
-
 ### 3.2 Kubernetes auth roles (SA-bound, exact namespace/audience)
 
 Bind distinct roles to the *actual rendered* ServiceAccount names and one exact
@@ -1257,8 +1242,6 @@ chart READMEs for the full table.
   `extraVolumeMounts` obey the same ancestor/descendant rule; mounting `/` is
   rejected. An inactive TLS path does not reserve a directory, but a legacy Secret
   mount still counts.
-- The removed `vault:` block, `secretsProvider` and PASERK admission settings make
-  rendering fail instead of being ignored.
 
 ### 4.3 Startup gate
 
@@ -1504,4 +1487,3 @@ production-safe.
 | Leaf cert not reloading | Bundle mounted via `subPath` (pins old file); use directory mount |
 | `check.sql` fails | pg_cron not installed or scheduled jobs not registered |
 | AppRole login 404 | `openbao.url` names a path that is not the AppRole login (use the origin or `/v1/auth/approle/login`), or the AppRole mount differs |
-| Chart render fails with "renamed to openbao" or "secretsProvider was removed" | Values written for chart 0.5: rename `vault:` to `openbao:`, drop `secretsProvider` and the PASERK admission settings |

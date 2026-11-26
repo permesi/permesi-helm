@@ -24,8 +24,7 @@ source paths below are relative to the application repository (`permesi/`).
    Provision it with the application's OpenTofu module
    (`openbao/contrib/opentofu`, encrypted state) or the equivalent `bao` commands
    in the [manual guide](install-guide.md). AppRole is a supported alternative,
-   not a prerequisite for Agent. Chart 0.6 deploys application 0.6 and later only;
-   HashiCorp Vault is no longer supported.
+   not a prerequisite for Agent.
 4. **Trust and TLS.** Agent renders backend bundles into memory volumes, not
    Kubernetes Secrets. Admission trust needs no CA: Permesi reads the approved
    Genesis public keys from the core OpenBao authority record. OpenBao/DB public
@@ -368,54 +367,38 @@ the real-dependencies cluster driver and from remote release execution.
 
 ## 11. Quickstart qualification and known boundaries
 
-The records in this section predate the OpenBao-only charts: where they name
-Vault, the qualified dependency was HashiCorp Vault, and the role and anchor names
-are those of the time. Current qualification runs against OpenBao (see
-[admission containment](#admission-containment-with-the-openbao-application-contract)).
+The quickstart bootstrap keeps the static schema owners `openbao_permesi` and
+`openbao_genesis` separate from the non-owner credential managers
+`openbao_permesi_manager` and `openbao_genesis_manager`. A manager gets only its
+matching runtime role's ADMIN option with INHERIT and SET disabled, CONNECT on
+its own database, CREATEROLE and pg_signal_backend. OpenBao rotates the manager
+password immediately after first configuration and never resets it on a rerun.
+Schema-owner passwords stay stable for authenticated schema bootstrap and
+maintenance.
 
-Bootstrap correction `de750e5` separates static canonical schema owners
-`vault_permesi`/`vault_genesis` from non-owner credential managers
-`vault_permesi_manager`/`vault_genesis_manager`. Managers get only their matching
-runtime role's ADMIN option with INHERIT/SET disabled, own-DB CONNECT,
-CREATEROLE and pg_signal_backend. Vault rotates the manager password immediately
-after first configuration and never resets it on rerun. Schema-owner passwords
-remain stable for authenticated schema bootstrap and maintenance.
+A configuration in which the schema owner is also the credential manager fails
+explicitly: restore a manager-separated configuration or reset only the
+disposable namespace. Do not reset the schema-owner password or migrate an
+unknown configuration automatically.
 
-The bootstrap correction report runtime-qualified both manager rotations plus
-rerun/data/identity preservation, colon/backslash passwords and CR/LF rejection,
-filtered root/unseal banner output with correct signal/exit handling, hashed
-namespace-safe reviewer RBAC names, and a real limited-privilege pregranted
-installation. Older owner-as-manager dev configs fail explicitly: use a
-manager-separated restore or reset only the disposable namespace. Do not reset
-the schema-owner password or automatically migrate an unknown legacy config.
+The verifier tracks each issued role and lease, checks its privileges,
+propagates synchronous revocation errors and verifies that the role disappears.
+Its runtime forwards use dynamic loopback ports, so simultaneous verifiers do
+not collide; those ports are separate from the fixed browser ports in
+`connect.sh`.
 
-Verifier correction `a81d64b` privately tracks each exact issued role/lease,
-checks its privileges, propagates synchronous revocation errors and verifies
-that role disappears. Fault-injected missing membership and broken revocation
-both failed verification. Runtime forwards parse their own child process's
-dynamic loopback announcement; simultaneous verifiers with different CAs passed
-while the old fixed ports were occupied. These verifier ports are separate from
-the fixed user-facing browser ports in `connect.sh`.
-
-The correction report's complete driver passed in 296.19s, including both
-services' actual pool-lease fail-closed restart/new-credential/admission recovery,
-leaf reload, Agent restart, replacement/scaling and reinstall preservation.
-Its complete umbrella wrapper also passed with explicit
-`--helper-release permesi --helper-fullname permesi-quickstart`. These are
-attributed report results, not a fresh driver run by the documentation builder.
-
-Natural projected-JWT expiry/rotation, exact Agent workload-token revocation,
-outbound PASERK wrong-CA/SAN negatives, CA-root rotation, production durability/
-HA/TLS, NetworkPolicy enforcement, SMTP, browser/WASM signup and verified-email/
-login/OIDC E2E remain separate qualifications. GitHub-hosted execution is not
-implied. The disposable quickstart still has no pg_cron scheduler; production
-scheduler execution and external reviewer provisioning are separate manual-guide
-procedures, not claims derived from the dev driver.
+The quickstart does not cover natural projected-JWT expiry and rotation, CA-root
+rotation, production durability, high availability and TLS, NetworkPolicy
+enforcement or SMTP delivery. It has no pg_cron scheduler; production scheduler
+execution and external reviewer provisioning are procedures of the
+[installation guide](install-guide.md). The containment suite covers more of the
+running system; see
+[release and sandbox qualification](#release-and-sandbox-qualification).
 
 ### CI driver and external qualifications
 
-The corrected full CI driver defaults to the disposable namespace **`qv-ci`**.
-Its fault-injection harness requires `qv-*`; the driver rejects other namespace
+The full CI driver defaults to the disposable namespace **`qv-ci`**. Its
+fault-injection harness requires `qv-*`; the driver rejects other namespace
 prefixes before installing resources. This restriction applies to the CI driver,
 not ordinary `install.sh`. Use an isolated context and a matching locked app SQL
 checkout; the admission helper must be compatible with the tooling environment:
@@ -427,35 +410,16 @@ QS_CONTEXT=kind-permesi-helm-test QS_NAMESPACE=qv-ci \
   bash scripts/ci/real-dependencies.sh
 ```
 
-Lead's final evidence at implementation `9742558` reports this default-path run
-passed in **302.47s**, including independent missing-GRANT/broken-revocation
-faults, both services' actual pool-lease recovery and reinstall preservation.
-It separately reports the integrated Helm-only profile and complete explicitly
-mapped wrapper passed. These supersede earlier preflight-failed/pre-correction
-driver attempts; they do not prove natural JWT/token-max-TTL expiry or production
-operation.
-
-The documentation qualification separately exercised
-[external reviewer replacement](install-guide.md#external-openbao-dedicated-reviewer-and-explicit-configuration)
-and [pg_cron background-worker execution](install-guide.md#23-production-scheduler-pg_cron-and-verification).
-External Vault ran outside Kind: both application logins succeeded before/after a
-distinct reviewer replacement, wrong SA/audience/cross-role requests failed,
-apps lacked TokenReview, and scoped management identities were enforced. JWT
-expiry, periodic management-token renewal and the operator-host timer were not
-elapsed-time tested.
-
-The PostgreSQL qualification executed both canonical maintenance jobs before and
-after changing both non-owner manager passwords; all 12 runs succeeded, including
-partition rollover/retention and expired-row cleanup effects. Owner credentials
-and job/function ownership remained unchanged. That scheduler experiment changed
-passwords via SQL, not Vault's rotate-root API; the bootstrap report supplies its
-separate API/rerun proof. Neither experiment certifies production TLS, failover,
-capacity or a managed service's permissions.
+The driver installs, verifies and reinstalls the quickstart. It injects a missing
+GRANT and a broken revocation, which must both fail verification, and it checks
+both services' pool-lease recovery, leaf reload, Agent restart, replacement,
+scaling and reinstall preservation. It does not wait for a projected JWT or a
+token to reach its maximum TTL.
 
 Initial manager-config creation and first root rotation are distinct steps.
 Treat an interruption between them as incomplete provisioning: require successful
-authorized manager rotation before enabling workloads. No automatic repair of
-that interruption is claimed here.
+authorized manager rotation before enabling workloads. Nothing repairs that
+interruption automatically.
 
 ### Sandbox qualification
 
@@ -468,7 +432,7 @@ archive checksum and commit alongside all three application manifests in
 
 ### Admission containment with the OpenBao application contract
 
-The charts render only the OpenBao contract of application 0.6 and later. Pin the backend and Agent image digests and set `genesis.admissionSigningVersion`; there is no provider switch and no PASERK setting. A production isolated installation uses independently constrained existing endpoints. Set each backend's database DSN and Agent address to its own PostgreSQL and OpenBao services. Reserve network access to the core database, the operator API and the authority writer for their respective principals.
+Pin the backend and Agent image digests and set `genesis.admissionSigningVersion`. A production isolated installation uses independently constrained existing endpoints. Set each backend's database DSN and Agent address to its own PostgreSQL and OpenBao services. Reserve network access to the core database, the operator API and the authority writer for their respective principals.
 
 The core operator initializes the versioned authority record outside the release, using the version currently authorized to sign. Set `genesis.admissionSigningVersion` to that version. For separate OpenBao installations, place a dedicated Agent on the operator side, grant it only read access to `transit/genesis/keys/genesis-signing`, and pass its local socket to the application's `scripts/admission-authority` publisher. Publish the public key into core KV before activating a new signer version. Check `/health` for `ok` on every serving core pod and complete real signup before declaring rollout success. During an admission outage `/ready` can stay healthy for existing sessions and OAuth traffic.
 
@@ -516,13 +480,10 @@ schema to the same commit. An explicitly acknowledged tag-only event resolves
 the release tags to immutable digests. Identical replays preserve the chart
 version. A chart version can advance independently of the application version.
 
-Every 0.6+ bump writes the OpenBao and PostgreSQL pins from
-`scripts/quickstart/openbao-images.json` into `scripts/quickstart/lock.json`; the
-first one replaces the 0.5 fixture's HashiCorp Vault and PostgreSQL 18 entries.
-From 0.6 the fixture check requires both files to agree, so change a dependency pin
-in both in the same commit. The charts and the quickstart are already OpenBao-only
-in source. Until that first bump, chart CI skips the
-real-dependency job, because the locked 0.5 application cannot run on these charts. The release
+Every bump writes the OpenBao and PostgreSQL pins from
+`scripts/quickstart/openbao-images.json` into `scripts/quickstart/lock.json`. The
+fixture check requires both files to agree, so change a dependency pin in both in
+the same commit. The release
 gate installs the package with its pinned source archive, initializes public
 authority once with CAS zero, completes OPAQUE login, and verifies a full session.
 For a Helm-only disposable install, initialize the authority through the

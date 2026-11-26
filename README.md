@@ -77,7 +77,7 @@ Install a published chart with:
 
 ```bash
 helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
-  --version 0.6.0 --namespace permesi --create-namespace -f values.yaml
+  --version 0.6.1 --namespace permesi --create-namespace -f values.yaml
 ```
 
 Day-two procedures are in the [operations runbook](docs/operations.md):

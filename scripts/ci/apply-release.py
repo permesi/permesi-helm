@@ -42,10 +42,8 @@ def stage(root, app, archive, version, revision, images, chart_version=None):
     if not repeat:
         subprocess.run(["bash", "scripts/bump-release.sh", *args,
                         *(["--chart-version", chart_version] if chart_version else []), version], cwd=root, check=True)
-    # Idempotent: the first 0.6 release replaces the 0.5 dependency entries; later
-    # locks are already held to the pins by the fixture validation above.
-    if version_tuple(version) >= (0, 6, 0):
-        promote(root)
+    # Idempotent: the fixture validation above already holds the lock to the pins.
+    promote(root)
     subprocess.run([sys.executable, ROOT / "scripts/ci/refresh-release-fixture.py", "--root", root,
                     "--app-source", app, "--archive", archive, "--version", version,
                     "--revision", revision, *args], check=True)

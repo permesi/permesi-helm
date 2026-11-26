@@ -50,8 +50,6 @@ def resolve(values, fullname, namespace):
     if len(candidates) != 1:
         raise ValueError("expected one standalone or umbrella quickstart configuration")
     helper = candidates[0]
-    if "vault" in helper or "secretsProvider" in helper:
-        raise ValueError("HashiCorp Vault helper values are no longer supported")
     enabled = helper["bootstrap"]["oidcSigning"]["enabled"]
     if type(enabled) is not bool:
         raise ValueError("OIDC enablement must be boolean")

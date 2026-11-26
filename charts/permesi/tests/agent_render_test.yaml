@@ -80,16 +80,6 @@ tests:
             name: tls-bundle
             emptyDir:
               medium: Memory
-      - notContains:
-          path: spec.template.spec.volumes
-          content:
-            name: admission-paserk-ca
-          any: true
-      - notContains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: PERMESI_ADMISSION_PASERK_CA_PATH
-          any: true
       # Projected token with audience and bounded expiry
       - contains:
           path: spec.template.spec.volumes

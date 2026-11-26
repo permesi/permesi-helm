@@ -25,15 +25,8 @@ class ReleaseTransaction(unittest.TestCase):
             shutil.copyfile(ROOT / "README.md", tree / "README.md")
             pins = json.loads((tree / "scripts/quickstart/openbao-images.json").read_text())
             base = validate(ROOT)["images"]["permesi"]["tag"]
-            if tuple(map(int, base.split("."))) < (0, 6, 0):
-                # A pre-0.6 lock is not held to the pins, so the first 0.6 release must
-                # promote them; from 0.6 the fixture check keeps both files in lockstep.
-                lock_path = tree / "scripts/quickstart/lock.json"
-                stale = json.loads(lock_path.read_text())
-                stale["images"]["openbao"] = {**stale["images"]["openbao"], "tag": "2.7.2", "digest": "sha256:" + "e" * 64}
-                lock_path.write_text(json.dumps(stale, indent=2) + "\n")
             major, minor, patch = map(int, base.split("."))
-            version = "0.6.0" if (major, minor, patch) < (0, 6, 0) else f"{major}.{minor}.{patch+1}"
+            version = f"{major}.{minor}.{patch+1}"
             app = tree / "source"
             (app / "db/sql").mkdir(parents=True)
             (app / "Cargo.toml").write_text(f'[workspace.package]\nversion="{version}"\n')
@@ -72,7 +65,6 @@ class ReleaseTransaction(unittest.TestCase):
             self.assertEqual(lock["appArchiveSha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
             self.assertEqual(lock["images"]["openbao"], pins["openbao"])
             self.assertEqual(lock["images"]["postgresql"], pins["postgresql"])
-            self.assertNotIn("vault", lock["images"])
             self.assertEqual(str(yaml.safe_load((tree / "charts/permesi-stack/Chart.yaml").read_text())["version"]), chart_version)
             committed = snapshot()
             self.assertEqual(apply().returncode, 0)

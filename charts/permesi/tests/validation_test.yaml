@@ -33,39 +33,11 @@ tests:
       - failedTemplate:
           errorPattern: "autoscaling.minReplicas must not exceed"
 
-  - it: rejects a stale vault values block
-    set:
-      vault.url: https://vault.example.com:8200
-    asserts:
-      - failedTemplate:
-          errorPattern: "vault values block was renamed to openbao"
-
-  - it: rejects the removed secretsProvider switch
-    set:
-      secretsProvider: openbao
-    asserts:
-      - failedTemplate:
-          errorPattern: "secretsProvider was removed"
-
-  - it: rejects the removed PASERK admission URL and CA settings
-    set:
-      admission.paserkUrl: https://genesis.example.com/paserk.json
-    asserts:
-      - failedTemplate:
-          errorPattern: "paserkUrl"
-
-  - it: rejects the removed Agent PASERK CA template
-    set:
-      openbao.agent.paserkCa.enabled: true
-    asserts:
-      - failedTemplate:
-          errorPattern: "paserkCa"
-
   - it: rejects OpenBao and admission settings passed through extraEnv
     set:
       extraEnv:
-        - name: PERMESI_ADMISSION_PASERK_URL
-          value: https://genesis.example.com/paserk.json
+        - name: PERMESI_ADMISSION_ISS
+          value: https://genesis.example.com
     asserts:
       - failedTemplate:
           errorPattern: "Use managed values for OpenBao and admission trust"
@@ -117,16 +89,6 @@ tests:
           errorPattern: "Use managed values for OpenBao and admission trust"
 
 
-  - it: rejects PERMESI_ADMISSION_PASERK_CA_PATH in extraEnv
-    set:
-      extraEnv:
-        - name: PERMESI_ADMISSION_PASERK_CA_PATH
-          value: override
-    asserts:
-      - failedTemplate:
-          errorPattern: "Use managed values for OpenBao and admission trust"
-
-
   - it: accepts the admission tuning setting PERMESI_ADMISSION_REFRESH_SECONDS in extraEnv
     set:
       extraEnv:
@@ -151,19 +113,3 @@ tests:
           content:
             name: PERMESI_ADMISSION_MAX_AGE_SECONDS
             value: "10"
-
-
-  - it: rejects the removed admission.paserkCaPath setting
-    set:
-      admission.paserkCaPath: /var/run/permesi/ca.pem
-    asserts:
-      - failedTemplate:
-          errorPattern: "paserkCa"
-
-
-  - it: rejects the removed admission.paserkCa.existingSecret setting
-    set:
-      admission.paserkCa.existingSecret: legacy-ca
-    asserts:
-      - failedTemplate:
-          errorPattern: "paserkCa"

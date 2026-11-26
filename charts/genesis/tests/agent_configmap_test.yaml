@@ -49,8 +49,6 @@ tests:
       - matchRegex:
           path: data["tls-bundle.tpl"]
           pattern: '"pki-int/issue/genesis-runtime"'
-      - notExists:
-          path: data["paserk-ca.tpl"]
 
   - it: omits the inbound PKI template in socket mode
     set:

@@ -20,7 +20,8 @@ class ReleaseFixtureTests(unittest.TestCase):
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
         self.root = Path(scratch.name) / "helm"
-        for name in ("scripts/quickstart/lock.json", "scripts/quickstart/chart/values.yaml",
+        for name in ("scripts/quickstart/lock.json", "scripts/quickstart/openbao-images.json",
+                     "scripts/quickstart/chart/values.yaml",
                      "charts/permesi-stack/values.yaml", "charts/permesi-stack/Chart.yaml",
                      *[f"charts/{s}/{n}" for s in SERVICES for n in ("Chart.yaml", "values.yaml")]):
             destination = self.root / name

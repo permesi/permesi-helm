@@ -34,20 +34,6 @@ tests:
       - failedTemplate:
           errorPattern: "autoscaling.minReplicas must not exceed"
 
-  - it: rejects a stale vault values block
-    set:
-      vault.url: https://vault.example.com:8200
-    asserts:
-      - failedTemplate:
-          errorPattern: "vault values block was renamed to openbao"
-
-  - it: rejects the removed secretsProvider switch
-    set:
-      secretsProvider: openbao
-    asserts:
-      - failedTemplate:
-          errorPattern: "secretsProvider was removed"
-
   - it: renders the admission signing version
     set:
       admissionSigningVersion: 7
@@ -67,18 +53,13 @@ tests:
       - failedTemplate:
           errorPattern: "Use managed values for OpenBao and admission trust"
 
-  - it: renders only OpenBao environment names
+  - it: renders the OpenBao Agent socket as the OpenBao address
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: GENESIS_OPENBAO_URL
             value: /var/run/secrets/openbao/agent.sock
-      - notContains:
-          path: spec.template.spec.containers[0].env
-          content:
-            name: GENESIS_VAULT_URL
-          any: true
 
   - it: rejects PERMESI_OPENBAO_URL in extraEnv
     set:

@@ -115,13 +115,6 @@ false
 {{- end -}}
 
 {{- define "permesi.validateValues" -}}
-{{- /* Chart 0.6 dropped HashiCorp Vault; stale keys would otherwise be ignored silently. */ -}}
-{{- if hasKey .Values "vault" -}}
-{{- fail "permesi: the vault values block was renamed to openbao; HashiCorp Vault is no longer supported" -}}
-{{- end -}}
-{{- if hasKey .Values "secretsProvider" -}}
-{{- fail "permesi: secretsProvider was removed; the chart always uses OpenBao" -}}
-{{- end -}}
 {{- include "permesi.validateOpenbaoAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- $openbaoEso := and .Values.externalSecret.enabled (ne (dig "externalSecret" "remoteKey" "" .Values.openbao) "") -}}
@@ -148,8 +141,8 @@ false
 {{- end -}}
 {{- range $e := .Values.extraEnv -}}
 {{- $name := toString $e.name -}}
-{{- /* Managed and removed names only: PERMESI_ADMISSION_REFRESH_SECONDS and _MAX_AGE_SECONDS stay tunable here. */ -}}
-{{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (has $name (list "PERMESI_ADMISSION_ISS" "PERMESI_ADMISSION_AUD")) (hasPrefix "PERMESI_ADMISSION_PASERK_" $name) -}}
+{{- /* Managed names only: PERMESI_ADMISSION_REFRESH_SECONDS and _MAX_AGE_SECONDS stay tunable here. */ -}}
+{{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (has $name (list "PERMESI_ADMISSION_ISS" "PERMESI_ADMISSION_AUD")) -}}
 {{- fail "Use managed values for OpenBao and admission trust" -}}
 {{- end -}}
 {{- end -}}

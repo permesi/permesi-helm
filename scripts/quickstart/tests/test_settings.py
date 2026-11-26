@@ -48,8 +48,6 @@ class SettingsTests(unittest.TestCase):
                 target = target[key]
             target[path[-1]] = value
             cases.append(values)
-        for stale in ({"vault": {"service": {"name": "", "port": 8200}}}, {"secretsProvider": "openbao"}):
-            cases.append({**self.values(), **stale})
         for values in cases:
             with self.subTest(values=values):
                 result = self.run_settings(values)

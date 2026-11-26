@@ -150,13 +150,6 @@ false
 {{- end -}}
 
 {{- define "genesis.validateValues" -}}
-{{- /* Chart 0.6 dropped HashiCorp Vault; stale keys would otherwise be ignored silently. */ -}}
-{{- if hasKey .Values "vault" -}}
-{{- fail "genesis: the vault values block was renamed to openbao; HashiCorp Vault is no longer supported" -}}
-{{- end -}}
-{{- if hasKey .Values "secretsProvider" -}}
-{{- fail "genesis: secretsProvider was removed; the chart always uses OpenBao" -}}
-{{- end -}}
 {{- include "genesis.validateOpenbaoAuth" . -}}
 {{- $socketMode := ne (default "" .Values.config.socketPath) "" -}}
 {{- if and $socketMode .Values.service.enabled -}}

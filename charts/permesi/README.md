@@ -1,9 +1,7 @@
 # permesi chart
 
-Production-oriented Helm chart for the permesi IAM service. Chart 0.6 and later
-deploy application 0.6 and later, which use OpenBao only: HashiCorp Vault, the
-`vault:` values block, `secretsProvider` and the PASERK admission URL/CA settings
-were removed, and rendering fails if they are still set.
+Production-oriented Helm chart for the permesi IAM service. The service takes
+its secrets from OpenBao.
 
 ## What it exposes
 
@@ -105,8 +103,8 @@ Supply the TLS bundle separately through Secret/ESO or external volume mounts.
 
 Inline/Secret AppRole credentials, wrapped tokens, OpenBao ESO credential sources
 and conflicting authentication `extraEnv` entries are rejected. `extraEnvFrom`
-remains supported: Helm cannot inspect external contents; operators must remove
-legacy AppRole credential variables there. The application fails closed on
+remains supported: Helm cannot inspect external contents; operators must keep
+AppRole credential variables out of it. The application fails closed on
 native-mode conflicts. Token renewal failure stops/drains the service; a
 supervisor restart re-reads the JWT, logs in and acquires new DB credentials.
 There is no hot token swap or auth-mode fallback.
@@ -252,8 +250,6 @@ The chart enforces these invariants at render time:
 - The application image (and, when enabled, the OpenBao Agent image) must be
   pinned by digest.
 - `extraEnv` must not set `PERMESI_OPENBAO_*`, `GENESIS_OPENBAO_*`,
-  `PERMESI_ADMISSION_ISS`, `PERMESI_ADMISSION_AUD` or `PERMESI_ADMISSION_PASERK_*`;
-  use the chart values instead. `PERMESI_ADMISSION_REFRESH_SECONDS` and
+  `PERMESI_ADMISSION_ISS` or `PERMESI_ADMISSION_AUD`; use the chart values
+  instead. `PERMESI_ADMISSION_REFRESH_SECONDS` and
   `PERMESI_ADMISSION_MAX_AGE_SECONDS` may be tuned there.
-- The removed `vault:` block, `secretsProvider` and PASERK admission settings are
-  rejected rather than ignored.

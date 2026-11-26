@@ -104,18 +104,6 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: Genesis issuer/audience must match Permesi admission
-  - it: rejects the removed provider switch on the helper
-    set:
-      quickstart.secretsProvider: vault
-    asserts:
-      - failedTemplate:
-          errorPattern: Additional property secretsProvider is not allowed
-  - it: rejects the removed PASERK admission URL
-    set:
-      permesi.admission.paserkUrl: https://permesi-genesis:8080/paserk.json
-    asserts:
-      - failedTemplate:
-          errorPattern: paserkUrl
   - it: rejects the unseeded browser client
     set:
       web.runtimeConfig.clientId: 11111111-1111-1111-1111-111111111111

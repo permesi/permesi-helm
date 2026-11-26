@@ -58,8 +58,6 @@ tests:
       - matchRegex:
           path: data["tls-bundle.tpl"]
           pattern: '"pki-int/issue/permesi-runtime"'
-      - notExists:
-          path: data["paserk-ca.tpl"]
       - matchRegex:
           path: data["agent.hcl"]
           pattern: 'pid_file = "/tmp/openbao-agent.pid"'
@@ -75,9 +73,6 @@ tests:
       - notMatchRegex:
           path: data["agent.hcl"]
           pattern: 'tls-bundle.tpl'
-      - notMatchRegex:
-          path: data["agent.hcl"]
-          pattern: 'paserk'
 
   - it: renders an explicit fractional renewal threshold
     set:

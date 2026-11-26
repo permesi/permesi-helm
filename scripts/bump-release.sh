@@ -158,7 +158,7 @@ else
     # The permesi and genesis charts render OpenBao workloads only and refuse
     # unpinned images, so a tag-only bump would publish unrenderable charts.
     if [[ ${#digests[@]} -eq 0 ]]; then
-        die "app releases need --digest for ${services[*]}: the OpenBao charts refuse unpinned images (tag-only bumps are no longer supported)"
+        die "app releases need --digest for ${services[*]}: the OpenBao charts refuse unpinned images (a tag-only bump is refused)"
     fi
     if [[ -z "${chart_version}" ]]; then
         if [[ "$(semver_cmp "${version}" "${current_chart_version}")" == 1 ]]; then

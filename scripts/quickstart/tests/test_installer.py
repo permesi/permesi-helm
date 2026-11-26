@@ -82,8 +82,6 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("@qs-database.qv-endpoints.svc:15432/", app["database"]["dsn"]["value"])
             self.assertEqual(app["openbao"]["agent"]["address"],
                              "http://qs-openbao.qv-endpoints.svc:18200")
-            self.assertNotIn("vault", app)
-            self.assertNotIn("paserkUrl", app.get("admission", {}))
         genesis = next(r["values"] for r in releases if "genesis" in r["release"])
         self.assertEqual(genesis["admissionSigningVersion"], 1)
 

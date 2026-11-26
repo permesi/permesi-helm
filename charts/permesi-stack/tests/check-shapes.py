@@ -59,9 +59,3 @@ for value in (
     result = render(CHART, "-f", str(PROFILE), "--set", value)
     assert result.returncode != 0 and "Additional property" in result.stderr, value
 print("PASS: unsupported production/persistence/replica/public exposure controls fail schema validation")
-
-# HashiCorp Vault was removed: stale helper keys fail instead of being ignored.
-for value in ("quickstart.vault.image.tag=1.20.4", "quickstart.secretsProvider=vault"):
-    result = render(CHART, "-f", str(PROFILE), "--set", value)
-    assert result.returncode != 0 and "Additional property" in result.stderr, value
-print("PASS: removed Vault helper keys fail schema validation")

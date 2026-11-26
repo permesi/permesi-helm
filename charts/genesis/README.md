@@ -1,9 +1,7 @@
 # genesis chart
 
-Production-oriented Helm chart for the genesis edge admission service. Chart 0.6
-and later deploy application 0.6 and later, which use OpenBao only: HashiCorp
-Vault, the `vault:` values block and `secretsProvider` were removed, and rendering
-fails if they are still set.
+Production-oriented Helm chart for the genesis edge admission service. The
+service takes its secrets from OpenBao.
 
 ## What it exposes
 
@@ -234,4 +232,3 @@ The chart enforces these invariants at render time:
   pinned by digest.
 - `extraEnv` must not set `PERMESI_OPENBAO_*`, `GENESIS_OPENBAO_*`,
   `GENESIS_ADMISSION_SIGNING_VERSION` or `GENESIS_TRANSIT_MOUNT`; use the chart values.
-- The removed `vault:` block and `secretsProvider` are rejected rather than ignored.

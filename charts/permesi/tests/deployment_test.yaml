@@ -76,11 +76,6 @@ tests:
       - equal:
           path: spec.template.spec.volumes[0].secret.secretName
           value: permesi-tls
-      - notContains:
-          path: spec.template.spec.volumes
-          content:
-            name: admission-paserk-ca
-          any: true
 
   - it: consumes ESO-generated names when remote keys are set
     set:
@@ -121,11 +116,6 @@ tests:
       - equal:
           path: spec.template.spec.volumes[0].secret.secretName
           value: permesi-tls
-      - notContains:
-          path: spec.template.spec.volumes
-          content:
-            name: admission-paserk-ca
-          any: true
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:

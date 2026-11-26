@@ -32,6 +32,11 @@ permissions:
 
 jobs:
   release-contracts:
+    # The release bump pull request merges itself as soon as it is opened, so a run for it
+    # would compare the charts with a main that already holds them and fail the version
+    # check. The bump workflow tests the package before opening the request and runs this
+    # workflow on main after the merge.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'chore/release-')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -57,6 +62,11 @@ jobs:
           python3 -m unittest discover -s scripts/quickstart/tests -p 'test_*.py' -v
 
   lint:
+    # The release bump pull request merges itself as soon as it is opened, so a run for it
+    # would compare the charts with a main that already holds them and fail the version
+    # check. The bump workflow tests the package before opening the request and runs this
+    # workflow on main after the merge.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'chore/release-')
     runs-on: ubuntu-latest
     outputs:
       has_changes: ${{ steps.changed.outputs.has_changes }}

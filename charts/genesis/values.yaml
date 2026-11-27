@@ -44,8 +44,12 @@ config:
   logLevel: info
 
 database:
+  # The service refuses a DSN to a host that is not local unless it sets
+  # sslmode=verify-full or verify-ca. Set this only for a development cluster
+  # whose PostgreSQL has no TLS; the connection can then be read or impersonated.
+  allowUnverifiedTls: false
   dsn:
-    value: postgres://postgres@postgres-genesis:5432/genesis?sslmode=disable
+    value: postgres://postgres@postgres-genesis:5432/genesis?sslmode=verify-full
     existingSecret: ""
     secretKey: dsn
     externalSecret:
@@ -66,6 +70,10 @@ tls:
 
 openbao:
   url: /var/run/secrets/openbao/agent.sock
+  # The service refuses a plain http:// URL to a host that is not loopback. Set
+  # this only for a development cluster whose OpenBao has no TLS; tokens and
+  # secrets then cross the network in clear text. The Agent socket needs nothing.
+  allowInsecureHttp: false
   # auto: a Unix socket uses the OpenBao Agent, an http(s) URL uses AppRole.
   # kubernetes: native Kubernetes auth with a projected service-account token.
   authMethod: auto

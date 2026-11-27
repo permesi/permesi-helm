@@ -57,6 +57,10 @@
 {{- if or (ne $v.database.dsn.value $dsn) $v.database.dsn.existingSecret $v.database.dsn.externalSecret.remoteKey -}}
 {{- fail (printf "permesi-stack: quickstart %s DSN must use bootstrap PostgreSQL/database with placeholder user, no credential Secret" $name) -}}
 {{- end -}}
+{{- /* The bootstrap PostgreSQL has no TLS; without the opt-out the service refuses the DSN at startup. */ -}}
+{{- if not $v.database.allowUnverifiedTls -}}
+{{- fail (printf "permesi-stack: quickstart %s needs database.allowUnverifiedTls: true for the bootstrap PostgreSQL" $name) -}}
+{{- end -}}
 {{- if ne $v.openbao.transitMount (printf "transit/%s" $name) -}}
 {{- fail (printf "permesi-stack: quickstart %s transitMount must match bootstrap policy" $name) -}}
 {{- end -}}

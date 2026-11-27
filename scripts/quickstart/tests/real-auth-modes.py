@@ -130,6 +130,8 @@ def main():
             values = json.loads(json.dumps(original))
             values["openbao"]["agent"]["enabled"] = False
             values["openbao"]["url"] = f"http://{helper}-openbao.{args.namespace}.svc:8200"
+            # The development OpenBao has no TLS; the service refuses plain http otherwise.
+            values["openbao"]["allowInsecureHttp"] = True
             values["openbao"]["authMethod"] = "kubernetes"
             values["openbao"]["kubernetes"]["role"] = service
             values["tls"]["existingSecret"] = name + "-qualification-tls"

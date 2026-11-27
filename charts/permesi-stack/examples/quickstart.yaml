@@ -41,6 +41,7 @@ permesi:
     automount: false
     name: permesi
   database:
+    allowUnverifiedTls: true
     dsn:
       value: postgres://placeholder@permesi-quickstart-postgresql.permesi-quickstart.svc:5432/permesi?sslmode=disable
   tls:
@@ -81,6 +82,7 @@ genesis:
     automount: false
     name: permesi-genesis
   database:
+    allowUnverifiedTls: true
     dsn:
       value: postgres://placeholder@permesi-quickstart-postgresql.permesi-quickstart.svc:5432/genesis?sslmode=disable
   tls:

@@ -24,13 +24,49 @@ tests:
           path: spec.template.spec.automountServiceAccountToken
           value: true
 
+  - it: leaves the transport opt-outs off by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
+          any: true
+
+  - it: passes the transport opt-outs only when a development cluster asks for them
+    set:
+      database.allowUnverifiedTls: true
+      openbao.allowInsecureHttp: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
+            value: "true"
+
+  - it: accepts only booleans for the transport opt-outs
+    set:
+      database.allowUnverifiedTls: "yes"
+    asserts:
+      - failedTemplate:
+          errorPattern: "allowUnverifiedTls"
+
   - it: keeps DSN inline by default
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: GENESIS_DSN
-            value: "postgres://postgres@postgres-genesis:5432/genesis?sslmode=disable"
+            value: "postgres://postgres@postgres-genesis:5432/genesis?sslmode=verify-full"
 
   - it: does not mount a TLS volume by default
     asserts:

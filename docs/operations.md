@@ -190,8 +190,12 @@ full native-auth supervisor/DB recovery is not claimed by the Agent quickstart.
   backend image needs no OpenBao CA.
 - **PostgreSQL TLS** is controlled by the DSN. Use `sslmode=verify-full` plus
   `sslrootcert=<path>` where `<path>` points at a CA mounted via
-  `extraVolumes`/`extraVolumeMounts` (see the example). The development default
-  `sslmode=disable` must not be used in production.
+  `extraVolumes`/`extraVolumeMounts` (see the example). The services refuse a DSN
+  to a host that is not local unless it sets `sslmode=verify-full` or `verify-ca`,
+  and a plain `http://` OpenBao URL to a host that is not loopback. The chart
+  values `database.allowUnverifiedTls` and `openbao.allowInsecureHttp` switch those
+  refusals off; the quickstart sets the first because its PostgreSQL has no TLS.
+  Neither belongs in production.
 
 ## 4. Split trust and admission verification
 

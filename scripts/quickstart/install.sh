@@ -277,6 +277,7 @@ serviceAccount:
   automount: false
   name: "${app_name}"
 database:
+  allowUnverifiedTls: true
   dsn:
     value: "postgres://placeholder@${pg_host}:${pg_port}/${svc}?sslmode=disable"
 openbao:

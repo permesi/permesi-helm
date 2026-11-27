@@ -136,6 +136,10 @@ spec:
               {{- else }}
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
+            {{- if .Values.database.allowUnverifiedTls }}
+            - name: PERMESI_DB_ALLOW_UNVERIFIED_TLS
+              value: "true"
+            {{- end }}
 
             {{- with .Values.admission.issuer }}
             - name: PERMESI_ADMISSION_ISS
@@ -148,6 +152,10 @@ spec:
 
             - name: PERMESI_OPENBAO_URL
               value: {{ .Values.openbao.url | quote }}
+            {{- if .Values.openbao.allowInsecureHttp }}
+            - name: PERMESI_OPENBAO_ALLOW_INSECURE_HTTP
+              value: "true"
+            {{- end }}
             {{- if ne .Values.openbao.authMethod "auto" }}
             - name: PERMESI_OPENBAO_AUTH_METHOD
               value: {{ .Values.openbao.authMethod | quote }}

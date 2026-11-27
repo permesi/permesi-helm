@@ -138,9 +138,17 @@ spec:
               {{- else }}
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
+            {{- if .Values.database.allowUnverifiedTls }}
+            - name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
+              value: "true"
+            {{- end }}
 
             - name: GENESIS_OPENBAO_URL
               value: {{ .Values.openbao.url | quote }}
+            {{- if .Values.openbao.allowInsecureHttp }}
+            - name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
+              value: "true"
+            {{- end }}
             {{- if ne .Values.openbao.authMethod "auto" }}
             - name: GENESIS_OPENBAO_AUTH_METHOD
               value: {{ .Values.openbao.authMethod | quote }}

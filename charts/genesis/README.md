@@ -32,6 +32,8 @@ This applies to:
 - `openbao.secretId`
 - `openbao.wrappedToken`
 
+The service refuses a `database.dsn` to a host that is not local unless it sets `sslmode=verify-full` or `verify-ca`, and a plain `http://` `openbao.url` to a host that is not loopback. `database.allowUnverifiedTls: true` and `openbao.allowInsecureHttp: true` switch those refusals off for a development cluster; leave both `false` in production. The default DSN uses `sslmode=verify-full`.
+
 ### ExternalSecret precedence
 
 When `externalSecret.enabled` is `true`, the Deployment and the rendered

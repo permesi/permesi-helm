@@ -25,6 +25,7 @@ permesi:
     automount: false
     name: api-backend-identity
   database:
+    allowUnverifiedTls: true
     dsn:
       value: postgres://placeholder@atlas-quickstart-postgresql.uq-alt.svc:5432/permesi?sslmode=disable
   tls:
@@ -74,6 +75,7 @@ genesis:
     automount: false
     name: token-backend-identity
   database:
+    allowUnverifiedTls: true
     dsn:
       value: postgres://placeholder@atlas-quickstart-postgresql.uq-alt.svc:5432/genesis?sslmode=disable
   tls:

@@ -25,6 +25,8 @@ For sensitive fields you can use either:
 
 This applies to `database.dsn`, `tls` and `openbao` (role_id/secret_id).
 
+The service refuses a `database.dsn` to a host that is not local unless it sets `sslmode=verify-full` or `verify-ca`, and a plain `http://` `openbao.url` to a host that is not loopback. `database.allowUnverifiedTls: true` and `openbao.allowInsecureHttp: true` switch those refusals off for a development cluster; leave both `false` in production. The default DSN uses `sslmode=verify-full`.
+
 ### ExternalSecret precedence
 
 Each source resolves to one effective Secret name used consistently by both the

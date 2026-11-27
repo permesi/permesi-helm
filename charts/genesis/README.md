@@ -118,8 +118,13 @@ override the defaults:
   `GENESIS_ADMISSION_AUD` (default `permesi`) must match Permesi's admission
   issuer/audience, or Permesi rejects the tokens.
 - `GENESIS_IP_HEADER` (default `CF-Connecting-IP`) and
-  `GENESIS_COUNTRY_HEADER` (default `CF-IPCountry`) are metadata only, not a
-  trusted-proxy authentication boundary.
+  `GENESIS_COUNTRY_HEADER` (default `CF-IPCountry`) name the headers an edge sets.
+  They feed the token audit record only and never decide a request.
+- `GENESIS_TRUSTED_PROXIES` (comma-separated CIDRs, empty by default) lists the
+  peers Genesis accepts those headers from. From any other peer it records the
+  address of the connection itself and no country. Behind an ingress or edge, set
+  it to the addresses that hop connects from and make the hop overwrite the
+  address header; otherwise every record shows the ingress.
 
 ## Admission signing version
 

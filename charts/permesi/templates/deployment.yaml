@@ -138,7 +138,8 @@ spec:
               {{- end }}
             # Always set, so a ConfigMap or Secret in extraEnvFrom cannot turn it on.
             - name: PERMESI_DB_ALLOW_UNVERIFIED_TLS
-              value: {{ .Values.database.allowUnverifiedTls | quote }}
+              # A value missing from an upgrade with --reuse-values renders as false, not empty.
+              value: {{ .Values.database.allowUnverifiedTls | default false | quote }}
 
             {{- with .Values.admission.issuer }}
             - name: PERMESI_ADMISSION_ISS
@@ -152,7 +153,7 @@ spec:
             - name: PERMESI_OPENBAO_URL
               value: {{ .Values.openbao.url | quote }}
             - name: PERMESI_OPENBAO_ALLOW_INSECURE_HTTP
-              value: {{ .Values.openbao.allowInsecureHttp | quote }}
+              value: {{ .Values.openbao.allowInsecureHttp | default false | quote }}
             {{- if ne .Values.openbao.authMethod "auto" }}
             - name: PERMESI_OPENBAO_AUTH_METHOD
               value: {{ .Values.openbao.authMethod | quote }}

@@ -207,11 +207,14 @@ def main():
             if len(current) == 2 and all(uid in first_end and status.get("ready")
                                          for uid, (_, status) in statuses.items()):
                 ended = list(first_end.values())
+                # Two restarts between samples replace the first termination in lastState;
+                # what is left would be read as evidence about the wrong exit.
+                skipped = [end["pod"] for end in ended if end["restartsWhenSeen"] != 1]
                 missing = [end["pod"] for end in ended
                            if "exitCode" not in (end["terminated"] or {})]
                 clean = [end["pod"] for end in ended
                          if (end["terminated"] or {}).get("exitCode") == 0]
-                if missing or clean:
+                if skipped or missing or clean:
                     # Say how each container ended. Only its recorded state and which of a fixed
                     # set of shutdown messages its log holds are printed, never a log line.
                     markers = ("Gracefully shutting down", "Shutdown requested by the operating system",
@@ -230,6 +233,7 @@ def main():
                               "reason": state.get("reason"), "signal": state.get("signal"),
                               "startedAt": state.get("startedAt"), "finishedAt": state.get("finishedAt"),
                               "seen": [marker for marker in markers if marker in text]}), flush=True)
+                require(not skipped, "the first restart after revocation was observed, not a later one")
                 require(not missing, "every restarted container left a termination record")
                 require(not clean,
                         "native token revocation causes a nonzero application exit before recovery")

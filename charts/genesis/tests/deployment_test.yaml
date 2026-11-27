@@ -43,6 +43,24 @@ tests:
             name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
             value: "false"
 
+  # `helm upgrade --reuse-values` from chart 0.6.1, which had neither value, passes
+  # them as null. An empty variable would stop a newer image from starting.
+  - it: renders a missing transport opt-out as false
+    set:
+      database.allowUnverifiedTls: null
+      openbao.allowInsecureHttp: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
+            value: "false"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
+            value: "false"
+
   - it: refuses a transport opt-out smuggled in through extraEnv
     set:
       extraEnv:

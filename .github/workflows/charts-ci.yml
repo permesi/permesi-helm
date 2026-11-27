@@ -36,12 +36,14 @@ jobs:
     # would compare the charts with a main that already holds them and fail the version
     # check. The bump workflow tests the package before opening the request and runs this
     # workflow on main after the merge.
-    # Skipped only for the release bump pull request the automation opens from this
+    # Skipped only when the automation opens its release bump pull request from this
     # repository. A branch name alone is not enough: anyone can push a fork branch
-    # called chore/release-*, and a skipped job counts as passed.
+    # called chore/release-*, and a skipped job counts as passed. Any later push to
+    # that branch runs the checks, since nothing qualified the new head.
     if: >-
       github.event_name != 'pull_request' ||
       !(startsWith(github.head_ref, 'chore/release-') &&
+        github.event.action == 'opened' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.user.login == 'github-actions[bot]')
     runs-on: ubuntu-latest
@@ -73,12 +75,14 @@ jobs:
     # would compare the charts with a main that already holds them and fail the version
     # check. The bump workflow tests the package before opening the request and runs this
     # workflow on main after the merge.
-    # Skipped only for the release bump pull request the automation opens from this
+    # Skipped only when the automation opens its release bump pull request from this
     # repository. A branch name alone is not enough: anyone can push a fork branch
-    # called chore/release-*, and a skipped job counts as passed.
+    # called chore/release-*, and a skipped job counts as passed. Any later push to
+    # that branch runs the checks, since nothing qualified the new head.
     if: >-
       github.event_name != 'pull_request' ||
       !(startsWith(github.head_ref, 'chore/release-') &&
+        github.event.action == 'opened' &&
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.user.login == 'github-actions[bot]')
     runs-on: ubuntu-latest

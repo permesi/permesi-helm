@@ -195,8 +195,24 @@ def main():
                    any(s["name"] == "permesi" and s.get("ready") and
                        s["restartCount"] > previous[p["metadata"]["uid"]]
                        for s in p["status"].get("containerStatuses", [])) for p in current):
-                require(all(next(s for s in p["status"]["containerStatuses"] if s["name"] == "permesi")
-                            .get("lastState", {}).get("terminated", {}).get("exitCode", 0) != 0 for p in current),
+                ended = {p["metadata"]["name"]: next(s for s in p["status"]["containerStatuses"]
+                         if s["name"] == "permesi").get("lastState", {}).get("terminated", {}) for p in current}
+                if any(state.get("exitCode", 0) == 0 for state in ended.values()):
+                    # Say how each container ended. Only its recorded state and which of a fixed
+                    # set of shutdown messages its log holds are printed, never a log line.
+                    markers = ("Gracefully shutting down", "Shutdown requested by the operating system",
+                               "Shutdown signalled again", "Graceful drain timed out", "Shutdown requested: ",
+                               "database_healthcheck_failed", "openbao_token_renewal_failed",
+                               "openbao_db_lease_renewal_failed", "panicked")
+                    for pod, state in ended.items():
+                        log = subprocess.run(k + ["logs", pod, "-c", "permesi", "--previous", "--tail=200"],
+                                             capture_output=True, text=True)
+                        text = log.stdout + log.stderr
+                        print("DIAG: " + json.dumps({"pod": pod, "exitCode": state.get("exitCode"),
+                              "reason": state.get("reason"), "signal": state.get("signal"),
+                              "startedAt": state.get("startedAt"), "finishedAt": state.get("finishedAt"),
+                              "seen": [marker for marker in markers if marker in text]}), flush=True)
+                require(all(state.get("exitCode", 0) != 0 for state in ended.values()),
                         "native token revocation causes a nonzero application exit before recovery")
                 require(True, "native token revocation recovers through fail-closed container restart")
                 break

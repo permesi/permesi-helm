@@ -66,6 +66,23 @@ tests:
       - failedTemplate:
           errorPattern: "allowUnverifiedTls"
 
+  - it: refuses an operator elevation lifetime the service would not start with
+    set:
+      auth.platformAdminTtlSeconds: 46801
+    asserts:
+      - failedTemplate:
+          errorPattern: "platformAdminTtlSeconds"
+
+  - it: accepts the longest operator elevation lifetime
+    set:
+      auth.platformAdminTtlSeconds: 46800
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PLATFORM_ADMIN_TTL_SECONDS
+            value: "46800"
+
   - it: uses the inline DSN value by default
     asserts:
       - contains:

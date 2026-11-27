@@ -158,6 +158,7 @@ auth:
   emailOutboxBackoffMaxSeconds: 300
   opaqueServerId: api.permesi.dev
   opaqueLoginTtlSeconds: 300
+  # Longest operator elevation, 1 to 46800 seconds; the service refuses other values.
   platformAdminTtlSeconds: 43200
   platformRecentAuthSeconds: 3600
 

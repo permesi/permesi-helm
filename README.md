@@ -80,6 +80,13 @@ helm upgrade --install permesi oci://ghcr.io/permesi/charts/permesi-stack \
   --version 0.6.1 --namespace permesi --create-namespace -f values.yaml
 ```
 
+Chart and image version 0.6.1 predate three behaviours this repository's `main`
+already documents and has values for: the refusal of clear-text OpenBao and
+unverified database connections, the Genesis trusted-proxy rule, and the
+session-bound operator elevation. A checkout of `main` still pins the 0.6.1 images,
+which ignore the new settings, until the next application release moves the digests.
+Do not rely on those guarantees before then.
+
 Day-two procedures are in the [operations runbook](docs/operations.md):
 authentication, TLS and CA rotation, database lease recovery, network policy,
 schema upgrades and releases.

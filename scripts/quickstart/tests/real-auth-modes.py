@@ -188,31 +188,50 @@ def main():
                 run(root + ["token", "revoke", "-accessor", accessor])
                 revoked += 1
         require(revoked >= 2, "revoked actual native service tokens by private accessor")
+        # The termination that counts is the first one after the revocation. It is taken
+        # when a container's restart count first rises, per pod UID, because a second
+        # restart would replace it in lastState. A container without a termination record
+        # is reported as that, never read as a clean exit.
+        first_end = {}
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             current = pods("permesi")
-            if len(current) == 2 and all(p["metadata"]["uid"] in previous and
-                   any(s["name"] == "permesi" and s.get("ready") and
-                       s["restartCount"] > previous[p["metadata"]["uid"]]
-                       for s in p["status"].get("containerStatuses", [])) for p in current):
-                ended = {p["metadata"]["name"]: next(s for s in p["status"]["containerStatuses"]
-                         if s["name"] == "permesi").get("lastState", {}).get("terminated", {}) for p in current}
-                if any(state.get("exitCode", 0) == 0 for state in ended.values()):
+            statuses = {p["metadata"]["uid"]: (p["metadata"]["name"], next(
+                (s for s in p["status"].get("containerStatuses", []) if s["name"] == "permesi"), {}))
+                for p in current}
+            for uid, (pod, status) in statuses.items():
+                restarts = status.get("restartCount", 0) - previous.get(uid, 0)
+                if uid in previous and restarts > 0 and uid not in first_end:
+                    first_end[uid] = {"pod": pod, "restartsWhenSeen": restarts,
+                                      "terminated": status.get("lastState", {}).get("terminated")}
+            if len(current) == 2 and all(uid in first_end and status.get("ready")
+                                         for uid, (_, status) in statuses.items()):
+                ended = list(first_end.values())
+                missing = [end["pod"] for end in ended
+                           if "exitCode" not in (end["terminated"] or {})]
+                clean = [end["pod"] for end in ended
+                         if (end["terminated"] or {}).get("exitCode") == 0]
+                if missing or clean:
                     # Say how each container ended. Only its recorded state and which of a fixed
                     # set of shutdown messages its log holds are printed, never a log line.
                     markers = ("Gracefully shutting down", "Shutdown requested by the operating system",
                                "Shutdown signalled again", "Graceful drain timed out", "Shutdown requested: ",
                                "database_healthcheck_failed", "openbao_token_renewal_failed",
                                "openbao_db_lease_renewal_failed", "panicked")
-                    for pod, state in ended.items():
-                        log = subprocess.run(k + ["logs", pod, "-c", "permesi", "--previous", "--tail=200"],
+                    for end in ended:
+                        state = end["terminated"] or {}
+                        log = subprocess.run(k + ["logs", end["pod"], "-c", "permesi", "--previous", "--tail=200"],
                                              capture_output=True, text=True)
                         text = log.stdout + log.stderr
-                        print("DIAG: " + json.dumps({"pod": pod, "exitCode": state.get("exitCode"),
+                        print("DIAG: " + json.dumps({"pod": end["pod"],
+                              "terminationRecorded": "exitCode" in state,
+                              "restartsWhenSeen": end["restartsWhenSeen"],
+                              "exitCode": state.get("exitCode"),
                               "reason": state.get("reason"), "signal": state.get("signal"),
                               "startedAt": state.get("startedAt"), "finishedAt": state.get("finishedAt"),
                               "seen": [marker for marker in markers if marker in text]}), flush=True)
-                require(all(state.get("exitCode", 0) != 0 for state in ended.values()),
+                require(not missing, "every restarted container left a termination record")
+                require(not clean,
                         "native token revocation causes a nonzero application exit before recovery")
                 require(True, "native token revocation recovers through fail-closed container restart")
                 break

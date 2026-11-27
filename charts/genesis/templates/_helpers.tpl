@@ -170,6 +170,10 @@ false
 {{- if or (hasPrefix "PERMESI_OPENBAO_" $name) (hasPrefix "GENESIS_OPENBAO_" $name) (has $name (list "GENESIS_ADMISSION_SIGNING_VERSION" "GENESIS_TRANSIT_MOUNT")) -}}
 {{- fail "Use managed values for OpenBao and admission trust" -}}
 {{- end -}}
+{{- /* A later duplicate in the env list would win over the value the chart renders. */ -}}
+{{- if eq $name "GENESIS_DB_ALLOW_UNVERIFIED_TLS" -}}
+{{- fail "Use database.allowUnverifiedTls, not extraEnv, for the database transport opt-out" -}}
+{{- end -}}
 {{- end -}}
 {{- $dsnSet := or (ne (default "" .Values.database.dsn.value) "") (ne (default "" .Values.database.dsn.existingSecret) "") $dbEsoActive -}}
 {{- if not $dsnSet -}}

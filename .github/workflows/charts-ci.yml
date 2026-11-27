@@ -36,7 +36,14 @@ jobs:
     # would compare the charts with a main that already holds them and fail the version
     # check. The bump workflow tests the package before opening the request and runs this
     # workflow on main after the merge.
-    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'chore/release-')
+    # Skipped only for the release bump pull request the automation opens from this
+    # repository. A branch name alone is not enough: anyone can push a fork branch
+    # called chore/release-*, and a skipped job counts as passed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      !(startsWith(github.head_ref, 'chore/release-') &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login == 'github-actions[bot]')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -66,7 +73,14 @@ jobs:
     # would compare the charts with a main that already holds them and fail the version
     # check. The bump workflow tests the package before opening the request and runs this
     # workflow on main after the merge.
-    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'chore/release-')
+    # Skipped only for the release bump pull request the automation opens from this
+    # repository. A branch name alone is not enough: anyone can push a fork branch
+    # called chore/release-*, and a skipped job counts as passed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      !(startsWith(github.head_ref, 'chore/release-') &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login == 'github-actions[bot]')
     runs-on: ubuntu-latest
     outputs:
       has_changes: ${{ steps.changed.outputs.has_changes }}
@@ -106,11 +120,14 @@ jobs:
       - name: Resolve chart test mode
         id: meta
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             echo "mode=changed" >> "$GITHUB_OUTPUT"
-            echo "target_branch=${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+            echo "target_branch=${BASE_REF}" >> "$GITHUB_OUTPUT"
           else
             echo "mode=all" >> "$GITHUB_OUTPUT"
             echo "target_branch=main" >> "$GITHUB_OUTPUT"

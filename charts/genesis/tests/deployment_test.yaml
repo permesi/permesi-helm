@@ -24,18 +24,42 @@ tests:
           path: spec.template.spec.automountServiceAccountToken
           value: true
 
-  - it: leaves the transport opt-outs off by default
+  # An explicit entry wins over envFrom, so a shared ConfigMap or Secret cannot switch
+  # an opt-out on while the chart value says off.
+  - it: sets the transport opt-outs to false explicitly by default
+    set:
+      extraEnvFrom:
+        - configMapRef:
+            name: shared-settings
     asserts:
-      - notContains:
+      - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
-          any: true
-      - notContains:
+            value: "false"
+      - contains:
           path: spec.template.spec.containers[0].env
           content:
             name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
-          any: true
+            value: "false"
+
+  - it: refuses a transport opt-out smuggled in through extraEnv
+    set:
+      extraEnv:
+        - name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
+          value: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: "database.allowUnverifiedTls"
+
+  - it: refuses the OpenBao opt-out in extraEnv as well
+    set:
+      extraEnv:
+        - name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
+          value: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: "Use managed values"
 
   - it: passes the transport opt-outs only when a development cluster asks for them
     set:

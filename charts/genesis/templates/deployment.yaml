@@ -138,17 +138,14 @@ spec:
               {{- else }}
               value: {{ .Values.database.dsn.value | quote }}
               {{- end }}
-            {{- if .Values.database.allowUnverifiedTls }}
+            # Always set, so a ConfigMap or Secret in extraEnvFrom cannot turn it on.
             - name: GENESIS_DB_ALLOW_UNVERIFIED_TLS
-              value: "true"
-            {{- end }}
+              value: {{ .Values.database.allowUnverifiedTls | quote }}
 
             - name: GENESIS_OPENBAO_URL
               value: {{ .Values.openbao.url | quote }}
-            {{- if .Values.openbao.allowInsecureHttp }}
             - name: GENESIS_OPENBAO_ALLOW_INSECURE_HTTP
-              value: "true"
-            {{- end }}
+              value: {{ .Values.openbao.allowInsecureHttp | quote }}
             {{- if ne .Values.openbao.authMethod "auto" }}
             - name: GENESIS_OPENBAO_AUTH_METHOD
               value: {{ .Values.openbao.authMethod | quote }}

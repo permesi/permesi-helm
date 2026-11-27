@@ -32,7 +32,11 @@ This applies to:
 - `openbao.secretId`
 - `openbao.wrappedToken`
 
-The service refuses a `database.dsn` to a host that is not local unless it sets `sslmode=verify-full` or `verify-ca`, and a plain `http://` `openbao.url` to a host that is not loopback. `database.allowUnverifiedTls: true` and `openbao.allowInsecureHttp: true` switch those refusals off for a development cluster; leave both `false` in production. The default DSN uses `sslmode=verify-full`.
+Application images newer than 0.6.1 refuse a `database.dsn` whose connection is not local unless it sets `sslmode=verify-full` or `verify-ca`, and a plain `http://` `openbao.url` to a host that is not loopback. `database.allowUnverifiedTls: true` and `openbao.allowInsecureHttp: true` switch those refusals off for a development cluster; leave both `false` in production. The chart always sets both variables, to `false` unless the value says otherwise, so a ConfigMap or Secret in `extraEnvFrom` cannot switch one on, and it refuses them in `extraEnv`. The default DSN uses `sslmode=verify-full`.
+
+Those images also accept only the DSN query parameters the driver acts on (`sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `host`, `hostaddr`, `port`, `dbname`, `application_name`, `options`, `statement-cache-capacity`) and refuse `user`, `password` and anything else, `connect_timeout` included.
+
+The 0.6.1 images, which this chart still pins by default, do none of this: they accept any DSN and any OpenBao address and ignore both settings. The checks take effect when the image digests move to the next application release.
 
 ### ExternalSecret precedence
 
@@ -123,8 +127,12 @@ override the defaults:
 - `GENESIS_TRUSTED_PROXIES` (comma-separated CIDRs, empty by default) lists the
   peers Genesis accepts those headers from. From any other peer it records the
   address of the connection itself and no country. Behind an ingress or edge, set
-  it to the addresses that hop connects from and make the hop overwrite the
-  address header; otherwise every record shows the ingress.
+  it to the addresses that hop connects from and make the hop overwrite both
+  headers; otherwise every record shows the ingress. A hop that sets only the
+  address has to delete an inbound country header, or a caller chooses the country
+  that is recorded. A range covering every address (`0.0.0.0/0`, `::/0`) is
+  refused. This setting needs an application image newer than 0.6.1: the 0.6.1
+  image records whatever the headers say, from any peer.
 
 ## Admission signing version
 

@@ -200,16 +200,31 @@ jobs:
           fi
 
           run_id="$(printf '%s\n' "${dispatch_output}" | sed -nE 's#.*actions/runs/([0-9]+).*#\1#p' | head -n1)"
-          if [[ -z "${run_id}" ]]; then
-            run_id="$(gh run list --workflow "Charts CI" --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${MERGE_SHA}\") | .databaseId" | head -n1 || true)"
-          fi
-          if [[ -z "${run_id}" ]]; then
-            echo "Could not determine Charts CI run id." >&2
-            exit 1
-          fi
-
-          [[ "$(gh run view "$run_id" --json headSha,headBranch,workflowName,event --jq '[.headSha,.headBranch,.workflowName,.event]|join("/")')" == "$MERGE_SHA/main/Charts CI/workflow_dispatch" ]]
-          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          # A run that was dispatched a moment ago can be missing from the list and can
+          # answer 404 when viewed. Both lookups are retried for five minutes, because
+          # the charts are already merged and giving up here would strand the release.
+          # The run is accepted only once it is confirmed to be Charts CI, dispatched
+          # on main at the merged commit.
+          expected="${MERGE_SHA}/main/Charts CI/workflow_dispatch"
+          for _ in {1..30}; do
+            if [[ -z "${run_id}" ]]; then
+              run_id="$(gh run list --workflow "Charts CI" --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"${MERGE_SHA}\") | .databaseId" 2>/dev/null | head -n1 || true)"
+            fi
+            if [[ -n "${run_id}" ]]; then
+              identity="$(gh run view "${run_id}" --json headSha,headBranch,workflowName,event --jq '[.headSha,.headBranch,.workflowName,.event]|join("/")' 2>/dev/null || true)"
+              if [[ "${identity}" == "${expected}" ]]; then
+                echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              if [[ -n "${identity}" ]]; then
+                echo "Run ${run_id} is ${identity}, not ${expected}." >&2
+                exit 1
+              fi
+            fi
+            sleep 10
+          done
+          echo "Could not find the Charts CI run for ${MERGE_SHA}." >&2
+          exit 1
 
       - name: Wait for Charts CI completion
         if: steps.charts_ci.outputs.run_id != ''

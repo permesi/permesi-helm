@@ -25,7 +25,11 @@ For sensitive fields you can use either:
 
 This applies to `database.dsn`, `tls` and `openbao` (role_id/secret_id).
 
-The service refuses a `database.dsn` to a host that is not local unless it sets `sslmode=verify-full` or `verify-ca`, and a plain `http://` `openbao.url` to a host that is not loopback. `database.allowUnverifiedTls: true` and `openbao.allowInsecureHttp: true` switch those refusals off for a development cluster; leave both `false` in production. The default DSN uses `sslmode=verify-full`.
+Application images newer than 0.6.1 refuse a `database.dsn` whose connection is not local unless it sets `sslmode=verify-full` or `verify-ca`, and a plain `http://` `openbao.url` to a host that is not loopback. `database.allowUnverifiedTls: true` and `openbao.allowInsecureHttp: true` switch those refusals off for a development cluster; leave both `false` in production. The chart always sets both variables, to `false` unless the value says otherwise, so a ConfigMap or Secret in `extraEnvFrom` cannot switch one on, and it refuses them in `extraEnv`. The default DSN uses `sslmode=verify-full`.
+
+Those images also accept only the DSN query parameters the driver acts on (`sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `host`, `hostaddr`, `port`, `dbname`, `application_name`, `options`, `statement-cache-capacity`) and refuse `user`, `password` and anything else, `connect_timeout` included.
+
+The 0.6.1 images, which this chart still pins by default, do none of this: they accept any DSN and any OpenBao address and ignore both settings. The checks take effect when the image digests move to the next application release.
 
 ### ExternalSecret precedence
 
